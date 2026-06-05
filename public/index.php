@@ -42,14 +42,17 @@ declare(strict_types=1);
                 <form class="card form" id="manualBatchForm">
                     <h3>Ручное добавление</h3>
                     <label>Артикул<input name="article" required autocomplete="off"></label>
+                    <label>Код<input name="code" autocomplete="off"></label>
                     <label>Наименование<input name="name" required autocomplete="off"></label>
                     <label>Количество в партии<input name="quantity" required min="0" step="1" type="number"></label>
                     <label>Срок годности до<input name="expiryDate" required type="date"></label>
+                    <label>Магазин<input name="storeName" autocomplete="off"></label>
                     <button class="primary" type="submit">Сохранить партию</button>
                 </form>
 
                 <div class="card form">
                     <h3>Импорт из XLSX</h3>
+                    <p class="subtitle">Также поддерживаются необязательные колонки: Код, Магазин.</p>
                     <label>Файл XLSX<input id="xlsxInput" accept=".xlsx,.xls" type="file"></label>
                     <div class="import-preview" id="importPreview">Файл не выбран.</div>
                     <button class="primary" id="importButton" disabled type="button">Загрузить строки</button>
@@ -92,6 +95,7 @@ declare(strict_types=1);
             </div>
             <div class="card filters">
                 <label>Артикул<input id="filterArticle" placeholder="Например, 12345"></label>
+                <label>Код<input id="filterCode" placeholder="Код товара"></label>
                 <label>Наименование<input id="filterName" placeholder="Название товара"></label>
                 <label>Статус
                     <select id="filterStatus">
@@ -102,12 +106,15 @@ declare(strict_types=1);
                     </select>
                 </label>
                 <label>Остаток дней до<input id="filterDaysTo" min="0" type="number" placeholder="60"></label>
+                <label>Магазин<input id="filterStore" placeholder="Название магазина"></label>
+                <label>Срок от<input id="filterDateFrom" type="date"></label>
+                <label>Срок до<input id="filterDateTo" type="date"></label>
                 <button class="ghost-button" id="exportFilteredButton" type="button">Выгрузить фильтр XLSX</button>
                 <button class="ghost-button" id="exportAllButton" type="button">Выгрузить все XLSX</button>
             </div>
             <div class="table-wrap card wide">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Наименование</th><th>Количество</th><th>Срок годности</th><th>Остаток дней</th><th>Статус</th><th>Дата внесения</th></tr></thead>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Количество</th><th>Срок годности</th><th>Остаток дней</th><th>Статус</th><th>Магазин</th><th>Дата внесения</th></tr></thead>
                     <tbody id="registryBody"></tbody>
                 </table>
             </div>
@@ -116,7 +123,7 @@ declare(strict_types=1);
         <section class="panel" id="tab-settings">
             <div class="section-heading">
                 <h2>Настройки уведомлений</h2>
-                <p>Укажите получателей и правила уведомлений. Для просроченных партий используйте значение -1.</p>
+                <p>Укажите получателей и правила уведомлений за 90, 60, 30, 15, 7 или 1 день.</p>
             </div>
             <div class="grid two">
                 <form class="card form" id="emailForm">
@@ -128,7 +135,7 @@ declare(strict_types=1);
                 <form class="card form" id="ruleForm">
                     <h3>Правила уведомлений</h3>
                     <label>Дней до окончания<input id="ruleDays" required type="number" value="15"></label>
-                    <label>Название правила<input id="ruleTitle" required placeholder="Истекает через 15 дней"></label>
+                    <p class="subtitle">Введите количество дней и нажмите кнопку, чтобы включить правило.</p>
                     <button class="primary" type="submit">Добавить правило</button>
                     <div class="rules" id="ruleList"></div>
                 </form>
@@ -138,7 +145,7 @@ declare(strict_types=1);
         <section class="panel" id="tab-logs">
             <div class="section-heading">
                 <h2>Логи</h2>
-                <p>Подробные события загрузки, изменения статусов, рассылок и резервного копирования.</p>
+                <p>Подробные события загрузки, изменения статусов, рассылок и работы сервиса.</p>
             </div>
             <div class="card log-actions">
                 <button class="ghost-button" id="refreshLogsButton" type="button">Обновить логи</button>
