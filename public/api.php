@@ -151,11 +151,9 @@ function createBatch(PDO $pdo, array $payload): array
     $batch = normalizeBatchPayload($payload);
     $statement = $pdo->prepare(
         'INSERT INTO batches (created_at, article, code, name, quantity, expiry_date, days_left, status, store_name)
-         VALUES (:created_at, :article, :code, :name, :quantity, :expiry_date, DATEDIFF(:expiry_date_for_days, CURDATE()), :status, :store_name)'
+         VALUES (:created_at, :article, :code, :name, :quantity, :expiry_date, :days_left, :status, :store_name)'
     );
-    $params = $batch;
-    // Для PDO с отключенной эмуляцией нельзя использовать один named placeholder дважды.
-    $params['expiry_date_for_days'] = $batch['expiry_date'];
+    $params = buildCreateBatchParams($batch);
     $statement->execute($params);
     $id = (int)$pdo->lastInsertId();
     writeLog($pdo, 'create', ['id' => $id, 'article' => $batch['article']]);
@@ -192,7 +190,6 @@ function updateBatch(PDO $pdo, array $payload): array
     }
 
     $batch = normalizeBatchPayload($payload, false);
-    $batch['id'] = $id;
     $statement = $pdo->prepare(
         'UPDATE batches
          SET article = :article,
@@ -200,18 +197,54 @@ function updateBatch(PDO $pdo, array $payload): array
              name = :name,
              quantity = :quantity,
              expiry_date = :expiry_date,
-             days_left = DATEDIFF(:expiry_date_for_days, CURDATE()),
+             days_left = :days_left,
              status = :status,
              store_name = :store_name
          WHERE id = :id'
     );
-    $params = $batch;
-    // Для PDO с отключенной эмуляцией нельзя использовать один named placeholder дважды.
-    $params['expiry_date_for_days'] = $batch['expiry_date'];
+    $params = buildUpdateBatchParams($batch, $id);
     $statement->execute($params);
     writeLog($pdo, 'update', ['id' => $id, 'status' => $batch['status']]);
 
     return ['ok' => true];
+}
+
+function buildCreateBatchParams(array $batch): array
+{
+    return [
+        'created_at' => $batch['created_at'],
+        'article' => $batch['article'],
+        'code' => $batch['code'],
+        'name' => $batch['name'],
+        'quantity' => $batch['quantity'],
+        'expiry_date' => $batch['expiry_date'],
+        'days_left' => calculateDaysLeft($batch['expiry_date']),
+        'status' => $batch['status'],
+        'store_name' => $batch['store_name'],
+    ];
+}
+
+function buildUpdateBatchParams(array $batch, int $id): array
+{
+    return [
+        'article' => $batch['article'],
+        'code' => $batch['code'],
+        'name' => $batch['name'],
+        'quantity' => $batch['quantity'],
+        'expiry_date' => $batch['expiry_date'],
+        'days_left' => calculateDaysLeft($batch['expiry_date']),
+        'status' => $batch['status'],
+        'store_name' => $batch['store_name'],
+        'id' => $id,
+    ];
+}
+
+function calculateDaysLeft(string $expiryDate): int
+{
+    $today = new DateTimeImmutable('today');
+    $expiry = new DateTimeImmutable($expiryDate);
+
+    return (int)$today->diff($expiry)->format('%r%a');
 }
 
 function deleteBatch(PDO $pdo, array $payload): array
