@@ -7,7 +7,6 @@ const state = {
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
-const supportedNotifyDays = [90, 60, 30, 15, 7, 1];
 
 const qs = (selector) => document.querySelector(selector);
 const qsa = (selector) => [...document.querySelectorAll(selector)];
@@ -335,16 +334,8 @@ function renderSettings() {
         <span>${escapeHtml(email)}</span><button class="small-danger" data-email="${escapeHtml(email)}" type="button">Удалить</button>
     </div>`).join('') || '<p class="subtitle">Получатели не добавлены.</p>';
 
-    qs('#ruleList').innerHTML = supportedNotifyDays.map((days) => {
-        const enabled = Boolean(state.settings[`notify_${days}_days`]) || (state.settings.rules || []).some((rule) => Number(rule.days) === days);
-        return `<label class="rule-item"><span><b>Истекает через ${days} дней</b><br>${days} дн.</span><input class="notify-checkbox" data-days="${days}" type="checkbox" ${enabled ? 'checked' : ''}></label>`;
-    }).join('');
-
     qsa('[data-email]').forEach((button) => button.addEventListener('click', async () => {
         await persistSettings({ emails: state.settings.emails.filter((email) => email !== button.dataset.email) });
-    }));
-    qsa('.notify-checkbox').forEach((checkbox) => checkbox.addEventListener('change', async () => {
-        await persistSettings({ [`notify_${checkbox.dataset.days}_days`]: checkbox.checked });
     }));
 }
 
@@ -430,6 +421,18 @@ function resetRegistryFilters() {
     renderRegistry();
 }
 
+function applyInitialUrlState() {
+    const params = new URLSearchParams(window.location.search);
+    const article = params.get('article');
+    if (article) qs('#filterArticle').value = article;
+
+    if (params.get('tab') === 'registry') {
+        qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
+        qs('[data-tab="registry"]').classList.add('active');
+        qs('#tab-registry').classList.add('active');
+    }
+}
+
 function bindEvents() {
     qsa('.tab').forEach((button) => button.addEventListener('click', () => {
         qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
@@ -487,16 +490,6 @@ function bindEvents() {
         }
     });
 
-    qs('#ruleForm').addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const days = Number(qs('#ruleDays').value);
-        if (!supportedNotifyDays.includes(days)) {
-            showToast('Поддерживаются уведомления за 90, 60, 30, 15, 7 или 1 день.', true);
-            return;
-        }
-        await persistSettings({ [`notify_${days}_days`]: true });
-        event.target.reset();
-    });
 }
 
 function activeRowsForExport(rows) {
@@ -526,4 +519,5 @@ async function bootstrap() {
 }
 
 bindEvents();
+applyInitialUrlState();
 bootstrap();

@@ -106,7 +106,7 @@ declare(strict_types=1);
         <section class="panel" id="tab-settings">
             <div class="section-heading">
                 <h2>Настройки уведомлений</h2>
-                <p>Укажите получателей и правила уведомлений за 90, 60, 30, 15, 7 или 1 день.</p>
+                <p>Укажите получателей. Сервис ежедневно проверяет просроченные партии и партии, у которых осталось 15, 30 или 60 дней.</p>
             </div>
             <div class="grid two">
                 <form class="card form" id="emailForm">
@@ -115,13 +115,16 @@ declare(strict_types=1);
                     <button class="primary" type="submit">Добавить</button>
                     <div class="chips" id="emailList"></div>
                 </form>
-                <form class="card form" id="ruleForm">
-                    <h3>Правила уведомлений</h3>
-                    <label>Дней до окончания<input id="ruleDays" required type="number" value="15"></label>
-                    <p class="subtitle">Введите количество дней и нажмите кнопку, чтобы включить правило.</p>
-                    <button class="primary" type="submit">Добавить правило</button>
-                    <div class="rules" id="ruleList"></div>
-                </form>
+                <div class="card form">
+                    <h3>Когда приходят письма</h3>
+                    <p class="subtitle">Уведомления отправляются один раз в день в 09:00 по МСК, если в реестре есть партии со статусом «В наличии» по одному из критериев.</p>
+                    <ul class="notification-criteria">
+                        <li>Срок годности партии истек</li>
+                        <li>Осталось 15 дней</li>
+                        <li>Осталось 30 дней</li>
+                        <li>Осталось 60 дней</li>
+                    </ul>
+                </div>
             </div>
         </section>
 

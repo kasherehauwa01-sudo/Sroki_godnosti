@@ -59,6 +59,8 @@ tr.indicator-gray td { background: var(--gray); color: #4b5563; }
 .import-help { border: 1px solid var(--border); border-radius: 16px; padding: 12px 14px; background: #f8fafc; color: #475569; }
 .import-help p { margin: 0 0 8px; }
 .import-help ul { margin: 0 0 8px 20px; padding: 0; }
+.notification-criteria { margin: 0; padding-left: 20px; color: #475569; }
+.notification-criteria li { margin: 6px 0; }
 .chips, .rules { display: grid; gap: 8px; margin-top: 8px; }
 .chip, .rule-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; background: #f8fafc; border-radius: 12px; border: 1px solid var(--border); }
 .small-danger { background: #fee2e2; color: #991b1b; padding: 7px 10px; }
