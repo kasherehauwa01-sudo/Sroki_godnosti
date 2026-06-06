@@ -1,10 +1,9 @@
 const state = {
     batches: [],
     filteredBatches: [],
-    reportRows: [],
     importRows: [],
     settings: { emails: [], rules: [] },
-    logs: [],
+    history: [],
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -22,7 +21,7 @@ function showToast(message, isError = false) {
 }
 
 function getApiMethod(action, data = {}) {
-    const readActions = new Set(['list', 'report', 'logs']);
+    const readActions = new Set(['list', 'logs']);
     const writeActions = new Set(['create', 'bulk_create', 'update', 'delete']);
 
     // Действие settings используется и для чтения, и для сохранения:
@@ -169,8 +168,6 @@ function getFilterParams() {
         name: qs('#filterName').value.trim(),
         status: qs('#filterStatus').value,
         days_to: qs('#filterDaysTo').value,
-        date_from: qs('#filterDateFrom').value,
-        date_to: qs('#filterDateTo').value,
     };
 }
 
@@ -182,9 +179,7 @@ function renderRegistry() {
             && (!filters.code || batch.code.toLowerCase().includes(filters.code.toLowerCase()))
             && (!filters.name || batch.name.toLowerCase().includes(filters.name.toLowerCase()))
             && (!filters.status || batch.status === filters.status)
-            && (!filters.days_to || days <= Number(filters.days_to))
-            && (!filters.date_from || batch.expiryDate >= filters.date_from)
-            && (!filters.date_to || batch.expiryDate <= filters.date_to);
+            && (!filters.days_to || days <= Number(filters.days_to));
     });
 
     qs('#registryBody').innerHTML = state.filteredBatches.map((batch) => {
@@ -221,27 +216,6 @@ async function onStatusChange(event) {
     }
 }
 
-async function buildReportRows() {
-    const type = qs('#reportType').value;
-    const params = { type };
-    if (type === 'custom') {
-        params.days_from = qs('#reportDaysFrom').value || 0;
-        params.days_to = qs('#reportDaysTo').value || 15;
-    }
-
-    const result = await api('report', params);
-    state.reportRows = (result.batches || []).map(normalizeBatch);
-    qs('#reportBody').innerHTML = state.reportRows.map((batch) => {
-        const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
-        return `<tr class="${indicatorClass(days)}">
-            <td>${escapeHtml(batch.article)}</td>
-            <td>${escapeHtml(batch.name)}</td>
-            <td>${escapeHtml(batch.quantity)}</td>
-            <td>${formatDays(days)}</td>
-        </tr>`;
-    }).join('') || '<tr><td colspan="4">Нет данных для выбранного отчета.</td></tr>';
-}
-
 function exportXlsx(rows, filename, mapper) {
     if (!window.XLSX) {
         showToast('Библиотека XLSX еще не загрузилась. Повторите действие через несколько секунд.', true);
@@ -258,7 +232,6 @@ async function loadBatches() {
     const result = await api('list');
     state.batches = (result.batches || []).map(normalizeBatch);
     renderRegistry();
-    await buildReportRows();
 }
 
 async function loadSettings() {
@@ -267,15 +240,41 @@ async function loadSettings() {
     renderSettings();
 }
 
-async function loadLogs() {
+function formatHistoryAction(action) {
+    const actions = {
+        create: 'Добавление партии',
+        bulk_create: 'Импорт партий',
+        update: 'Изменение партии',
+        delete: 'Удаление партии',
+        settings: 'Изменение настроек',
+        expiry_notifications_sent: 'Отправка уведомлений',
+        expiry_notifications_failed: 'Ошибка уведомлений',
+        expiry_check_no_matches: 'Проверка сроков без совпадений',
+        expiry_check_skipped: 'Проверка сроков пропущена',
+    };
+
+    return actions[action] || action || '';
+}
+
+function formatHistoryDetails(payload) {
+    if (!payload) return '';
+    try {
+        const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
+        return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('; ');
+    } catch (error) {
+        return String(payload);
+    }
+}
+
+async function loadHistory() {
     const result = await api('logs');
-    state.logs = result.logs || [];
-    qs('#logsBody').innerHTML = state.logs.map((log) => `<tr>
+    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete']);
+    state.history = (result.logs || []).filter((log) => registryActions.has(log.event || log.action));
+    qs('#historyBody').innerHTML = state.history.map((log) => `<tr>
         <td>${escapeHtml(log.createdAt)}</td>
-        <td>${escapeHtml(log.level || 'INFO')}</td>
-        <td>${escapeHtml(log.event || log.action)}</td>
-        <td>${escapeHtml(log.details || log.payload)}</td>
-    </tr>`).join('') || '<tr><td colspan="4">Логи пока отсутствуют.</td></tr>';
+        <td>${escapeHtml(formatHistoryAction(log.event || log.action))}</td>
+        <td>${escapeHtml(formatHistoryDetails(log.details || log.payload))}</td>
+    </tr>`).join('') || '<tr><td colspan="3">История пока отсутствует.</td></tr>';
 }
 
 function renderSettings() {
@@ -371,7 +370,7 @@ function readXlsx(file) {
 }
 
 function resetRegistryFilters() {
-    ['#filterArticle', '#filterCode', '#filterName', '#filterDaysTo', '#filterDateFrom', '#filterDateTo'].forEach((selector) => {
+    ['#filterArticle', '#filterCode', '#filterName', '#filterDaysTo'].forEach((selector) => {
         qs(selector).value = '';
     });
     qs('#filterStatus').value = '';
@@ -415,19 +414,12 @@ function bindEvents() {
         }
     });
 
-    ['#filterArticle', '#filterCode', '#filterName', '#filterStatus', '#filterDaysTo', '#filterDateFrom', '#filterDateTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
-    qs('#reportType').addEventListener('change', async () => {
-        qsa('.custom-period').forEach((item) => item.classList.toggle('hidden', qs('#reportType').value !== 'custom'));
-        await buildReportRows();
-    });
-    ['#reportDaysFrom', '#reportDaysTo'].forEach((selector) => qs(selector).addEventListener('input', buildReportRows));
-    qs('#buildReportButton').addEventListener('click', buildReportRows);
-    qs('#exportReportButton').addEventListener('click', () => exportXlsx(state.reportRows, 'otchet_sroki_godnosti.xlsx', (row) => ({ Артикул: row.article, Код: row.code, Наименование: row.name, 'Количество в партии': row.quantity, 'Истекает через': formatDays(row.daysLeft ?? daysLeft(row.expiryDate)) })));
+    ['#filterArticle', '#filterCode', '#filterName', '#filterStatus', '#filterDaysTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(state.filteredBatches, 'reestr_filtr.xlsx', batchExportMapper));
     qs('#exportAllButton').addEventListener('click', () => exportXlsx(state.batches, 'reestr_vse_partii.xlsx', batchExportMapper));
     qs('#refreshAllButton').addEventListener('click', bootstrap);
-    qs('#refreshLogsButton').addEventListener('click', loadLogs);
+    qs('#refreshHistoryButton').addEventListener('click', loadHistory);
 
     qs('#emailForm').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -466,7 +458,7 @@ function batchExportMapper(batch) {
 
 async function bootstrap() {
     try {
-        await Promise.all([loadBatches(), loadSettings(), loadLogs()]);
+        await Promise.all([loadBatches(), loadSettings(), loadHistory()]);
         showToast('Данные обновлены.');
     } catch (error) {
         showToast(error.message, true);

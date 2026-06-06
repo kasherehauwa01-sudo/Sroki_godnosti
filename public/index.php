@@ -28,16 +28,15 @@ declare(strict_types=1);
     <main class="layout">
         <nav class="tabs" aria-label="Разделы администратора">
             <button class="tab active" data-tab="upload" type="button">Загрузка партии</button>
-            <button class="tab" data-tab="reports" type="button">Отчеты</button>
             <button class="tab" data-tab="registry" type="button">Реестр</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
-            <button class="tab" data-tab="logs" type="button">Логи</button>
+            <button class="tab" data-tab="history" type="button">История</button>
         </nav>
 
         <section class="panel active" id="tab-upload">
             <div class="section-heading">
                 <h2>Загрузка новой партии</h2>
-                <p>Добавьте одну партию вручную или импортируйте файл XLSX с колонками: Артикул, Наименование, Количество в партии, Срок годности до.</p>
+                <p>Добавьте одну партию вручную или импортируйте файл XLSX.</p>
             </div>
             <div class="grid two">
                 <form class="card form" id="manualBatchForm">
@@ -54,47 +53,17 @@ declare(strict_types=1);
                     <h3>Импорт из XLSX</h3>
                     <div class="import-help">
                         <p><b>Порядок колонок в XLSX:</b></p>
-                        <ol>
-                            <li>Артикул</li>
-                            <li>Наименование</li>
-                            <li>Количество или Количество в партии</li>
-                            <li>Срок годности до</li>
-                        </ol>
-                        <p class="subtitle">Первая строка должна содержать заголовки. Необязательные колонки: Код, Дата внесения, Статус партии.</p>
+                        <ul>
+                            <li>Скачайте шаблон таблицы</li>
+                            <li>Заполните шаблон</li>
+                            <li>Загрузите шаблон</li>
+                        </ul>
                     </div>
                     <button class="ghost-button" id="downloadTemplateButton" type="button">Скачать шаблон таблицы</button>
                     <label>Файл XLSX<input id="xlsxInput" accept=".xlsx,.xls" type="file"></label>
                     <div class="import-preview" id="importPreview">Файл не выбран.</div>
                     <button class="primary" id="importButton" disabled type="button">Загрузить строки</button>
                 </div>
-            </div>
-        </section>
-
-        <section class="panel" id="tab-reports">
-            <div class="section-heading">
-                <h2>Отчеты по срокам годности</h2>
-                <p>Отчеты формируются только по партиям со статусом «В наличии».</p>
-            </div>
-            <div class="card form inline-form">
-                <label>Категория
-                    <select id="reportType">
-                        <option value="expired">Просроченные партии</option>
-                        <option value="15">Истекают через 15 дней</option>
-                        <option value="30">Истекают через 30 дней</option>
-                        <option value="60">Истекают через 60 дней</option>
-                        <option value="custom">Пользовательский период</option>
-                    </select>
-                </label>
-                <label class="custom-period hidden">От, дней<input id="reportDaysFrom" min="0" value="0" type="number"></label>
-                <label class="custom-period hidden">До, дней<input id="reportDaysTo" min="0" value="15" type="number"></label>
-                <button class="primary" id="buildReportButton" type="button">Сформировать</button>
-                <button class="ghost-button" id="exportReportButton" type="button">Выгрузить XLSX</button>
-            </div>
-            <div class="table-wrap card">
-                <table>
-                    <thead><tr><th>Артикул</th><th>Наименование</th><th>Количество</th><th>Истекает через</th></tr></thead>
-                    <tbody id="reportBody"></tbody>
-                </table>
             </div>
         </section>
 
@@ -116,8 +85,6 @@ declare(strict_types=1);
                     </select>
                 </label>
                 <label>Остаток дней до<input id="filterDaysTo" min="0" type="number" placeholder="60"></label>
-                <label>Срок от<input id="filterDateFrom" type="date"></label>
-                <label>Срок до<input id="filterDateTo" type="date"></label>
                 <button class="ghost-button" id="resetFiltersButton" type="button">Сбросить фильтры</button>
                 <button class="ghost-button" id="exportFilteredButton" type="button">Выгрузить фильтр XLSX</button>
                 <button class="ghost-button" id="exportAllButton" type="button">Выгрузить все XLSX</button>
@@ -152,18 +119,18 @@ declare(strict_types=1);
             </div>
         </section>
 
-        <section class="panel" id="tab-logs">
+        <section class="panel" id="tab-history">
             <div class="section-heading">
-                <h2>Логи</h2>
-                <p>Подробные события загрузки, изменения статусов, рассылок и работы сервиса.</p>
+                <h2>История</h2>
+                <p>История изменений в реестре: добавление партий, импорт, изменение статусов и удаление записей.</p>
             </div>
             <div class="card log-actions">
-                <button class="ghost-button" id="refreshLogsButton" type="button">Обновить логи</button>
+                <button class="ghost-button" id="refreshHistoryButton" type="button">Обновить историю</button>
             </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Дата</th><th>Уровень</th><th>Событие</th><th>Детали</th></tr></thead>
-                    <tbody id="logsBody"></tbody>
+                    <thead><tr><th>Дата</th><th>Действие</th><th>Детали</th></tr></thead>
+                    <tbody id="historyBody"></tbody>
                 </table>
             </div>
         </section>
