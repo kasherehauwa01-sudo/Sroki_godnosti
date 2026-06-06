@@ -21,7 +21,23 @@ function showToast(message, isError = false) {
     setTimeout(() => toast.classList.remove('show'), 4200);
 }
 
-async function api(action, data = {}, method = 'GET') {
+function getApiMethod(action, data = {}) {
+    const readActions = new Set(['list', 'report', 'logs']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete']);
+
+    // Действие settings используется и для чтения, и для сохранения:
+    // пустой payload читается GET-запросом, payload с настройками сохраняется POST-запросом.
+    if (action === 'settings') {
+        return Object.keys(data).length === 0 ? 'GET' : 'POST';
+    }
+    if (readActions.has(action)) return 'GET';
+    if (writeActions.has(action)) return 'POST';
+
+    throw new Error(`Неизвестное действие API на фронтенде: ${action}`);
+}
+
+async function api(action, data = {}) {
+    const method = getApiMethod(action, data);
     const url = new URL('api.php', window.location.href);
     url.searchParams.set('action', action);
 
@@ -146,7 +162,7 @@ async function onStatusChange(event) {
     if (!batch) return;
 
     try {
-        await api('update', { ...batch, status }, 'POST');
+        await api('update', { ...batch, status });
         batch.status = status;
         showToast('Статус партии обновлен.');
         await loadBatches();
@@ -223,16 +239,16 @@ function renderSettings() {
     }).join('');
 
     qsa('[data-email]').forEach((button) => button.addEventListener('click', async () => {
-        await saveSettings({ emails: state.settings.emails.filter((email) => email !== button.dataset.email) });
+        await persistSettings({ emails: state.settings.emails.filter((email) => email !== button.dataset.email) });
     }));
     qsa('.notify-checkbox').forEach((checkbox) => checkbox.addEventListener('change', async () => {
-        await saveSettings({ [`notify_${checkbox.dataset.days}_days`]: checkbox.checked });
+        await persistSettings({ [`notify_${checkbox.dataset.days}_days`]: checkbox.checked });
     }));
 }
 
-async function saveSettings(partial) {
+async function persistSettings(partial) {
     state.settings = { ...state.settings, ...partial };
-    const result = await api('settings', { settings: state.settings }, 'POST');
+    const result = await api('settings', { settings: state.settings });
     state.settings = result.settings;
     renderSettings();
     showToast('Настройки сохранены.');
@@ -261,7 +277,7 @@ function bindEvents() {
         event.preventDefault();
         const form = new FormData(event.target);
         const batch = normalizeBatch(Object.fromEntries(form.entries()));
-        await api('create', batch, 'POST');
+        await api('create', batch);
         event.target.reset();
         showToast('Партия сохранена.');
         await loadBatches();
@@ -269,7 +285,7 @@ function bindEvents() {
 
     qs('#xlsxInput').addEventListener('change', (event) => event.target.files[0] && readXlsx(event.target.files[0]));
     qs('#importButton').addEventListener('click', async () => {
-        await api('bulk_create', { batches: state.importRows }, 'POST');
+        await api('bulk_create', { batches: state.importRows });
         showToast(`Загружено строк: ${state.importRows.length}`);
         state.importRows = [];
         qs('#xlsxInput').value = '';
@@ -295,7 +311,7 @@ function bindEvents() {
         event.preventDefault();
         const email = qs('#emailInput').value.trim();
         if (email && !state.settings.emails.includes(email)) {
-            await saveSettings({ emails: [...state.settings.emails, email] });
+            await persistSettings({ emails: [...state.settings.emails, email] });
             qs('#emailInput').value = '';
         }
     });
@@ -307,7 +323,7 @@ function bindEvents() {
             showToast('Поддерживаются уведомления за 90, 60, 30, 15, 7 или 1 день.', true);
             return;
         }
-        await saveSettings({ [`notify_${days}_days`]: true });
+        await persistSettings({ [`notify_${days}_days`]: true });
         event.target.reset();
     });
 }
