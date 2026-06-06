@@ -17,23 +17,18 @@ declare(strict_types=1);
 </head>
 <body>
     <header class="topbar">
-        <div>
-            <p class="eyebrow">kvasmix.ru / vr / sroki_godnosti</p>
-            <h1>Контроль сроков годности</h1>
-            <p class="subtitle">Загрузка партий, отчеты, реестр, уведомления и резервные копии.</p>
-        </div>
-        <button class="ghost-button" id="refreshAllButton" type="button">Обновить данные</button>
+        <h1>Контроль сроков годности</h1>
     </header>
 
     <main class="layout">
         <nav class="tabs" aria-label="Разделы администратора">
-            <button class="tab active" data-tab="upload" type="button">Загрузка партии</button>
-            <button class="tab" data-tab="registry" type="button">Реестр</button>
+            <button class="tab active" data-tab="registry" type="button">Реестр</button>
+            <button class="tab" data-tab="upload" type="button">Загрузка партии</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
             <button class="tab" data-tab="history" type="button">История</button>
         </nav>
 
-        <section class="panel active" id="tab-upload">
+        <section class="panel" id="tab-upload">
             <div class="section-heading">
                 <h2>Загрузка новой партии</h2>
                 <p>Добавьте одну партию вручную или импортируйте файл XLSX.</p>
@@ -66,7 +61,7 @@ declare(strict_types=1);
             </div>
         </section>
 
-        <section class="panel" id="tab-registry">
+        <section class="panel active" id="tab-registry">
             <div class="section-heading">
                 <h2>Реестр партий товаров</h2>
                 <p>Быстрый поиск и фильтрация выполняются без перезагрузки страницы.</p>

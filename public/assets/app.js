@@ -191,8 +191,8 @@ function renderRegistry() {
             <td>${escapeHtml(batch.createdAt)}</td>
             <td>
                 <div class="row-actions">
-                    <button class="small-button edit-batch-button" data-id="${escapeHtml(batch.id)}" type="button">Редактировать</button>
-                    <button class="small-button danger delete-batch-button" data-id="${escapeHtml(batch.id)}" type="button">Удалить</button>
+                    <button class="small-button icon-action edit-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Редактировать" aria-label="Редактировать партию">✏️</button>
+                    <button class="small-button icon-action danger delete-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Удалить" aria-label="Удалить партию">🗑️</button>
                 </div>
             </td>
         </tr>`;
@@ -478,7 +478,6 @@ function bindEvents() {
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
     qs('#exportAllButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.batches), 'reestr_vse_partii.xlsx', batchExportMapper));
-    qs('#refreshAllButton').addEventListener('click', bootstrap);
     qs('#refreshHistoryButton').addEventListener('click', loadHistory);
 
     qs('#emailForm').addEventListener('submit', async (event) => {
