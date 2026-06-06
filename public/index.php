@@ -52,7 +52,16 @@ declare(strict_types=1);
 
                 <div class="card form">
                     <h3>Импорт из XLSX</h3>
-                    <p class="subtitle">Также поддерживаются необязательные колонки: Код, Магазин.</p>
+                    <div class="import-help">
+                        <p><b>Порядок колонок в XLSX:</b></p>
+                        <ol>
+                            <li>Артикул</li>
+                            <li>Наименование</li>
+                            <li>Количество или Количество в партии</li>
+                            <li>Срок годности до</li>
+                        </ol>
+                        <p class="subtitle">Первая строка должна содержать заголовки. Необязательные колонки: Код, Магазин, Дата внесения, Статус партии.</p>
+                    </div>
                     <label>Файл XLSX<input id="xlsxInput" accept=".xlsx,.xls" type="file"></label>
                     <div class="import-preview" id="importPreview">Файл не выбран.</div>
                     <button class="primary" id="importButton" disabled type="button">Загрузить строки</button>
@@ -109,6 +118,7 @@ declare(strict_types=1);
                 <label>Магазин<input id="filterStore" placeholder="Название магазина"></label>
                 <label>Срок от<input id="filterDateFrom" type="date"></label>
                 <label>Срок до<input id="filterDateTo" type="date"></label>
+                <button class="ghost-button" id="resetFiltersButton" type="button">Сбросить фильтры</button>
                 <button class="ghost-button" id="exportFilteredButton" type="button">Выгрузить фильтр XLSX</button>
                 <button class="ghost-button" id="exportAllButton" type="button">Выгрузить все XLSX</button>
             </div>

@@ -93,25 +93,52 @@ function formatDays(days) {
 function toDateInputValue(value) {
     if (!value) return '';
     if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+    if (typeof value === 'number') return excelSerialDateToInputValue(value);
+
     const text = String(value).trim();
     if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+
+    // В российских XLSX-файлах дата часто приходит как 01.08.2026.
+    const russianDate = text.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (russianDate) {
+        const [, day, month, year] = russianDate;
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
+
     const parsed = new Date(text);
     if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
     return text.slice(0, 10);
 }
 
+function excelSerialDateToInputValue(serial) {
+    // Excel хранит даты как количество дней с 1899-12-30.
+    const utcDays = Math.floor(serial - 25569);
+    const utcValue = utcDays * 86400;
+    const date = new Date(utcValue * 1000);
+    return date.toISOString().slice(0, 10);
+}
+
+function getRowValue(row, aliases) {
+    for (const alias of aliases) {
+        if (row[alias] !== undefined && row[alias] !== null && String(row[alias]).trim() !== '') {
+            return row[alias];
+        }
+    }
+    return '';
+}
+
 function normalizeBatch(row) {
     return {
-        id: String(row.id || row.ID || crypto.randomUUID()),
-        createdAt: toDateInputValue(row.createdAt || row.created_at || row['Дата внесения']) || new Date().toISOString().slice(0, 10),
-        article: String(row.article || row['Артикул'] || '').trim(),
-        code: String(row.code || row['Код'] || '').trim(),
-        name: String(row.name || row['Наименование'] || '').trim(),
-        quantity: Number(row.quantity || row['Количество в партии'] || 0),
-        expiryDate: toDateInputValue(row.expiryDate || row.expiry_date || row['Срок годности до']),
+        id: String(getRowValue(row, ['id', 'ID']) || crypto.randomUUID()),
+        createdAt: toDateInputValue(getRowValue(row, ['createdAt', 'created_at', 'Дата внесения'])) || new Date().toISOString().slice(0, 10),
+        article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара'])).trim(),
+        code: String(getRowValue(row, ['code', 'Код', 'Код товара'])).trim(),
+        name: String(getRowValue(row, ['name', 'Наименование', 'Наименование товара', 'Товар'])).trim(),
+        quantity: Number(getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии']) || 0),
+        expiryDate: toDateInputValue(getRowValue(row, ['expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности', 'Годен до'])),
         daysLeft: Number.isFinite(Number(row.daysLeft ?? row.days_left)) ? Number(row.daysLeft ?? row.days_left) : null,
-        status: row.status || row['Статус партии'] || 'В наличии',
-        storeName: String(row.storeName || row.store_name || row['Магазин'] || '').trim(),
+        status: getRowValue(row, ['status', 'Статус партии']) || 'В наличии',
+        storeName: String(getRowValue(row, ['storeName', 'store_name', 'Магазин', 'Склад'])).trim(),
     };
 }
 
@@ -261,15 +288,54 @@ async function persistSettings(partial) {
 }
 
 function readXlsx(file) {
+    if (!window.XLSX) {
+        showToast('Библиотека XLSX еще не загрузилась. Обновите страницу и повторите импорт.', true);
+        return;
+    }
+
+    qs('#importPreview').textContent = 'Читаю файл...';
+    qs('#importButton').disabled = true;
+
     const reader = new FileReader();
     reader.onload = (event) => {
-        const workbook = XLSX.read(new Uint8Array(event.target.result), { type: 'array', cellDates: true });
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        state.importRows = XLSX.utils.sheet_to_json(firstSheet).map(normalizeBatch).filter((row) => row.article && row.name && row.expiryDate);
-        qs('#importPreview').textContent = `Готово к загрузке строк: ${state.importRows.length}`;
-        qs('#importButton').disabled = state.importRows.length === 0;
+        try {
+            const workbook = XLSX.read(new Uint8Array(event.target.result), { type: 'array', cellDates: true });
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: false });
+            const normalizedRows = rawRows.map(normalizeBatch);
+            state.importRows = normalizedRows.filter((row) => row.article && row.name && row.expiryDate);
+            const skipped = normalizedRows.length - state.importRows.length;
+            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.name} — ${row.quantity} — ${row.expiryDate}`).join('\n');
+            qs('#importPreview').textContent = [
+                `Файл: ${file.name}`,
+                `Найдено строк: ${rawRows.length}`,
+                `Готово к загрузке: ${state.importRows.length}`,
+                skipped > 0 ? `Пропущено строк без артикула, наименования или срока годности: ${skipped}` : '',
+                exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте заголовки: Артикул, Наименование, Количество, Срок годности до.',
+            ].filter(Boolean).join('\n');
+            qs('#importButton').disabled = state.importRows.length === 0;
+        } catch (error) {
+            state.importRows = [];
+            qs('#importPreview').textContent = 'Не удалось прочитать XLSX-файл.';
+            qs('#importButton').disabled = true;
+            showToast(error.message, true);
+        }
+    };
+    reader.onerror = () => {
+        state.importRows = [];
+        qs('#importPreview').textContent = 'Ошибка чтения файла.';
+        qs('#importButton').disabled = true;
+        showToast('Не удалось прочитать выбранный файл.', true);
     };
     reader.readAsArrayBuffer(file);
+}
+
+function resetRegistryFilters() {
+    ['#filterArticle', '#filterCode', '#filterName', '#filterDaysTo', '#filterStore', '#filterDateFrom', '#filterDateTo'].forEach((selector) => {
+        qs(selector).value = '';
+    });
+    qs('#filterStatus').value = '';
+    renderRegistry();
 }
 
 function bindEvents() {
@@ -316,6 +382,7 @@ function bindEvents() {
     ['#reportDaysFrom', '#reportDaysTo'].forEach((selector) => qs(selector).addEventListener('input', buildReportRows));
     qs('#buildReportButton').addEventListener('click', buildReportRows);
     qs('#exportReportButton').addEventListener('click', () => exportXlsx(state.reportRows, 'otchet_sroki_godnosti.xlsx', (row) => ({ Артикул: row.article, Код: row.code, Наименование: row.name, 'Количество в партии': row.quantity, 'Истекает через': formatDays(row.daysLeft ?? daysLeft(row.expiryDate)), Магазин: row.storeName })));
+    qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(state.filteredBatches, 'reestr_filtr.xlsx', batchExportMapper));
     qs('#exportAllButton').addEventListener('click', () => exportXlsx(state.batches, 'reestr_vse_partii.xlsx', batchExportMapper));
     qs('#refreshAllButton').addEventListener('click', bootstrap);

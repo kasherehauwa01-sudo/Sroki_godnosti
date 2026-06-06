@@ -54,7 +54,10 @@ tr.indicator-red td { background: var(--red); }
 tr.indicator-gray td { background: var(--gray); color: #4b5563; }
 .status-select { min-width: 145px; }
 .hidden { display: none !important; }
-.import-preview { min-height: 90px; border: 1px dashed var(--border); border-radius: 16px; padding: 14px; color: var(--muted); background: #f8fafc; }
+.import-preview { min-height: 90px; border: 1px dashed var(--border); border-radius: 16px; padding: 14px; color: var(--muted); background: #f8fafc; white-space: pre-line; }
+.import-help { border: 1px solid var(--border); border-radius: 16px; padding: 12px 14px; background: #f8fafc; color: #475569; }
+.import-help p { margin: 0 0 8px; }
+.import-help ol { margin: 0 0 8px 20px; padding: 0; }
 .chips, .rules { display: grid; gap: 8px; margin-top: 8px; }
 .chip, .rule-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; background: #f8fafc; border-radius: 12px; border: 1px solid var(--border); }
 .small-danger { background: #fee2e2; color: #991b1b; padding: 7px 10px; }
