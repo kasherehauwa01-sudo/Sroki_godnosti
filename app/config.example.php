@@ -8,5 +8,5 @@
 putenv('DB_HOST=localhost');
 putenv('DB_NAME=sroki_godnosti');
 putenv('DB_USER=sroki');
-putenv('DB_PASSWORD=CHANGE_ME_STRONG_PASSWORD');
+putenv('DB_PASSWORD=8852285');
 putenv('DB_CHARSET=utf8mb4');

@@ -99,13 +99,13 @@ sudo mariadb
 
 ```sql
 CREATE DATABASE sroki_godnosti CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'sroki'@'localhost' IDENTIFIED BY 'PASSWORD';
+CREATE USER 'sroki'@'localhost' IDENTIFIED BY '8852285';
 GRANT ALL PRIVILEGES ON sroki_godnosti.* TO 'sroki'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 ```
 
-Замените `PASSWORD` на надежный пароль.
+Используется существующий пароль пользователя MariaDB: `8852285`.
 
 ## Установка структуры БД
 
@@ -169,7 +169,7 @@ app/database.php
 $host = 'localhost';
 $database = 'sroki_godnosti';
 $user = 'sroki';
-$password = 'PASSWORD';
+$password = '8852285';
 ```
 
 На VPS рекомендуется не хранить пароль в репозитории, а задать переменные окружения веб-сервера и cron-пользователя:
@@ -178,7 +178,7 @@ $password = 'PASSWORD';
 export DB_HOST=localhost
 export DB_NAME=sroki_godnosti
 export DB_USER=sroki
-export DB_PASSWORD='PASSWORD'
+export DB_PASSWORD='8852285'
 export DB_CHARSET=utf8mb4
 ```
 
@@ -363,7 +363,7 @@ crontab -e
 Проверка отправки почты:
 
 ```bash
-php -r "mail('you@example.com','test','test');"
+php -r "mail('you@example.com','Проверка','Проверка отправки почты');"
 ```
 
 Если письма не отправляются, настройте Postfix/Exim или SMTP-релей на VPS.
@@ -388,7 +388,7 @@ mysqldump -u sroki -p sroki_godnosti > /var/backups/sroki_godnosti/sroki_godnost
 Cron для ежедневного бэкапа в 02:30:
 
 ```cron
-30 2 * * * mysqldump -u sroki -p'PASSWORD' sroki_godnosti | gzip > /var/backups/sroki_godnosti/sroki_godnosti_$(date +\%F).sql.gz
+30 2 * * * mysqldump -u sroki -p'8852285' sroki_godnosti | gzip > /var/backups/sroki_godnosti/sroki_godnosti_$(date +\%F).sql.gz
 ```
 
 ### Резервная копия файлов проекта
