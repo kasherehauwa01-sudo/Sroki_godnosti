@@ -191,7 +191,8 @@ function updateBatch(PDO $pdo, array $payload): array
     $batch = normalizeBatchPayload($payload, false);
     $statement = $pdo->prepare(
         'UPDATE batches
-         SET article = :article,
+         SET created_at = :created_at,
+             article = :article,
              name = :name,
              quantity = :quantity,
              expiry_date = :expiry_date,
@@ -201,7 +202,7 @@ function updateBatch(PDO $pdo, array $payload): array
     );
     $params = buildUpdateBatchParams($batch, $id);
     $statement->execute($params);
-    writeLog($pdo, 'update', ['id' => $id, 'status' => $batch['status']]);
+    writeLog($pdo, 'update', ['id' => $id, 'article' => $batch['article'], 'status' => $batch['status']]);
 
     return ['ok' => true];
 }
@@ -222,6 +223,7 @@ function buildCreateBatchParams(array $batch): array
 function buildUpdateBatchParams(array $batch, int $id): array
 {
     return [
+        'created_at' => $batch['created_at'],
         'article' => $batch['article'],
         'name' => $batch['name'],
         'quantity' => $batch['quantity'],
@@ -247,9 +249,13 @@ function deleteBatch(PDO $pdo, array $payload): array
         throw new InvalidArgumentException('Не указан id партии для удаления.');
     }
 
+    $selectStatement = $pdo->prepare('SELECT article, name FROM batches WHERE id = :id');
+    $selectStatement->execute([':id' => $id]);
+    $deletedBatch = $selectStatement->fetch() ?: [];
+
     $statement = $pdo->prepare('DELETE FROM batches WHERE id = :id');
     $statement->execute([':id' => $id]);
-    writeLog($pdo, 'delete', ['id' => $id]);
+    writeLog($pdo, 'delete', ['id' => $id, 'article' => $deletedBatch['article'] ?? '', 'name' => $deletedBatch['name'] ?? '']);
 
     return ['ok' => true];
 }

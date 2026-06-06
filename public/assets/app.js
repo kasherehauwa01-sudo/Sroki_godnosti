@@ -190,10 +190,18 @@ function renderRegistry() {
             <td>${formatDays(days)}</td>
             <td><select class="status-select" data-id="${escapeHtml(batch.id)}">${options}</select></td>
             <td>${escapeHtml(batch.createdAt)}</td>
+            <td>
+                <div class="row-actions">
+                    <button class="small-button edit-batch-button" data-id="${escapeHtml(batch.id)}" type="button">Редактировать</button>
+                    <button class="small-button danger delete-batch-button" data-id="${escapeHtml(batch.id)}" type="button">Удалить</button>
+                </div>
+            </td>
         </tr>`;
-    }).join('') || '<tr><td colspan="7">Партий не найдено.</td></tr>';
+    }).join('') || '<tr><td colspan="8">Партий не найдено.</td></tr>';
 
     qsa('.status-select').forEach((select) => select.addEventListener('change', onStatusChange));
+    qsa('.edit-batch-button').forEach((button) => button.addEventListener('click', () => openEditDialog(button.dataset.id)));
+    qsa('.delete-batch-button').forEach((button) => button.addEventListener('click', () => deleteBatch(button.dataset.id)));
 }
 
 async function onStatusChange(event) {
@@ -207,6 +215,55 @@ async function onStatusChange(event) {
         batch.status = status;
         showToast('Статус партии обновлен.');
         await loadBatches();
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+function openEditDialog(id) {
+    const batch = state.batches.find((item) => item.id === id);
+    if (!batch) return;
+
+    qs('#editBatchId').value = batch.id;
+    qs('#editArticle').value = batch.article;
+    qs('#editName').value = batch.name;
+    qs('#editQuantity').value = batch.quantity;
+    qs('#editExpiryDate').value = batch.expiryDate;
+    qs('#editStatus').value = batch.status;
+    qs('#editCreatedAt').value = batch.createdAt;
+    qs('#editBatchDialog').showModal();
+}
+
+function closeEditDialog() {
+    qs('#editBatchDialog').close();
+    qs('#editBatchForm').reset();
+}
+
+async function submitEditForm(event) {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const batch = normalizeBatch(Object.fromEntries(form.entries()));
+    batch.id = String(form.get('id'));
+
+    try {
+        await api('update', batch);
+        closeEditDialog();
+        showToast('Партия обновлена.');
+        await Promise.all([loadBatches(), loadHistory()]);
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+async function deleteBatch(id) {
+    const batch = state.batches.find((item) => item.id === id);
+    if (!batch) return;
+    if (!confirm(`Удалить партию ${batch.article} — ${batch.name}?`)) return;
+
+    try {
+        await api('delete', { id });
+        showToast('Партия удалена.');
+        await Promise.all([loadBatches(), loadHistory()]);
     } catch (error) {
         showToast(error.message, true);
     }
@@ -379,6 +436,10 @@ function bindEvents() {
         button.classList.add('active');
         qs(`#tab-${button.dataset.tab}`).classList.add('active');
     }));
+
+    qs('#editBatchForm').addEventListener('submit', submitEditForm);
+    qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
+    qs('#cancelEditButton').addEventListener('click', closeEditDialog);
 
     qs('#manualBatchForm').addEventListener('submit', async (event) => {
         event.preventDefault();

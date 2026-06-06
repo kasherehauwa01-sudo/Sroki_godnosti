@@ -89,7 +89,7 @@ declare(strict_types=1);
             </div>
             <div class="table-wrap card wide">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Наименование</th><th>Количество</th><th>Срок годности</th><th>Остаток дней</th><th>Статус</th><th>Дата внесения</th></tr></thead>
+                    <thead><tr><th>Артикул</th><th>Наименование</th><th>Количество</th><th>Срок годности</th><th>Остаток дней</th><th>Статус</th><th>Дата внесения</th><th>Действия</th></tr></thead>
                     <tbody id="registryBody"></tbody>
                 </table>
             </div>
@@ -133,6 +133,32 @@ declare(strict_types=1);
             </div>
         </section>
     </main>
+
+    <dialog class="modal" id="editBatchDialog">
+        <form class="card form modal-card" id="editBatchForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Редактировать партию</h2>
+                <button class="icon-button" id="closeEditDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <input id="editBatchId" name="id" type="hidden">
+            <label>Артикул<input id="editArticle" name="article" required autocomplete="off"></label>
+            <label>Наименование<input id="editName" name="name" required autocomplete="off"></label>
+            <label>Количество в партии<input id="editQuantity" name="quantity" required min="0" step="1" type="number"></label>
+            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required type="date"></label>
+            <label>Статус
+                <select id="editStatus" name="status" required>
+                    <option>В наличии</option>
+                    <option>Реализована</option>
+                    <option>Списана</option>
+                </select>
+            </label>
+            <label>Дата внесения<input id="editCreatedAt" name="createdAt" required type="date"></label>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelEditButton" type="button">Отмена</button>
+                <button class="primary" type="submit">Сохранить изменения</button>
+            </div>
+        </form>
+    </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>
