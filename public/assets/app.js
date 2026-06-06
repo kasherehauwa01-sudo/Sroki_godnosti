@@ -176,7 +176,7 @@ function renderRegistry() {
         return (!filters.article || batch.article.toLowerCase().includes(filters.article.toLowerCase()))
             && (!filters.name || batch.name.toLowerCase().includes(filters.name.toLowerCase()))
             && (!filters.status || batch.status === filters.status)
-            && (!filters.days_to || days <= Number(filters.days_to));
+            && (!filters.days_to || (filters.days_to === 'expired' ? days < 0 : days >= 0 && days <= Number(filters.days_to)));
     });
 
     qs('#registryBody').innerHTML = state.filteredBatches.map((batch) => {
@@ -473,8 +473,8 @@ function bindEvents() {
 
     ['#filterArticle', '#filterName', '#filterStatus', '#filterDaysTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
-    qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(state.filteredBatches, 'reestr_filtr.xlsx', batchExportMapper));
-    qs('#exportAllButton').addEventListener('click', () => exportXlsx(state.batches, 'reestr_vse_partii.xlsx', batchExportMapper));
+    qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
+    qs('#exportAllButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.batches), 'reestr_vse_partii.xlsx', batchExportMapper));
     qs('#refreshAllButton').addEventListener('click', bootstrap);
     qs('#refreshHistoryButton').addEventListener('click', loadHistory);
 
@@ -497,6 +497,10 @@ function bindEvents() {
         await persistSettings({ [`notify_${days}_days`]: true });
         event.target.reset();
     });
+}
+
+function activeRowsForExport(rows) {
+    return rows.filter((batch) => batch.status === 'В наличии');
 }
 
 function batchExportMapper(batch) {

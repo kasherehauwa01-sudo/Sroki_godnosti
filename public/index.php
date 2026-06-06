@@ -82,7 +82,15 @@ declare(strict_types=1);
                         <option>Списана</option>
                     </select>
                 </label>
-                <label>Остаток дней до<input id="filterDaysTo" min="0" type="number" placeholder="60"></label>
+                <label>Остаток дней до
+                    <select id="filterDaysTo">
+                        <option value="">Все</option>
+                        <option value="expired">Просроченные</option>
+                        <option value="15">15 дней</option>
+                        <option value="30">30 дней</option>
+                        <option value="60">60 дней</option>
+                    </select>
+                </label>
                 <button class="ghost-button" id="resetFiltersButton" type="button">Сбросить фильтры</button>
                 <button class="ghost-button" id="exportFilteredButton" type="button">Выгрузить фильтр XLSX</button>
                 <button class="ghost-button" id="exportAllButton" type="button">Выгрузить все XLSX</button>
