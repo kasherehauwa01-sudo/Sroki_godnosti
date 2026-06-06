@@ -42,7 +42,6 @@ declare(strict_types=1);
                 <form class="card form" id="manualBatchForm">
                     <h3>Ручное добавление</h3>
                     <label>Артикул<input name="article" required autocomplete="off"></label>
-                    <label>Код<input name="code" autocomplete="off"></label>
                     <label>Наименование<input name="name" required autocomplete="off"></label>
                     <label>Количество в партии<input name="quantity" required min="0" step="1" type="number"></label>
                     <label>Срок годности до<input name="expiryDate" required type="date"></label>
@@ -74,7 +73,6 @@ declare(strict_types=1);
             </div>
             <div class="card filters">
                 <label>Артикул<input id="filterArticle" placeholder="Например, 12345"></label>
-                <label>Код<input id="filterCode" placeholder="Код товара"></label>
                 <label>Наименование<input id="filterName" placeholder="Название товара"></label>
                 <label>Статус
                     <select id="filterStatus">
@@ -91,7 +89,7 @@ declare(strict_types=1);
             </div>
             <div class="table-wrap card wide">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Количество</th><th>Срок годности</th><th>Остаток дней</th><th>Статус</th><th>Дата внесения</th></tr></thead>
+                    <thead><tr><th>Артикул</th><th>Наименование</th><th>Количество</th><th>Срок годности</th><th>Остаток дней</th><th>Статус</th><th>Дата внесения</th></tr></thead>
                     <tbody id="registryBody"></tbody>
                 </table>
             </div>

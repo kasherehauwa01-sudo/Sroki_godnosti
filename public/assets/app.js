@@ -152,7 +152,6 @@ function normalizeBatch(row) {
         id: String(getRowValue(row, ['id', 'ID']) || crypto.randomUUID()),
         createdAt: toDateInputValue(getRowValue(row, ['createdAt', 'created_at', 'Дата внесения'])) || new Date().toISOString().slice(0, 10),
         article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара', 'Артикул.'])).trim(),
-        code: String(getRowValue(row, ['code', 'Код', 'Код товара'])).trim(),
         name: String(getRowValue(row, ['name', 'Наименование', 'Наименование товара', 'Товар', 'Наименованиетовара'])).trim(),
         quantity: Number(getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']) || 0),
         expiryDate: toDateInputValue(getRowValue(row, ['expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности до.', 'Срок годности', 'Годен до', 'Срокгодностидо'])),
@@ -164,7 +163,6 @@ function normalizeBatch(row) {
 function getFilterParams() {
     return {
         article: qs('#filterArticle').value.trim(),
-        code: qs('#filterCode').value.trim(),
         name: qs('#filterName').value.trim(),
         status: qs('#filterStatus').value,
         days_to: qs('#filterDaysTo').value,
@@ -176,7 +174,6 @@ function renderRegistry() {
     state.filteredBatches = state.batches.filter((batch) => {
         const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
         return (!filters.article || batch.article.toLowerCase().includes(filters.article.toLowerCase()))
-            && (!filters.code || batch.code.toLowerCase().includes(filters.code.toLowerCase()))
             && (!filters.name || batch.name.toLowerCase().includes(filters.name.toLowerCase()))
             && (!filters.status || batch.status === filters.status)
             && (!filters.days_to || days <= Number(filters.days_to));
@@ -187,7 +184,6 @@ function renderRegistry() {
         const options = statusOptions.map((option) => `<option ${option === batch.status ? 'selected' : ''}>${option}</option>`).join('');
         return `<tr class="${indicatorClass(days)}">
             <td>${escapeHtml(batch.article)}</td>
-            <td>${escapeHtml(batch.code)}</td>
             <td>${escapeHtml(batch.name)}</td>
             <td>${escapeHtml(batch.quantity)}</td>
             <td>${escapeHtml(batch.expiryDate)}</td>
@@ -195,7 +191,7 @@ function renderRegistry() {
             <td><select class="status-select" data-id="${escapeHtml(batch.id)}">${options}</select></td>
             <td>${escapeHtml(batch.createdAt)}</td>
         </tr>`;
-    }).join('') || '<tr><td colspan="8">Партий не найдено.</td></tr>';
+    }).join('') || '<tr><td colspan="7">Партий не найдено.</td></tr>';
 
     qsa('.status-select').forEach((select) => select.addEventListener('change', onStatusChange));
 }
@@ -370,7 +366,7 @@ function readXlsx(file) {
 }
 
 function resetRegistryFilters() {
-    ['#filterArticle', '#filterCode', '#filterName', '#filterDaysTo'].forEach((selector) => {
+    ['#filterArticle', '#filterName', '#filterDaysTo'].forEach((selector) => {
         qs(selector).value = '';
     });
     qs('#filterStatus').value = '';
@@ -414,7 +410,7 @@ function bindEvents() {
         }
     });
 
-    ['#filterArticle', '#filterCode', '#filterName', '#filterStatus', '#filterDaysTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
+    ['#filterArticle', '#filterName', '#filterStatus', '#filterDaysTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(state.filteredBatches, 'reestr_filtr.xlsx', batchExportMapper));
     qs('#exportAllButton').addEventListener('click', () => exportXlsx(state.batches, 'reestr_vse_partii.xlsx', batchExportMapper));
@@ -446,7 +442,6 @@ function batchExportMapper(batch) {
     const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
     return {
         Артикул: batch.article,
-        Код: batch.code,
         Наименование: batch.name,
         Количество: batch.quantity,
         'Срок годности': batch.expiryDate,
