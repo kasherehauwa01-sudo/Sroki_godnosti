@@ -1,0 +1,5 @@
+app/config.php
+.DS_Store
+*.log
+*.sql.gz
+*.dump
