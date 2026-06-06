@@ -47,7 +47,6 @@ declare(strict_types=1);
                     <label>Наименование<input name="name" required autocomplete="off"></label>
                     <label>Количество в партии<input name="quantity" required min="0" step="1" type="number"></label>
                     <label>Срок годности до<input name="expiryDate" required type="date"></label>
-                    <label>Магазин<input name="storeName" autocomplete="off"></label>
                     <button class="primary" type="submit">Сохранить партию</button>
                 </form>
 
@@ -61,8 +60,9 @@ declare(strict_types=1);
                             <li>Количество или Количество в партии</li>
                             <li>Срок годности до</li>
                         </ol>
-                        <p class="subtitle">Первая строка должна содержать заголовки. Необязательные колонки: Код, Магазин, Дата внесения, Статус партии.</p>
+                        <p class="subtitle">Первая строка должна содержать заголовки. Необязательные колонки: Код, Дата внесения, Статус партии.</p>
                     </div>
+                    <button class="ghost-button" id="downloadTemplateButton" type="button">Скачать шаблон таблицы</button>
                     <label>Файл XLSX<input id="xlsxInput" accept=".xlsx,.xls" type="file"></label>
                     <div class="import-preview" id="importPreview">Файл не выбран.</div>
                     <button class="primary" id="importButton" disabled type="button">Загрузить строки</button>
@@ -116,7 +116,6 @@ declare(strict_types=1);
                     </select>
                 </label>
                 <label>Остаток дней до<input id="filterDaysTo" min="0" type="number" placeholder="60"></label>
-                <label>Магазин<input id="filterStore" placeholder="Название магазина"></label>
                 <label>Срок от<input id="filterDateFrom" type="date"></label>
                 <label>Срок до<input id="filterDateTo" type="date"></label>
                 <button class="ghost-button" id="resetFiltersButton" type="button">Сбросить фильтры</button>
@@ -125,7 +124,7 @@ declare(strict_types=1);
             </div>
             <div class="table-wrap card wide">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Количество</th><th>Срок годности</th><th>Остаток дней</th><th>Статус</th><th>Магазин</th><th>Дата внесения</th></tr></thead>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Количество</th><th>Срок годности</th><th>Остаток дней</th><th>Статус</th><th>Дата внесения</th></tr></thead>
                     <tbody id="registryBody"></tbody>
                 </table>
             </div>

@@ -69,7 +69,7 @@ function refreshDaysLeft(PDO $pdo): void
 function listBatches(PDO $pdo, array $filters): array
 {
     [$where, $params] = buildBatchFilters($filters);
-    $sql = 'SELECT id, created_at, article, code, name, quantity, expiry_date, days_left, status, store_name, updated_at FROM batches ' . $where . ' ORDER BY expiry_date ASC, id DESC';
+    $sql = 'SELECT id, created_at, article, code, name, quantity, expiry_date, days_left, status, updated_at FROM batches ' . $where . ' ORDER BY expiry_date ASC, id DESC';
     $statement = $pdo->prepare($sql);
     $statement->execute($params);
 
@@ -101,7 +101,7 @@ function buildBatchFilters(array $filters): array
     $conditions = [];
     $params = [];
 
-    foreach (['article', 'code', 'name', 'store_name'] as $field) {
+    foreach (['article', 'code', 'name'] as $field) {
         if (isset($filters[$field]) && trim((string)$filters[$field]) !== '') {
             $conditions[] = "$field LIKE :$field";
             $params[":$field"] = '%' . trim((string)$filters[$field]) . '%';
@@ -150,8 +150,8 @@ function createBatch(PDO $pdo, array $payload): array
 {
     $batch = normalizeBatchPayload($payload);
     $statement = $pdo->prepare(
-        'INSERT INTO batches (created_at, article, code, name, quantity, expiry_date, days_left, status, store_name)
-         VALUES (:created_at, :article, :code, :name, :quantity, :expiry_date, :days_left, :status, :store_name)'
+        'INSERT INTO batches (created_at, article, code, name, quantity, expiry_date, days_left, status)
+         VALUES (:created_at, :article, :code, :name, :quantity, :expiry_date, :days_left, :status)'
     );
     $params = buildCreateBatchParams($batch);
     $statement->execute($params);
@@ -198,8 +198,7 @@ function updateBatch(PDO $pdo, array $payload): array
              quantity = :quantity,
              expiry_date = :expiry_date,
              days_left = :days_left,
-             status = :status,
-             store_name = :store_name
+             status = :status
          WHERE id = :id'
     );
     $params = buildUpdateBatchParams($batch, $id);
@@ -220,7 +219,6 @@ function buildCreateBatchParams(array $batch): array
         'expiry_date' => $batch['expiry_date'],
         'days_left' => calculateDaysLeft($batch['expiry_date']),
         'status' => $batch['status'],
-        'store_name' => $batch['store_name'],
     ];
 }
 
@@ -234,7 +232,6 @@ function buildUpdateBatchParams(array $batch, int $id): array
         'expiry_date' => $batch['expiry_date'],
         'days_left' => calculateDaysLeft($batch['expiry_date']),
         'status' => $batch['status'],
-        'store_name' => $batch['store_name'],
         'id' => $id,
     ];
 }
@@ -270,8 +267,6 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
     $quantity = (int)($payload['quantity'] ?? $payload['Количество в партии'] ?? 0);
     $expiryDate = normalizeDate((string)($payload['expiry_date'] ?? $payload['expiryDate'] ?? $payload['Срок годности до'] ?? ''));
     $status = (string)($payload['status'] ?? $payload['Статус партии'] ?? ACTIVE_STATUS);
-    $storeName = trim((string)($payload['store_name'] ?? $payload['storeName'] ?? $payload['Магазин'] ?? ''));
-
     if ($article === '' || $name === '' || $expiryDate === '') {
         throw new InvalidArgumentException('Заполните артикул, наименование и срок годности.');
     }
@@ -287,7 +282,6 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
         'quantity' => $quantity,
         'expiry_date' => $expiryDate,
         'status' => $status,
-        'store_name' => $storeName !== '' ? $storeName : null,
     ];
 }
 
@@ -315,8 +309,6 @@ function normalizeBatchRow(array $row): array
         'daysLeft' => (int)$row['days_left'],
         'days_left' => (int)$row['days_left'],
         'status' => $row['status'],
-        'storeName' => $row['store_name'] ?? '',
-        'store_name' => $row['store_name'] ?? '',
         'updated_at' => $row['updated_at'],
     ];
 }

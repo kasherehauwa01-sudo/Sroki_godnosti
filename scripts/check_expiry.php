@@ -28,7 +28,7 @@ try {
 
     $placeholders = implode(',', array_fill(0, count($notifyDays), '?'));
     $statement = $pdo->prepare(
-        "SELECT article, code, name, quantity, expiry_date, days_left, store_name
+        "SELECT article, code, name, quantity, expiry_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND days_left IN ($placeholders)
          ORDER BY days_left ASC, expiry_date ASC"
@@ -98,17 +98,15 @@ function buildEmailBody(array $batches): string
     ];
 
     foreach ($batches as $batch) {
-        $store = $batch['store_name'] ? ', магазин: ' . $batch['store_name'] : '';
         $code = $batch['code'] ? ', код: ' . $batch['code'] : '';
         $lines[] = sprintf(
-            'Артикул: %s%s, наименование: %s, количество: %s, остаток дней: %s, срок годности: %s%s',
+            'Артикул: %s%s, наименование: %s, количество: %s, остаток дней: %s, срок годности: %s',
             $batch['article'],
             $code,
             $batch['name'],
             $batch['quantity'],
             $batch['days_left'],
-            date('d.m.Y', strtotime((string)$batch['expiry_date'])),
-            $store
+            date('d.m.Y', strtotime((string)$batch['expiry_date']))
         );
     }
 

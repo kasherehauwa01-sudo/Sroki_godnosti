@@ -159,7 +159,6 @@ function normalizeBatch(row) {
         expiryDate: toDateInputValue(getRowValue(row, ['expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности до.', 'Срок годности', 'Годен до', 'Срокгодностидо'])),
         daysLeft: Number.isFinite(Number(row.daysLeft ?? row.days_left)) ? Number(row.daysLeft ?? row.days_left) : null,
         status: getRowValue(row, ['status', 'Статус партии']) || 'В наличии',
-        storeName: String(getRowValue(row, ['storeName', 'store_name', 'Магазин', 'Склад'])).trim(),
     };
 }
 
@@ -170,7 +169,6 @@ function getFilterParams() {
         name: qs('#filterName').value.trim(),
         status: qs('#filterStatus').value,
         days_to: qs('#filterDaysTo').value,
-        store_name: qs('#filterStore').value.trim(),
         date_from: qs('#filterDateFrom').value,
         date_to: qs('#filterDateTo').value,
     };
@@ -185,7 +183,6 @@ function renderRegistry() {
             && (!filters.name || batch.name.toLowerCase().includes(filters.name.toLowerCase()))
             && (!filters.status || batch.status === filters.status)
             && (!filters.days_to || days <= Number(filters.days_to))
-            && (!filters.store_name || batch.storeName.toLowerCase().includes(filters.store_name.toLowerCase()))
             && (!filters.date_from || batch.expiryDate >= filters.date_from)
             && (!filters.date_to || batch.expiryDate <= filters.date_to);
     });
@@ -201,10 +198,9 @@ function renderRegistry() {
             <td>${escapeHtml(batch.expiryDate)}</td>
             <td>${formatDays(days)}</td>
             <td><select class="status-select" data-id="${escapeHtml(batch.id)}">${options}</select></td>
-            <td>${escapeHtml(batch.storeName)}</td>
             <td>${escapeHtml(batch.createdAt)}</td>
         </tr>`;
-    }).join('') || '<tr><td colspan="9">Партий не найдено.</td></tr>';
+    }).join('') || '<tr><td colspan="8">Партий не найдено.</td></tr>';
 
     qsa('.status-select').forEach((select) => select.addEventListener('change', onStatusChange));
 }
@@ -308,6 +304,27 @@ async function persistSettings(partial) {
     showToast('Настройки сохранены.');
 }
 
+function downloadTemplateXlsx() {
+    if (!window.XLSX) {
+        showToast('Библиотека XLSX еще не загрузилась. Повторите действие через несколько секунд.', true);
+        return;
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet([
+        ['Артикул', 'Наименование', 'Количество', 'Срок годности до'],
+    ]);
+    worksheet['!cols'] = [
+        { wch: 18 },
+        { wch: 34 },
+        { wch: 14 },
+        { wch: 18 },
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Шаблон');
+    XLSX.writeFile(workbook, 'shablon_sroki_godnosti.xlsx');
+}
+
 function readXlsx(file) {
     if (!window.XLSX) {
         showToast('Библиотека XLSX еще не загрузилась. Обновите страницу и повторите импорт.', true);
@@ -354,7 +371,7 @@ function readXlsx(file) {
 }
 
 function resetRegistryFilters() {
-    ['#filterArticle', '#filterCode', '#filterName', '#filterDaysTo', '#filterStore', '#filterDateFrom', '#filterDateTo'].forEach((selector) => {
+    ['#filterArticle', '#filterCode', '#filterName', '#filterDaysTo', '#filterDateFrom', '#filterDateTo'].forEach((selector) => {
         qs(selector).value = '';
     });
     qs('#filterStatus').value = '';
@@ -382,6 +399,7 @@ function bindEvents() {
         }
     });
 
+    qs('#downloadTemplateButton').addEventListener('click', downloadTemplateXlsx);
     qs('#xlsxInput').addEventListener('change', (event) => event.target.files[0] && readXlsx(event.target.files[0]));
     qs('#importButton').addEventListener('click', async () => {
         try {
@@ -397,14 +415,14 @@ function bindEvents() {
         }
     });
 
-    ['#filterArticle', '#filterCode', '#filterName', '#filterStatus', '#filterDaysTo', '#filterStore', '#filterDateFrom', '#filterDateTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
+    ['#filterArticle', '#filterCode', '#filterName', '#filterStatus', '#filterDaysTo', '#filterDateFrom', '#filterDateTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
     qs('#reportType').addEventListener('change', async () => {
         qsa('.custom-period').forEach((item) => item.classList.toggle('hidden', qs('#reportType').value !== 'custom'));
         await buildReportRows();
     });
     ['#reportDaysFrom', '#reportDaysTo'].forEach((selector) => qs(selector).addEventListener('input', buildReportRows));
     qs('#buildReportButton').addEventListener('click', buildReportRows);
-    qs('#exportReportButton').addEventListener('click', () => exportXlsx(state.reportRows, 'otchet_sroki_godnosti.xlsx', (row) => ({ Артикул: row.article, Код: row.code, Наименование: row.name, 'Количество в партии': row.quantity, 'Истекает через': formatDays(row.daysLeft ?? daysLeft(row.expiryDate)), Магазин: row.storeName })));
+    qs('#exportReportButton').addEventListener('click', () => exportXlsx(state.reportRows, 'otchet_sroki_godnosti.xlsx', (row) => ({ Артикул: row.article, Код: row.code, Наименование: row.name, 'Количество в партии': row.quantity, 'Истекает через': formatDays(row.daysLeft ?? daysLeft(row.expiryDate)) })));
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(state.filteredBatches, 'reestr_filtr.xlsx', batchExportMapper));
     qs('#exportAllButton').addEventListener('click', () => exportXlsx(state.batches, 'reestr_vse_partii.xlsx', batchExportMapper));
@@ -442,7 +460,6 @@ function batchExportMapper(batch) {
         'Срок годности': batch.expiryDate,
         'Остаток дней': formatDays(days),
         'Статус партии': batch.status,
-        Магазин: batch.storeName,
         'Дата внесения': batch.createdAt,
     };
 }

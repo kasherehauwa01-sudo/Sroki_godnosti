@@ -14,14 +14,12 @@ CREATE TABLE IF NOT EXISTS batches (
     expiry_date DATE NOT NULL,
     days_left INT NOT NULL DEFAULT 0,
     status ENUM('В наличии', 'Реализована', 'Списана') NOT NULL DEFAULT 'В наличии',
-    store_name VARCHAR(255) NULL,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     INDEX idx_batches_article (article),
     INDEX idx_batches_code (code),
     INDEX idx_batches_name (name),
     INDEX idx_batches_status (status),
-    INDEX idx_batches_store_name (store_name),
     INDEX idx_batches_expiry_date (expiry_date),
     INDEX idx_batches_days_left (days_left)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
