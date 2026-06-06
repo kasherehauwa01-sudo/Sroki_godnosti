@@ -109,8 +109,11 @@ function buildBatchFilters(array $filters): array
     }
 
     if (!empty($filters['search'])) {
-        $conditions[] = '(article LIKE :search OR code LIKE :search OR name LIKE :search)';
-        $params[':search'] = '%' . trim((string)$filters['search']) . '%';
+        $conditions[] = '(article LIKE :search_article OR code LIKE :search_code OR name LIKE :search_name)';
+        $searchValue = '%' . trim((string)$filters['search']) . '%';
+        $params[':search_article'] = $searchValue;
+        $params[':search_code'] = $searchValue;
+        $params[':search_name'] = $searchValue;
     }
 
     if (!empty($filters['status'])) {
@@ -148,9 +151,12 @@ function createBatch(PDO $pdo, array $payload): array
     $batch = normalizeBatchPayload($payload);
     $statement = $pdo->prepare(
         'INSERT INTO batches (created_at, article, code, name, quantity, expiry_date, days_left, status, store_name)
-         VALUES (:created_at, :article, :code, :name, :quantity, :expiry_date, DATEDIFF(:expiry_date, CURDATE()), :status, :store_name)'
+         VALUES (:created_at, :article, :code, :name, :quantity, :expiry_date, DATEDIFF(:expiry_date_for_days, CURDATE()), :status, :store_name)'
     );
-    $statement->execute($batch);
+    $params = $batch;
+    // Для PDO с отключенной эмуляцией нельзя использовать один named placeholder дважды.
+    $params['expiry_date_for_days'] = $batch['expiry_date'];
+    $statement->execute($params);
     $id = (int)$pdo->lastInsertId();
     writeLog($pdo, 'create', ['id' => $id, 'article' => $batch['article']]);
 
@@ -194,12 +200,15 @@ function updateBatch(PDO $pdo, array $payload): array
              name = :name,
              quantity = :quantity,
              expiry_date = :expiry_date,
-             days_left = DATEDIFF(:expiry_date, CURDATE()),
+             days_left = DATEDIFF(:expiry_date_for_days, CURDATE()),
              status = :status,
              store_name = :store_name
          WHERE id = :id'
     );
-    $statement->execute($batch);
+    $params = $batch;
+    // Для PDO с отключенной эмуляцией нельзя использовать один named placeholder дважды.
+    $params['expiry_date_for_days'] = $batch['expiry_date'];
+    $statement->execute($params);
     writeLog($pdo, 'update', ['id' => $id, 'status' => $batch['status']]);
 
     return ['ok' => true];

@@ -52,7 +52,13 @@ async function api(action, data = {}) {
     }
 
     const response = await fetch(url, options);
-    const json = await response.json();
+    const text = await response.text();
+    let json;
+    try {
+        json = JSON.parse(text);
+    } catch (error) {
+        throw new Error(text || 'API вернул некорректный JSON.');
+    }
     if (!response.ok || !json.ok) {
         throw new Error(json.error || 'Ошибка API');
     }
@@ -277,21 +283,29 @@ function bindEvents() {
         event.preventDefault();
         const form = new FormData(event.target);
         const batch = normalizeBatch(Object.fromEntries(form.entries()));
-        await api('create', batch);
-        event.target.reset();
-        showToast('Партия сохранена.');
-        await loadBatches();
+        try {
+            await api('create', batch);
+            event.target.reset();
+            showToast('Партия сохранена.');
+            await loadBatches();
+        } catch (error) {
+            showToast(error.message, true);
+        }
     });
 
     qs('#xlsxInput').addEventListener('change', (event) => event.target.files[0] && readXlsx(event.target.files[0]));
     qs('#importButton').addEventListener('click', async () => {
-        await api('bulk_create', { batches: state.importRows });
-        showToast(`Загружено строк: ${state.importRows.length}`);
-        state.importRows = [];
-        qs('#xlsxInput').value = '';
-        qs('#importPreview').textContent = 'Файл не выбран.';
-        qs('#importButton').disabled = true;
-        await loadBatches();
+        try {
+            await api('bulk_create', { batches: state.importRows });
+            showToast(`Загружено строк: ${state.importRows.length}`);
+            state.importRows = [];
+            qs('#xlsxInput').value = '';
+            qs('#importPreview').textContent = 'Файл не выбран.';
+            qs('#importButton').disabled = true;
+            await loadBatches();
+        } catch (error) {
+            showToast(error.message, true);
+        }
     });
 
     ['#filterArticle', '#filterCode', '#filterName', '#filterStatus', '#filterDaysTo', '#filterStore', '#filterDateFrom', '#filterDateTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
