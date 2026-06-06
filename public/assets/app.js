@@ -118,12 +118,33 @@ function excelSerialDateToInputValue(serial) {
     return date.toISOString().slice(0, 10);
 }
 
+function normalizeHeaderKey(value) {
+    return String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/ё/g, 'е')
+        .replace(/[^a-zа-я0-9]/gi, '');
+}
+
 function getRowValue(row, aliases) {
+    const normalizedAliases = aliases.map(normalizeHeaderKey);
+    const entries = Object.entries(row);
+
+    // Сначала ищем точное совпадение заголовка, затем совпадение после очистки
+    // пробелов, точек, переносов строк и других символов из XLSX-шапки.
     for (const alias of aliases) {
         if (row[alias] !== undefined && row[alias] !== null && String(row[alias]).trim() !== '') {
             return row[alias];
         }
     }
+
+    for (const [key, value] of entries) {
+        const normalizedKey = normalizeHeaderKey(key);
+        if (normalizedAliases.includes(normalizedKey) && String(value).trim() !== '') {
+            return value;
+        }
+    }
+
     return '';
 }
 
@@ -131,11 +152,11 @@ function normalizeBatch(row) {
     return {
         id: String(getRowValue(row, ['id', 'ID']) || crypto.randomUUID()),
         createdAt: toDateInputValue(getRowValue(row, ['createdAt', 'created_at', 'Дата внесения'])) || new Date().toISOString().slice(0, 10),
-        article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара'])).trim(),
+        article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара', 'Артикул.'])).trim(),
         code: String(getRowValue(row, ['code', 'Код', 'Код товара'])).trim(),
-        name: String(getRowValue(row, ['name', 'Наименование', 'Наименование товара', 'Товар'])).trim(),
-        quantity: Number(getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии']) || 0),
-        expiryDate: toDateInputValue(getRowValue(row, ['expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности', 'Годен до'])),
+        name: String(getRowValue(row, ['name', 'Наименование', 'Наименование товара', 'Товар', 'Наименованиетовара'])).trim(),
+        quantity: Number(getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']) || 0),
+        expiryDate: toDateInputValue(getRowValue(row, ['expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности до.', 'Срок годности', 'Годен до', 'Срокгодностидо'])),
         daysLeft: Number.isFinite(Number(row.daysLeft ?? row.days_left)) ? Number(row.daysLeft ?? row.days_left) : null,
         status: getRowValue(row, ['status', 'Статус партии']) || 'В наличии',
         storeName: String(getRowValue(row, ['storeName', 'store_name', 'Магазин', 'Склад'])).trim(),
@@ -302,6 +323,7 @@ function readXlsx(file) {
             const workbook = XLSX.read(new Uint8Array(event.target.result), { type: 'array', cellDates: true });
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: false });
+            const detectedHeaders = rawRows[0] ? Object.keys(rawRows[0]).join(', ') : 'не найдены';
             const normalizedRows = rawRows.map(normalizeBatch);
             state.importRows = normalizedRows.filter((row) => row.article && row.name && row.expiryDate);
             const skipped = normalizedRows.length - state.importRows.length;
@@ -311,7 +333,8 @@ function readXlsx(file) {
                 `Найдено строк: ${rawRows.length}`,
                 `Готово к загрузке: ${state.importRows.length}`,
                 skipped > 0 ? `Пропущено строк без артикула, наименования или срока годности: ${skipped}` : '',
-                exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте заголовки: Артикул, Наименование, Количество, Срок годности до.',
+                `Распознанные заголовки: ${detectedHeaders}`,
+                exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте, что первая строка — это заголовки: Артикул, Наименование, Количество, Срок годности до.',
             ].filter(Boolean).join('\n');
             qs('#importButton').disabled = state.importRows.length === 0;
         } catch (error) {
