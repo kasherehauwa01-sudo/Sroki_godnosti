@@ -18,3 +18,4 @@ putenv('SMTP_USERNAME=vr-vk@yandex.ru');
 putenv('SMTP_PASSWORD=YOUR_APP_PASSWORD');
 putenv('SMTP_FROM_NAME=Сроки годности');
 putenv('APP_URL=https://kvasmix.ru/vr/sroki_godnosti/');
+putenv('SETTINGS_PASSWORD=YOUR_SETTINGS_PASSWORD');
