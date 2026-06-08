@@ -23,21 +23,13 @@ declare(strict_types=1);
     <main class="layout">
         <nav class="tabs" aria-label="Разделы администратора">
             <button class="tab active" data-tab="registry" type="button">Реестр</button>
-            <button class="tab" data-tab="settings" type="button">Настройки</button>
             <button class="tab" data-tab="history" type="button">История</button>
+            <button class="tab" data-tab="settings" type="button">Настройки</button>
+            <button class="primary nav-action" id="openAddBatchesButton" type="button">Добавить партию</button>
+            <button class="ghost-button" id="openWriteOffButton" type="button">Списать партию</button>
         </nav>
 
         <section class="panel active" id="tab-registry">
-            <div class="section-heading registry-heading">
-                <div>
-                    <h2>Реестр партий товаров</h2>
-                    <p>Быстрый поиск и фильтрация выполняются без перезагрузки страницы.</p>
-                </div>
-                <div class="registry-actions">
-                    <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
-                    <button class="ghost-button" id="openXlsImportButton" type="button">XLS</button>
-                </div>
-            </div>
             <div class="card filters">
                 <label>Артикул<input id="filterArticle" placeholder="Например, 12345"></label>
                 <label>Статус
@@ -63,45 +55,71 @@ declare(strict_types=1);
             </div>
             <div class="table-wrap card wide">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Количество</th><th><button class="sort-button" data-sort="expiryDate" type="button">Срок годности <span class="sort-indicator" data-sort-indicator="expiryDate"></span></button></th><th>Остаток дней</th><th>Статус</th><th><button class="sort-button" data-sort="createdAt" type="button">Дата внесения <span class="sort-indicator" data-sort-indicator="createdAt"></span></button></th><th>Действия</th></tr></thead>
+                    <thead><tr><th><button class="sort-button" data-sort="article" type="button">Артикул <span class="sort-indicator" data-sort-indicator="article"></span></button></th><th><button class="sort-button" data-sort="quantity" type="button">Количество <span class="sort-indicator" data-sort-indicator="quantity"></span></button></th><th><button class="sort-button" data-sort="expiryDate" type="button">Срок годности <span class="sort-indicator" data-sort-indicator="expiryDate"></span></button></th><th><button class="sort-button" data-sort="daysLeft" type="button">Остаток дней <span class="sort-indicator" data-sort-indicator="daysLeft"></span></button></th><th>Статус</th><th><button class="sort-button" data-sort="createdAt" type="button">Дата внесения <span class="sort-indicator" data-sort-indicator="createdAt"></span></button></th><th>Действия</th></tr></thead>
                     <tbody id="registryBody"></tbody>
                 </table>
             </div>
         </section>
 
         <section class="panel" id="tab-settings">
-            <div class="section-heading">
-                <h2>Настройки уведомлений</h2>
-                <p>Укажите получателей. Сервис ежедневно проверяет просроченные партии и партии, у которых осталось 15, 30 или 60 дней.</p>
-            </div>
-            <div class="grid two">
-                <form class="card form" id="emailForm">
-                    <h3>Email получатели</h3>
-                    <label>Email<input id="emailInput" type="email" placeholder="user@example.com"></label>
-                    <button class="primary" type="submit">Добавить</button>
-                    <div class="chips" id="emailList"></div>
-                </form>
+            <form class="settings-grid" id="settingsForm">
                 <div class="card form">
-                    <h3>Когда приходят письма</h3>
-                    <p class="subtitle">Уведомления отправляются один раз в день в 09:00 по МСК, если в реестре есть партии со статусом «В наличии» по одному из критериев.</p>
-                    <ul class="notification-criteria">
-                        <li>Срок годности партии истек</li>
-                        <li>Осталось 15 дней</li>
-                        <li>Осталось 30 дней</li>
-                        <li>Осталось 60 дней</li>
-                    </ul>
+                    <h3>Уведомления</h3>
+                    <label class="checkbox-row"><input id="notify90" name="notify_90_days" type="checkbox"> За 90 дней</label>
+                    <label class="checkbox-row"><input id="notify60" name="notify_60_days" type="checkbox"> За 60 дней</label>
+                    <label class="checkbox-row"><input id="notify30" name="notify_30_days" type="checkbox"> За 30 дней</label>
+                    <label class="checkbox-row"><input id="notify15" name="notify_15_days" type="checkbox"> За 15 дней</label>
+                    <label class="checkbox-row"><input id="notify7" name="notify_7_days" type="checkbox"> За 7 дней</label>
+                    <label class="checkbox-row"><input id="notify1" name="notify_1_day" type="checkbox"> За 1 день</label>
                 </div>
-            </div>
+
+                <div class="card form">
+                    <h3>Получатели уведомлений</h3>
+                    <label>Email получателей<textarea id="notificationEmails" rows="6" placeholder="vr-vk@yandex.ru
+manager@site.ru"></textarea></label>
+                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
+                    <div class="settings-actions">
+                        <button class="primary" type="submit">Сохранить настройки</button>
+                        <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                    </div>
+                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="card form">
+                    <h3>SMTP</h3>
+                    <label>SMTP сервер<input id="smtpHost" placeholder="smtp.yandex.ru"></label>
+                    <label>SMTP порт<input id="smtpPort" min="1" max="65535" type="number" placeholder="587"></label>
+                    <label>SMTP логин<input id="smtpUsername" type="email" placeholder="vr-vk@yandex.ru"></label>
+                    <label>SMTP пароль
+                        <div class="password-field">
+                            <input id="smtpPassword" autocomplete="new-password" type="password" placeholder="Оставьте пустым, чтобы сохранить текущий пароль">
+                            <button class="ghost-button" id="toggleSmtpPasswordButton" type="button">Показать</button>
+                        </div>
+                    </label>
+                    <label>Email отправителя<input id="smtpFromEmail" type="email" placeholder="vr-vk@yandex.ru"></label>
+                    <label>Имя отправителя<input id="smtpFromName" placeholder="Сроки годности"></label>
+                    <p class="subtitle" id="smtpPasswordState"></p>
+                </div>
+
+                <div class="card form">
+                    <h3>Время отправки уведомлений</h3>
+                    <label>Отправлять уведомления в:<input id="notificationTime" type="time" required value="09:00"></label>
+                    <p class="subtitle">Изменение времени будет использоваться после настройки cron.</p>
+                </div>
+
+                <div class="card form settings-system-card">
+                    <h3>Система</h3>
+                    <dl class="system-info">
+                        <dt>Проверка сроков:</dt><dd id="systemCheckSchedule">Не выполнялось</dd>
+                        <dt>Последняя проверка:</dt><dd id="systemLastCheck">Не выполнялось</dd>
+                        <dt>Последняя отправка письма:</dt><dd id="systemLastSent">Не выполнялось</dd>
+                        <dt>Статус SMTP:</dt><dd id="systemSmtpStatus">Не выполнялось</dd>
+                    </dl>
+                </div>
+            </form>
         </section>
 
         <section class="panel" id="tab-history">
-            <div class="section-heading">
-                <h2>История</h2>
-                <p>История изменений в реестре: добавление партий, импорт, изменение статусов и удаление записей.</p>
-            </div>
-            <div class="card log-actions">
-                <button class="ghost-button" id="refreshHistoryButton" type="button">Обновить историю</button>
-            </div>
             <div class="table-wrap card">
                 <table>
                     <thead><tr><th>Дата</th><th>Действие</th><th>Детали</th></tr></thead>
@@ -118,7 +136,10 @@ declare(strict_types=1);
                 <button class="icon-button" id="closeAddBatchesDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
             <div class="batch-lines" id="batchRowsContainer"></div>
-            <button class="ghost-button" id="addBatchRowButton" type="button">Добавить строку</button>
+            <div class="batch-dialog-actions">
+                <button class="ghost-button" id="addBatchRowButton" type="button">Добавить строку</button>
+                <button class="ghost-button" id="openXlsImportButton" type="button">Загрузить XLS</button>
+            </div>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelAddBatchesButton" type="button">Отмена</button>
                 <button class="primary" type="submit">Добавить партии в реестр</button>
@@ -149,6 +170,38 @@ declare(strict_types=1);
         </div>
     </dialog>
 
+    <dialog class="modal" id="settingsPasswordDialog">
+        <form class="card form modal-card" id="settingsPasswordForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Доступ к настройкам</h2>
+                <button class="icon-button" id="closeSettingsPasswordDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Введите пароль, чтобы открыть вкладку «Настройки».</p>
+            <label>Пароль<input id="settingsPasswordInput" required autocomplete="current-password" type="password"></label>
+            <p class="field-error" id="settingsPasswordError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelSettingsPasswordButton" type="button">Отмена</button>
+                <button class="primary" type="submit">Открыть настройки</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal" id="writeOffPasswordDialog">
+        <form class="card form modal-card" id="writeOffPasswordForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Списать партию</h2>
+                <button class="icon-button" id="closeWriteOffPasswordDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Введите пароль, чтобы разрешить изменение статусов в колонке «Статус».</p>
+            <label>Пароль<input id="writeOffPasswordInput" required autocomplete="current-password" type="password"></label>
+            <p class="field-error" id="writeOffPasswordError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelWriteOffPasswordButton" type="button">Отмена</button>
+                <button class="primary" type="submit">Разрешить изменение статусов</button>
+            </div>
+        </form>
+    </dialog>
+
     <dialog class="modal" id="editBatchDialog">
         <form class="card form modal-card" id="editBatchForm" method="dialog">
             <div class="modal-heading">
@@ -158,7 +211,7 @@ declare(strict_types=1);
             <input id="editBatchId" name="id" type="hidden">
             <label>Артикул<input id="editArticle" name="article" required autocomplete="off"></label>
             <label>Количество в партии<input id="editQuantity" name="quantity" required min="0" step="1" type="number"></label>
-            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric"></label>
+            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric" maxlength="7"></label>
             <label>Статус
                 <select id="editStatus" name="status" required>
                     <option>В наличии</option>

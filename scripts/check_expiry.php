@@ -14,7 +14,6 @@ require_once __DIR__ . '/../app/database.php';
 
 const SENDER_EMAIL = 'vr-vk@yandex.ru';
 const DEFAULT_APP_URL = 'https://kvasmix.ru/vr/sroki_godnosti/';
-const NOTIFICATION_DAYS = [15, 30, 60];
 
 try {
     $pdo = getDatabaseConnection();
@@ -29,27 +28,28 @@ try {
         exit(0);
     }
 
-    $placeholders = implode(',', array_fill(0, count(NOTIFICATION_DAYS), '?'));
+    $notificationDays = getEnabledNotificationDays($settings);
+    $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
     $statement = $pdo->prepare(
         "SELECT article, quantity, expiry_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND (days_left < 0 OR days_left IN ($placeholders))
          ORDER BY days_left ASC, expiry_date ASC, article ASC"
     );
-    $statement->execute(NOTIFICATION_DAYS);
+    $statement->execute($notificationDays);
     $batches = $statement->fetchAll();
 
     if (!$batches) {
-        writeLog($pdo, 'expiry_check_no_matches', ['criteria' => ['expired', ...NOTIFICATION_DAYS]]);
+        writeLog($pdo, 'expiry_check_no_matches', ['criteria' => ['expired', ...$notificationDays]]);
         exit(0);
     }
 
     $body = buildEmailBody($batches, getAppUrl());
     $subject = 'Сроки годности. Требуется актуализация статусов от ' . date('d.m.Y');
-    $sent = sendNotificationEmail($emails, $subject, $body);
+    $sent = sendNotificationEmail($pdo, $emails, $subject, $body, $settings);
     writeLog($pdo, $sent ? 'expiry_notifications_sent' : 'expiry_notifications_failed', [
         'emails' => $emails,
-        'criteria' => ['expired', ...NOTIFICATION_DAYS],
+        'criteria' => ['expired', ...$notificationDays],
         'rows' => count($batches),
         'sender' => SENDER_EMAIL,
     ]);
@@ -61,11 +61,11 @@ try {
 }
 
 
-function sendNotificationEmail(array $emails, string $subject, string $body): bool
+function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings = []): bool
 {
-    $smtpPassword = getenv('SMTP_PASSWORD') ?: '';
+    $smtpPassword = (string)($settings['smtp_password'] ?? '') ?: (getenv('SMTP_PASSWORD') ?: '');
     if ($smtpPassword !== '') {
-        sendSmtpEmail($emails, $subject, $body);
+        sendSmtpEmail($pdo, $emails, $subject, $body, $settings);
         return true;
     }
 
@@ -79,36 +79,61 @@ function sendNotificationEmail(array $emails, string $subject, string $body): bo
     return mail(implode(',', $emails), $subject, $body, implode("\r\n", $headers), '-f ' . SENDER_EMAIL);
 }
 
-function sendSmtpEmail(array $emails, string $subject, string $body): void
+function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings = []): void
 {
-    $host = getenv('SMTP_HOST') ?: 'smtp.yandex.ru';
-    $port = (int)(getenv('SMTP_PORT') ?: 465);
-    $username = getenv('SMTP_USERNAME') ?: SENDER_EMAIL;
-    $password = getenv('SMTP_PASSWORD') ?: '';
-    $fromName = getenv('SMTP_FROM_NAME') ?: 'Сроки годности';
+    $host = (string)($settings['smtp_host'] ?? '') ?: (getenv('SMTP_HOST') ?: 'smtp.yandex.ru');
+    $port = (int)((int)($settings['smtp_port'] ?? 0) ?: (getenv('SMTP_PORT') ?: 465));
+    $username = (string)($settings['smtp_username'] ?? '') ?: (getenv('SMTP_USERNAME') ?: SENDER_EMAIL);
+    $password = (string)($settings['smtp_password'] ?? '') ?: (getenv('SMTP_PASSWORD') ?: '');
+    $fromEmail = (string)($settings['smtp_from_email'] ?? '') ?: SENDER_EMAIL;
+    $fromName = (string)($settings['smtp_from_name'] ?? '') ?: (getenv('SMTP_FROM_NAME') ?: 'Сроки годности');
+    $mode = $port === 465 ? 'SSL' : 'STARTTLS';
+    $transportHost = $mode === 'SSL' ? 'ssl://' . $host : $host;
 
     if ($password === '') {
         throw new RuntimeException('Для SMTP-отправки задайте SMTP_PASSWORD.');
     }
 
-    $socket = fsockopen('ssl://' . $host, $port, $errno, $errstr, 30);
+    writeLog($pdo, 'smtp_connection_attempt', ['host' => $host, 'port' => $port, 'mode' => $mode]);
+    $socket = fsockopen($transportHost, $port, $errno, $errstr, 30);
     if (!$socket) {
+        writeLog($pdo, 'smtp_connection_failed', ['host' => $host, 'port' => $port, 'mode' => $mode, 'error' => $errstr, 'code' => $errno]);
         throw new RuntimeException('Не удалось подключиться к SMTP: ' . $errstr . ' (' . $errno . ')');
     }
+    writeLog($pdo, 'smtp_connection_success', ['host' => $host, 'port' => $port, 'mode' => $mode]);
 
     smtpExpect($socket, [220]);
     smtpCommand($socket, 'EHLO kvasmix.ru', [250]);
-    smtpCommand($socket, 'AUTH LOGIN', [334]);
-    smtpCommand($socket, base64_encode($username), [334]);
-    smtpCommand($socket, base64_encode($password), [235]);
-    smtpCommand($socket, 'MAIL FROM:<' . SENDER_EMAIL . '>', [250]);
+    if ($mode === 'STARTTLS') {
+        smtpCommand($socket, 'STARTTLS', [220]);
+        $cryptoEnabled = stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+        if ($cryptoEnabled !== true) {
+            fclose($socket);
+            writeLog($pdo, 'smtp_starttls_failed', ['host' => $host, 'port' => $port, 'mode' => $mode]);
+            throw new RuntimeException('Не удалось включить TLS для SMTP STARTTLS.');
+        }
+        writeLog($pdo, 'smtp_starttls_success', ['host' => $host, 'port' => $port, 'mode' => $mode]);
+        smtpCommand($socket, 'EHLO kvasmix.ru', [250]);
+    }
+
+    try {
+        smtpCommand($socket, 'AUTH LOGIN', [334]);
+        smtpCommand($socket, base64_encode($username), [334]);
+        smtpCommand($socket, base64_encode($password), [235]);
+        writeLog($pdo, 'smtp_auth_success', ['host' => $host, 'port' => $port, 'mode' => $mode, 'username' => $username]);
+    } catch (Throwable $error) {
+        fclose($socket);
+        writeLog($pdo, 'smtp_auth_failed', ['host' => $host, 'port' => $port, 'mode' => $mode, 'username' => $username, 'error' => $error->getMessage()]);
+        throw $error;
+    }
+    smtpCommand($socket, 'MAIL FROM:<' . $fromEmail . '>', [250]);
     foreach ($emails as $email) {
         smtpCommand($socket, 'RCPT TO:<' . $email . '>', [250, 251]);
     }
     smtpCommand($socket, 'DATA', [354]);
 
     $headers = [
-        'From: ' . encodeMimeHeader($fromName) . ' <' . SENDER_EMAIL . '>',
+        'From: ' . encodeMimeHeader($fromName) . ' <' . $fromEmail . '>',
         'To: ' . implode(', ', $emails),
         'Subject: ' . encodeMimeHeader($subject),
         'MIME-Version: 1.0',
@@ -164,6 +189,18 @@ function getNotificationSettings(PDO $pdo): array
 function splitEmails(string $emails): array
 {
     return array_values(array_filter(array_map('trim', preg_split('/[,;\s]+/', $emails) ?: [])));
+}
+
+function getEnabledNotificationDays(array $settings): array
+{
+    $days = [];
+    foreach ([90, 60, 30, 15, 7, 1] as $day) {
+        if ((int)($settings['notify_' . $day . '_days'] ?? 0) === 1) {
+            $days[] = $day;
+        }
+    }
+
+    return $days ?: [15, 30, 60];
 }
 
 function buildEmailBody(array $batches, string $appUrl): string
