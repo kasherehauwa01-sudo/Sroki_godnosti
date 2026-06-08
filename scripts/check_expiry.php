@@ -194,7 +194,7 @@ function buildBatchNotificationText(array $batch, string $appUrl): string
         $prefix,
         'Артикул: ' . $batch['article'] . '.',
         'Количество: ' . $batch['quantity'] . '.',
-        'Срок годности: ' . date('d.m.Y', strtotime((string)$batch['expiry_date'])) . '.',
+        'Срок годности: ' . date('m.Y', strtotime((string)$batch['expiry_date'])) . '.',
         'Актуализируйте статус товара в реестре партий.',
         'Ссылка на реестр: ' . buildRegistryUrl($appUrl, (string)$batch['article']),
     ]);

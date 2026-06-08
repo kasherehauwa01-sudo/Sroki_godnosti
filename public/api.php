@@ -329,11 +329,23 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
 
 function normalizeDate(string $value): string
 {
+    $value = trim($value);
     if ($value === '') {
         return '';
     }
+
+    if (preg_match('/^(0?[1-9]|1[0-2])\.(\d{4})$/', $value, $matches)) {
+        return sprintf('%04d-%02d-01', (int)$matches[2], (int)$matches[1]);
+    }
+    if (preg_match('/^\d{1,2}\.(\d{1,2})\.(\d{4})$/', $value, $matches)) {
+        return sprintf('%04d-%02d-01', (int)$matches[2], (int)$matches[1]);
+    }
+    if (preg_match('/^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/', $value, $matches)) {
+        return sprintf('%04d-%02d-01', (int)$matches[1], (int)$matches[2]);
+    }
+
     $timestamp = strtotime($value);
-    return $timestamp ? date('Y-m-d', $timestamp) : substr($value, 0, 10);
+    return $timestamp ? date('Y-m-01', $timestamp) : substr($value, 0, 10);
 }
 
 function normalizeBatchRow(array $row): array

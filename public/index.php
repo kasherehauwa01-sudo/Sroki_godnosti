@@ -38,7 +38,7 @@ declare(strict_types=1);
                     <h3>Ручное добавление</h3>
                     <label>Артикул<input name="article" required autocomplete="off"></label>
                     <label>Количество в партии<input name="quantity" required min="0" step="1" type="number"></label>
-                    <label>Срок годности до<input name="expiryDate" required type="date"></label>
+                    <label>Срок годности до<input name="expiryDate" required pattern="^(0[1-9]|1[0-2])\.\d{4}$" placeholder="мм.гггг" inputmode="numeric"></label>
                     <button class="primary" type="submit">Сохранить партию</button>
                 </form>
 
@@ -147,7 +147,7 @@ declare(strict_types=1);
             <input id="editBatchId" name="id" type="hidden">
             <label>Артикул<input id="editArticle" name="article" required autocomplete="off"></label>
             <label>Количество в партии<input id="editQuantity" name="quantity" required min="0" step="1" type="number"></label>
-            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required type="date"></label>
+            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^(0[1-9]|1[0-2])\.\d{4}$" placeholder="мм.гггг" inputmode="numeric"></label>
             <label>Статус
                 <select id="editStatus" name="status" required>
                     <option>В наличии</option>
