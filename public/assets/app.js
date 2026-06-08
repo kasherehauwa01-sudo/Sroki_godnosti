@@ -142,6 +142,19 @@ function formatExpiryMonthRu(value) {
     return `${month}.${year}`;
 }
 
+function maskExpiryMonthValue(value) {
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 6);
+    return digits.length > 2 ? `${digits.slice(0, 2)}.${digits.slice(2)}` : digits;
+}
+
+function bindExpiryMonthMask(input) {
+    input.value = maskExpiryMonthValue(input.value);
+    // Маска оставляет только цифры и автоматически добавляет точку после месяца.
+    input.addEventListener('input', () => {
+        input.value = maskExpiryMonthValue(input.value);
+    });
+}
+
 function formatDuplicateBatches(duplicates, intro = 'В реестре уже есть эта партия товара') {
     const rows = (duplicates || [])
         .filter(Boolean)
@@ -339,9 +352,10 @@ function createBatchRow(values = {}) {
     row.innerHTML = `
         <label>Артикул<input class="batch-row-article" required autocomplete="off" value="${escapeHtml(values.article || '')}"></label>
         <label>Количество в партии<input class="batch-row-quantity" required min="0" step="1" type="number" value="${escapeHtml(values.quantity ?? '')}"></label>
-        <label>Срок годности<input class="batch-row-expiry" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric" value="${escapeHtml(values.expiryDate || '')}"></label>
+        <label>Срок годности<input class="batch-row-expiry" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric" maxlength="7" value="${escapeHtml(values.expiryDate || '')}"></label>
         <button class="small-button danger remove-batch-row-button" type="button" aria-label="Удалить строку">🗑️</button>
     `;
+    bindExpiryMonthMask(row.querySelector('.batch-row-expiry'));
     row.querySelector('.remove-batch-row-button').addEventListener('click', () => {
         row.remove();
         updateBatchRowRemoveButtons();
@@ -606,6 +620,7 @@ function bindEvents() {
         qs(`#tab-${button.dataset.tab}`).classList.add('active');
     }));
 
+    bindExpiryMonthMask(qs('#editExpiryDate'));
     qs('#editBatchForm').addEventListener('submit', submitEditForm);
     qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
     qs('#cancelEditButton').addEventListener('click', closeEditDialog);
