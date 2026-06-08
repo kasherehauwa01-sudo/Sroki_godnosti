@@ -72,8 +72,9 @@ declare(strict_types=1);
                     <label>Email<input id="emailInput" type="email" placeholder="user@example.com"></label>
                     <div class="settings-actions">
                         <button class="primary" type="submit">Добавить</button>
-                        <button class="ghost-button" id="sendTestNotificationButton" type="button">Тест уведомления</button>
+                        <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
                     </div>
+                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
                     <div class="chips" id="emailList"></div>
                 </form>
                 <div class="card form">
