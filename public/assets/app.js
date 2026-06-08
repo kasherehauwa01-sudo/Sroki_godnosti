@@ -421,6 +421,14 @@ function openXlsImportDialog() {
     qs('#xlsImportDialog').showModal();
 }
 
+function openXlsImportFromAddDialog() {
+    // Закрываем окно ручного добавления, чтобы открыть отдельное модальное окно загрузки XLS.
+    if (qs('#addBatchesDialog').open) {
+        closeAddBatchesDialog();
+    }
+    openXlsImportDialog();
+}
+
 function closeXlsImportDialog() {
     qs('#xlsImportDialog').close();
     state.importRows = [];
@@ -757,7 +765,7 @@ function bindEvents() {
     qs('#closeAddBatchesDialogButton').addEventListener('click', closeAddBatchesDialog);
     qs('#cancelAddBatchesButton').addEventListener('click', closeAddBatchesDialog);
 
-    qs('#openXlsImportButton').addEventListener('click', openXlsImportDialog);
+    qs('#openXlsImportButton').addEventListener('click', openXlsImportFromAddDialog);
     qs('#closeXlsImportDialogButton').addEventListener('click', closeXlsImportDialog);
     qs('#cancelXlsImportButton').addEventListener('click', closeXlsImportDialog);
 

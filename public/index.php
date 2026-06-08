@@ -31,7 +31,6 @@ declare(strict_types=1);
             <div class="section-heading registry-heading">
                 <div class="registry-actions">
                     <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
-                    <button class="ghost-button" id="openXlsImportButton" type="button">XLS</button>
                 </div>
             </div>
             <div class="card filters">
@@ -107,7 +106,10 @@ declare(strict_types=1);
                 <button class="icon-button" id="closeAddBatchesDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
             <div class="batch-lines" id="batchRowsContainer"></div>
-            <button class="ghost-button" id="addBatchRowButton" type="button">Добавить строку</button>
+            <div class="batch-dialog-actions">
+                <button class="ghost-button" id="addBatchRowButton" type="button">Добавить строку</button>
+                <button class="ghost-button" id="openXlsImportButton" type="button">Загрузить XLS</button>
+            </div>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelAddBatchesButton" type="button">Отмена</button>
                 <button class="primary" type="submit">Добавить партии в реестр</button>
