@@ -88,6 +88,15 @@ function formatDays(days) {
     return `${days} дн.`;
 }
 
+function formatDateRu(value) {
+    const dateValue = toDateInputValue(value);
+    const match = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return value || '';
+
+    const [, year, month, day] = match;
+    return `${day}.${month}.${year}`;
+}
+
 function toDateInputValue(value) {
     if (!value) return '';
     if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
@@ -185,10 +194,10 @@ function renderRegistry() {
             <td>${escapeHtml(batch.article)}</td>
             <td>${escapeHtml(batch.name)}</td>
             <td>${escapeHtml(batch.quantity)}</td>
-            <td>${escapeHtml(batch.expiryDate)}</td>
+            <td>${escapeHtml(formatDateRu(batch.expiryDate))}</td>
             <td>${formatDays(days)}</td>
             <td><select class="status-select" data-id="${escapeHtml(batch.id)}">${options}</select></td>
-            <td>${escapeHtml(batch.createdAt)}</td>
+            <td>${escapeHtml(formatDateRu(batch.createdAt))}</td>
             <td>
                 <div class="row-actions">
                     <button class="small-button icon-action edit-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Редактировать" aria-label="Редактировать партию">✏️</button>
