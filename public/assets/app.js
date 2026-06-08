@@ -5,6 +5,8 @@ const state = {
     settings: { emails: [], rules: [] },
     history: [],
     registrySort: { field: 'expiryDate', direction: 'asc' },
+    settingsAccessGranted: false,
+    settingsPassword: '',
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -25,9 +27,9 @@ function getApiMethod(action, data = {}) {
     const writeActions = new Set(['create', 'bulk_create', 'update', 'delete']);
 
     // Действие settings используется и для чтения, и для сохранения:
-    // пустой payload читается GET-запросом, payload с настройками сохраняется POST-запросом.
+    // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
     if (action === 'settings') {
-        return Object.keys(data).length === 0 ? 'GET' : 'POST';
+        return Object.prototype.hasOwnProperty.call(data, 'settings') ? 'POST' : 'GET';
     }
     if (readActions.has(action)) return 'GET';
     if (writeActions.has(action)) return 'POST';
@@ -140,6 +142,19 @@ function formatExpiryMonthRu(value) {
 
     const [, year, month] = match;
     return `${month}.${year}`;
+}
+
+function maskExpiryMonthValue(value) {
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 6);
+    return digits.length > 2 ? `${digits.slice(0, 2)}.${digits.slice(2)}` : digits;
+}
+
+function bindExpiryMonthMask(input) {
+    input.value = maskExpiryMonthValue(input.value);
+    // Маска оставляет только цифры и автоматически добавляет точку после месяца.
+    input.addEventListener('input', () => {
+        input.value = maskExpiryMonthValue(input.value);
+    });
 }
 
 function formatDuplicateBatches(duplicates, intro = 'В реестре уже есть эта партия товара') {
@@ -339,9 +354,10 @@ function createBatchRow(values = {}) {
     row.innerHTML = `
         <label>Артикул<input class="batch-row-article" required autocomplete="off" value="${escapeHtml(values.article || '')}"></label>
         <label>Количество в партии<input class="batch-row-quantity" required min="0" step="1" type="number" value="${escapeHtml(values.quantity ?? '')}"></label>
-        <label>Срок годности<input class="batch-row-expiry" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric" value="${escapeHtml(values.expiryDate || '')}"></label>
+        <label>Срок годности<input class="batch-row-expiry" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric" maxlength="7" value="${escapeHtml(values.expiryDate || '')}"></label>
         <button class="small-button danger remove-batch-row-button" type="button" aria-label="Удалить строку">🗑️</button>
     `;
+    bindExpiryMonthMask(row.querySelector('.batch-row-expiry'));
     row.querySelector('.remove-batch-row-button').addEventListener('click', () => {
         row.remove();
         updateBatchRowRemoveButtons();
@@ -454,9 +470,45 @@ async function loadBatches() {
 }
 
 async function loadSettings() {
-    const result = await api('settings');
+    const result = await api('settings', { settings_password: state.settingsPassword });
     state.settings = result.settings || { emails: [], rules: [] };
     renderSettings();
+}
+
+function switchTab(tabName) {
+    qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
+    qs(`[data-tab="${tabName}"]`).classList.add('active');
+    qs(`#tab-${tabName}`).classList.add('active');
+}
+
+function openSettingsPasswordDialog() {
+    qs('#settingsPasswordInput').value = '';
+    qs('#settingsPasswordError').textContent = '';
+    qs('#settingsPasswordDialog').showModal();
+    qs('#settingsPasswordInput').focus();
+}
+
+function closeSettingsPasswordDialog() {
+    qs('#settingsPasswordDialog').close();
+}
+
+async function submitSettingsPassword(event) {
+    event.preventDefault();
+    const input = qs('#settingsPasswordInput');
+    const error = qs('#settingsPasswordError');
+
+    state.settingsPassword = input.value;
+
+    try {
+        await loadSettings();
+        state.settingsAccessGranted = true;
+        closeSettingsPasswordDialog();
+        switchTab('settings');
+    } catch (loadError) {
+        state.settingsPassword = '';
+        error.textContent = loadError.message;
+        input.select();
+    }
 }
 
 function formatHistoryAction(action) {
@@ -475,14 +527,86 @@ function formatHistoryAction(action) {
     return actions[action] || action || '';
 }
 
-function formatHistoryDetails(payload) {
-    if (!payload) return '';
+function parseHistoryPayload(payload) {
+    if (!payload) return {};
     try {
-        const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
-        return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('; ');
+        return typeof payload === 'string' ? JSON.parse(payload) : payload;
     } catch (error) {
-        return String(payload);
+        return { text: String(payload) };
     }
+}
+
+function formatHistoryBatch(batch) {
+    if (!batch) return 'партия не найдена';
+
+    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
+    const expiry = batch.expiry_date || batch.expiryDate
+        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate)}`
+        : 'без указанного срока годности';
+    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
+    const status = batch.status ? `, статус «${batch.status}»` : '';
+
+    return `партия ${article} ${expiry}${quantity}${status}`;
+}
+
+function formatHistoryBatchList(batches) {
+    return (batches || []).map(formatHistoryBatch).join('; ');
+}
+
+function formatChangedFields(before, after) {
+    const changes = [];
+    if (!before || !after) return changes;
+
+    if (before.article && after.article && before.article !== after.article) {
+        changes.push(`артикул изменён с ${before.article} на ${after.article}`);
+    }
+    if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
+        changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date)} на ${formatExpiryMonthRu(after.expiry_date)}`);
+    }
+    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
+        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
+    }
+    if (before.status && after.status && before.status !== after.status) {
+        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
+    }
+
+    return changes;
+}
+
+function formatHistoryDetails(action, payload) {
+    const parsed = parseHistoryPayload(payload);
+
+    if (action === 'create') {
+        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (action === 'bulk_create') {
+        const addedText = parsed.batches && parsed.batches.length
+            ? `Добавлены партии: ${formatHistoryBatchList(parsed.batches)}.`
+            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
+        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
+            ? ` Дубликаты не загружены${parsed.duplicates ? `: ${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
+            : '';
+
+        return `${addedText}${duplicatesText}`;
+    }
+
+    if (action === 'update') {
+        const before = parsed.before || {};
+        const after = parsed.after || parsed;
+        const changes = formatChangedFields(before, after);
+        const changesText = changes.length ? ` ${changes.join('; ')}.` : '';
+        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
+    }
+
+    if (action === 'delete') {
+        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (parsed.text) return parsed.text;
+
+    // Запасной вариант нужен для старых записей истории со служебными полями.
+    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('; ');
 }
 
 async function loadHistory() {
@@ -492,7 +616,7 @@ async function loadHistory() {
     qs('#historyBody').innerHTML = state.history.map((log) => `<tr>
         <td>${escapeHtml(log.createdAt)}</td>
         <td>${escapeHtml(formatHistoryAction(log.event || log.action))}</td>
-        <td>${escapeHtml(formatHistoryDetails(log.details || log.payload))}</td>
+        <td>${escapeHtml(formatHistoryDetails(log.event || log.action, log.details || log.payload))}</td>
     </tr>`).join('') || '<tr><td colspan="3">История пока отсутствует.</td></tr>';
 }
 
@@ -508,7 +632,7 @@ function renderSettings() {
 
 async function persistSettings(partial) {
     state.settings = { ...state.settings, ...partial };
-    const result = await api('settings', { settings: state.settings });
+    const result = await api('settings', { settings_password: state.settingsPassword, settings: state.settings });
     state.settings = result.settings;
     renderSettings();
     showToast('Настройки сохранены.');
@@ -593,19 +717,28 @@ function applyInitialUrlState() {
     if (article) qs('#filterArticle').value = article;
 
     if (params.get('tab') === 'registry') {
-        qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
-        qs('[data-tab="registry"]').classList.add('active');
-        qs('#tab-registry').classList.add('active');
+        switchTab('registry');
     }
 }
 
 function bindEvents() {
-    qsa('.tab').forEach((button) => button.addEventListener('click', () => {
-        qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
-        button.classList.add('active');
-        qs(`#tab-${button.dataset.tab}`).classList.add('active');
+    qsa('.tab').forEach((button) => button.addEventListener('click', async () => {
+        if (button.dataset.tab === 'settings' && !state.settingsAccessGranted) {
+            openSettingsPasswordDialog();
+            return;
+        }
+
+        switchTab(button.dataset.tab);
+        if (button.dataset.tab === 'settings') {
+            await loadSettings();
+        }
     }));
 
+    qs('#settingsPasswordForm').addEventListener('submit', submitSettingsPassword);
+    qs('#cancelSettingsPasswordButton').addEventListener('click', closeSettingsPasswordDialog);
+    qs('#closeSettingsPasswordDialogButton').addEventListener('click', closeSettingsPasswordDialog);
+
+    bindExpiryMonthMask(qs('#editExpiryDate'));
     qs('#editBatchForm').addEventListener('submit', submitEditForm);
     qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
     qs('#cancelEditButton').addEventListener('click', closeEditDialog);
@@ -632,7 +765,7 @@ function bindEvents() {
                 showToast(`Загружено строк: ${result.added || 0}`);
             }
             closeXlsImportDialog();
-            await loadBatches();
+            await Promise.all([loadBatches(), loadHistory()]);
         } catch (error) {
             showToast(error.message, true);
         }
@@ -674,7 +807,7 @@ function batchExportMapper(batch) {
 
 async function bootstrap() {
     try {
-        await Promise.all([loadBatches(), loadSettings(), loadHistory()]);
+        await Promise.all([loadBatches(), loadHistory()]);
         showToast('Данные обновлены.');
     } catch (error) {
         showToast(error.message, true);

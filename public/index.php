@@ -23,8 +23,8 @@ declare(strict_types=1);
     <main class="layout">
         <nav class="tabs" aria-label="Разделы администратора">
             <button class="tab active" data-tab="registry" type="button">Реестр</button>
-            <button class="tab" data-tab="settings" type="button">Настройки</button>
             <button class="tab" data-tab="history" type="button">История</button>
+            <button class="tab" data-tab="settings" type="button">Настройки</button>
         </nav>
 
         <section class="panel active" id="tab-registry">
@@ -149,6 +149,22 @@ declare(strict_types=1);
         </div>
     </dialog>
 
+    <dialog class="modal" id="settingsPasswordDialog">
+        <form class="card form modal-card" id="settingsPasswordForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Доступ к настройкам</h2>
+                <button class="icon-button" id="closeSettingsPasswordDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Введите пароль, чтобы открыть вкладку «Настройки».</p>
+            <label>Пароль<input id="settingsPasswordInput" required autocomplete="current-password" type="password"></label>
+            <p class="field-error" id="settingsPasswordError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelSettingsPasswordButton" type="button">Отмена</button>
+                <button class="primary" type="submit">Открыть настройки</button>
+            </div>
+        </form>
+    </dialog>
+
     <dialog class="modal" id="editBatchDialog">
         <form class="card form modal-card" id="editBatchForm" method="dialog">
             <div class="modal-heading">
@@ -158,7 +174,7 @@ declare(strict_types=1);
             <input id="editBatchId" name="id" type="hidden">
             <label>Артикул<input id="editArticle" name="article" required autocomplete="off"></label>
             <label>Количество в партии<input id="editQuantity" name="quantity" required min="0" step="1" type="number"></label>
-            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric"></label>
+            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric" maxlength="7"></label>
             <label>Статус
                 <select id="editStatus" name="status" required>
                     <option>В наличии</option>

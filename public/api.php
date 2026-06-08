@@ -13,6 +13,7 @@ require_once __DIR__ . '/../app/database.php';
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
 const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта партия товара';
+const SETTINGS_PASSWORD = '8852285';
 
 try {
     $pdo = getDatabaseConnection();
@@ -26,7 +27,7 @@ try {
         $result = match ($action) {
             'list' => ['ok' => true, 'batches' => listBatches($pdo, $_GET)],
             'report' => ['ok' => true, 'batches' => reportBatches($pdo, $_GET)],
-            'settings' => ['ok' => true, 'settings' => getSettings($pdo)],
+            'settings' => getProtectedSettings($pdo, $_GET),
             'logs' => ['ok' => true, 'logs' => getLogs($pdo)],
             default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
         };
@@ -36,7 +37,7 @@ try {
             'bulk_create' => bulkCreateBatches($pdo, $payload['batches'] ?? []),
             'update' => updateBatch($pdo, $payload),
             'delete' => deleteBatch($pdo, $payload),
-            'settings' => saveSettings($pdo, $payload['settings'] ?? $payload),
+            'settings' => saveProtectedSettings($pdo, $payload),
             default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
         };
     }
@@ -143,7 +144,7 @@ function buildBatchFilters(array $filters): array
     return [$conditions ? 'WHERE ' . implode(' AND ', $conditions) : '', $params];
 }
 
-function createBatch(PDO $pdo, array $payload): array
+function createBatch(PDO $pdo, array $payload, bool $writeHistory = true): array
 {
     $batch = normalizeBatchPayload($payload);
     if (batchAlreadyExists($pdo, $batch['article'], $batch['expiry_date'])) {
@@ -151,9 +152,12 @@ function createBatch(PDO $pdo, array $payload): array
     }
 
     $id = insertBatch($pdo, $batch);
-    writeLog($pdo, 'create', ['id' => $id, 'article' => $batch['article']]);
+    $batchInfo = historyBatchInfo($batch, $id);
+    if ($writeHistory) {
+        writeLog($pdo, 'create', ['batch' => $batchInfo]);
+    }
 
-    return ['ok' => true, 'id' => $id, 'duplicate' => false];
+    return ['ok' => true, 'id' => $id, 'duplicate' => false, 'batch' => $batchInfo];
 }
 
 function bulkCreateBatches(PDO $pdo, array $batches): array
@@ -163,12 +167,13 @@ function bulkCreateBatches(PDO $pdo, array $batches): array
         $added = 0;
         $skippedDuplicates = 0;
         $duplicates = [];
+        $createdBatches = [];
         foreach ($batches as $batch) {
             if (!is_array($batch)) {
                 continue;
             }
 
-            $result = createBatch($pdo, $batch);
+            $result = createBatch($pdo, $batch, false);
             if (!empty($result['duplicate'])) {
                 $skippedDuplicates++;
                 $duplicates[] = $result['duplicate_batch'];
@@ -176,9 +181,14 @@ function bulkCreateBatches(PDO $pdo, array $batches): array
             }
 
             $added++;
+            $createdBatches[] = $result['batch'];
         }
         $pdo->commit();
-        writeLog($pdo, 'bulk_create', ['added' => $added, 'skipped_duplicates' => $skippedDuplicates]);
+        writeLog($pdo, 'bulk_create', [
+            'batches' => $createdBatches,
+            'duplicates' => $duplicates,
+            'skipped_duplicates' => $skippedDuplicates,
+        ]);
         return [
             'ok' => true,
             'added' => $added,
@@ -199,6 +209,7 @@ function updateBatch(PDO $pdo, array $payload): array
         throw new InvalidArgumentException('Не указан id партии для обновления.');
     }
 
+    $previousBatch = findBatchForHistory($pdo, $id);
     $batch = normalizeBatchPayload($payload, false);
     $statement = $pdo->prepare(
         'UPDATE batches
@@ -213,7 +224,10 @@ function updateBatch(PDO $pdo, array $payload): array
     );
     $params = buildUpdateBatchParams($batch, $id);
     $statement->execute($params);
-    writeLog($pdo, 'update', ['id' => $id, 'article' => $batch['article'], 'status' => $batch['status']]);
+    writeLog($pdo, 'update', [
+        'before' => $previousBatch,
+        'after' => historyBatchInfo($batch, $id),
+    ]);
 
     return ['ok' => true];
 }
@@ -275,6 +289,27 @@ function insertBatch(PDO $pdo, array $batch): int
     return (int)$pdo->lastInsertId();
 }
 
+function findBatchForHistory(PDO $pdo, int $id): array
+{
+    $statement = $pdo->prepare('SELECT id, article, quantity, expiry_date, status FROM batches WHERE id = :id');
+    $statement->execute([':id' => $id]);
+    $row = $statement->fetch();
+
+    return $row ? historyBatchInfo($row, $id) : ['id' => $id];
+}
+
+function historyBatchInfo(array $batch, ?int $id = null): array
+{
+    // В истории сохраняем только понятные пользователю поля партии.
+    return [
+        'id' => $id ?? (isset($batch['id']) ? (int)$batch['id'] : null),
+        'article' => (string)($batch['article'] ?? ''),
+        'quantity' => isset($batch['quantity']) ? (int)$batch['quantity'] : null,
+        'expiry_date' => (string)($batch['expiry_date'] ?? ''),
+        'status' => (string)($batch['status'] ?? ''),
+    ];
+}
+
 function calculateDaysLeft(string $expiryDate): int
 {
     $today = new DateTimeImmutable('today');
@@ -290,13 +325,11 @@ function deleteBatch(PDO $pdo, array $payload): array
         throw new InvalidArgumentException('Не указан id партии для удаления.');
     }
 
-    $selectStatement = $pdo->prepare('SELECT article FROM batches WHERE id = :id');
-    $selectStatement->execute([':id' => $id]);
-    $deletedBatch = $selectStatement->fetch() ?: [];
+    $deletedBatch = findBatchForHistory($pdo, $id);
 
     $statement = $pdo->prepare('DELETE FROM batches WHERE id = :id');
     $statement->execute([':id' => $id]);
-    writeLog($pdo, 'delete', ['id' => $id, 'article' => $deletedBatch['article'] ?? '']);
+    writeLog($pdo, 'delete', ['batch' => $deletedBatch]);
 
     return ['ok' => true];
 }
@@ -364,6 +397,27 @@ function normalizeBatchRow(array $row): array
         'status' => $row['status'],
         'updated_at' => $row['updated_at'],
     ];
+}
+
+function getProtectedSettings(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    return ['ok' => true, 'settings' => getSettings($pdo)];
+}
+
+function saveProtectedSettings(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    return saveSettings($pdo, $payload['settings'] ?? $payload);
+}
+
+function assertSettingsPassword(array $payload): void
+{
+    if ((string)($payload['settings_password'] ?? '') !== SETTINGS_PASSWORD) {
+        throw new InvalidArgumentException('Неверный пароль для вкладки «Настройки».');
+    }
 }
 
 function getSettings(PDO $pdo): array
