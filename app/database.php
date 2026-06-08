@@ -12,7 +12,7 @@ function getDatabaseConnection(): PDO
     $host = getenv('DB_HOST') ?: 'localhost';
     $database = getenv('DB_NAME') ?: 'sroki_godnosti';
     $user = getenv('DB_USER') ?: 'sroki';
-    $password = getenv('DB_PASSWORD') ?: '8852285';
+    $password = getenv('DB_PASSWORD') ?: '';
     $charset = getenv('DB_CHARSET') ?: 'utf8mb4';
 
     $dsn = "mysql:host={$host};dbname={$database};charset={$charset}";
