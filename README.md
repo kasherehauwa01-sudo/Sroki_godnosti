@@ -168,7 +168,17 @@ export DB_CHARSET=utf8mb4
 export SETTINGS_PASSWORD='YOUR_SETTINGS_PASSWORD'
 ```
 
-Если переменные окружения недоступны, создайте локальный `app/config.php` на сервере и не добавляйте его в git. Приложение автоматически подключает этот файл при старте, поэтому в нём можно задать `DB_PASSWORD`, `SMTP_PASSWORD` и другие переменные через `putenv(...)`.
+Если переменные окружения недоступны, создайте локальный `app/config.php` на сервере и не добавляйте его в git. Приложение автоматически подключает этот файл при старте. В нём можно задать переменные через `putenv(...)` или вернуть массив с параметрами БД:
+
+```php
+return [
+    'db_host' => 'localhost',
+    'db_name' => 'sroki_godnosti',
+    'db_user' => 'sroki',
+    'db_password' => 'YOUR_DB_PASSWORD',
+    'db_charset' => 'utf8mb4',
+];
+```
 
 ## Размещение проекта на Timeweb
 

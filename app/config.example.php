@@ -18,4 +18,13 @@ putenv('SMTP_USERNAME=vr-vk@yandex.ru');
 putenv('SMTP_PASSWORD=YOUR_APP_PASSWORD');
 putenv('SMTP_FROM_NAME=Сроки годности');
 putenv('APP_URL=https://kvasmix.ru/vr/sroki_godnosti/');
-putenv('SETTINGS_PASSWORD=YOUR_SETTINGS_PASSWORD');
+
+// Альтернативно app/config.php может вернуть массив. Это удобно для веб-интерфейса,
+// если веб-сервер не видит переменные окружения:
+// return [
+//     'db_host' => 'localhost',
+//     'db_name' => 'sroki_godnosti',
+//     'db_user' => 'sroki',
+//     'db_password' => 'YOUR_DB_PASSWORD',
+//     'db_charset' => 'utf8mb4',
+// ];
