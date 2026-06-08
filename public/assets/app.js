@@ -4,6 +4,7 @@ const state = {
     importRows: [],
     settings: { emails: [], rules: [] },
     history: [],
+    registrySort: { field: '', direction: 'asc' },
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -97,6 +98,13 @@ function formatDateRu(value) {
     return `${day}.${month}.${year}`;
 }
 
+function formatDuplicateBatches(duplicates) {
+    const rows = (duplicates || [])
+        .filter(Boolean)
+        .map((batch) => `Артикул: ${batch.article}, срок годности: ${formatDateRu(batch.expiry_date || batch.expiryDate)}`);
+    return ['В реестре уже есть эта партия товара', ...rows].join('\n');
+}
+
 function toDateInputValue(value) {
     if (!value) return '';
     if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
@@ -156,11 +164,14 @@ function getRowValue(row, aliases) {
 }
 
 function normalizeBatch(row) {
+    const quantityRaw = getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']);
+
     return {
         id: String(getRowValue(row, ['id', 'ID']) || crypto.randomUUID()),
         createdAt: toDateInputValue(getRowValue(row, ['createdAt', 'created_at', 'Дата внесения'])) || new Date().toISOString().slice(0, 10),
         article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара', 'Артикул.'])).trim(),
-        quantity: Number(getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']) || 0),
+        quantity: Number(quantityRaw || 0),
+        hasQuantity: String(quantityRaw).trim() !== '',
         expiryDate: toDateInputValue(getRowValue(row, ['expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности до.', 'Срок годности', 'Годен до', 'Срокгодностидо'])),
         daysLeft: Number.isFinite(Number(row.daysLeft ?? row.days_left)) ? Number(row.daysLeft ?? row.days_left) : null,
         status: getRowValue(row, ['status', 'Статус партии']) || 'В наличии',
@@ -183,6 +194,8 @@ function renderRegistry() {
             && (!filters.status || batch.status === filters.status)
             && (!filters.days_to || (filters.days_to === 'expired' ? days < 0 : days >= 0 && days <= Number(filters.days_to)));
     });
+    sortRegistryRows();
+    updateSortButtons();
 
     qs('#registryBody').innerHTML = state.filteredBatches.map((batch) => {
         const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
@@ -206,6 +219,30 @@ function renderRegistry() {
     qsa('.status-select').forEach((select) => select.addEventListener('change', onStatusChange));
     qsa('.edit-batch-button').forEach((button) => button.addEventListener('click', () => openEditDialog(button.dataset.id)));
     qsa('.delete-batch-button').forEach((button) => button.addEventListener('click', () => deleteBatch(button.dataset.id)));
+}
+
+function sortRegistryRows() {
+    const { field, direction } = state.registrySort;
+    if (!field) return;
+
+    const multiplier = direction === 'desc' ? -1 : 1;
+    state.filteredBatches.sort((left, right) => toDateInputValue(left[field]).localeCompare(toDateInputValue(right[field])) * multiplier);
+}
+
+function updateSortButtons() {
+    qsa('[data-sort-indicator]').forEach((indicator) => {
+        indicator.textContent = state.registrySort.field === indicator.dataset.sortIndicator
+            ? (state.registrySort.direction === 'asc' ? '↑' : '↓')
+            : '';
+    });
+}
+
+function toggleRegistrySort(field) {
+    state.registrySort = {
+        field,
+        direction: state.registrySort.field === field && state.registrySort.direction === 'asc' ? 'desc' : 'asc',
+    };
+    renderRegistry();
 }
 
 async function onStatusChange(event) {
@@ -261,7 +298,7 @@ async function submitEditForm(event) {
 async function deleteBatch(id) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
-    if (!confirm(`Удалить партию ${batch.article}?`)) return;
+    if (!confirm('Уверены, что хотите удалить партию безвозвратно?')) return;
 
     try {
         await api('delete', { id });
@@ -388,14 +425,14 @@ function readXlsx(file) {
             const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: false });
             const detectedHeaders = rawRows[0] ? Object.keys(rawRows[0]).join(', ') : 'не найдены';
             const normalizedRows = rawRows.map(normalizeBatch);
-            state.importRows = normalizedRows.filter((row) => row.article && row.expiryDate);
+            state.importRows = normalizedRows.filter((row) => row.article && row.hasQuantity && row.expiryDate);
             const skipped = normalizedRows.length - state.importRows.length;
             const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.quantity} — ${row.expiryDate}`).join('\n');
             qs('#importPreview').textContent = [
                 `Файл: ${file.name}`,
                 `Найдено строк: ${rawRows.length}`,
                 `Готово к загрузке: ${state.importRows.length}`,
-                skipped > 0 ? `Пропущено строк без артикула или срока годности: ${skipped}` : '',
+                skipped > 0 ? `Пропущено строк без артикула, количества или срока годности: ${skipped}` : '',
                 `Распознанные заголовки: ${detectedHeaders}`,
                 exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте, что первая строка — это заголовки: Артикул, Количество, Срок годности до.',
             ].filter(Boolean).join('\n');
@@ -454,7 +491,7 @@ function bindEvents() {
         try {
             const result = await api('create', batch);
             if (result.duplicate) {
-                showToast(result.message || 'В реестре уже есть эта партия товара', true);
+                alert(formatDuplicateBatches(result.duplicates || [result.duplicate_batch]));
                 return;
             }
             event.target.reset();
@@ -471,7 +508,8 @@ function bindEvents() {
         try {
             const result = await api('bulk_create', { batches: state.importRows });
             if (Number(result.skipped_duplicates || 0) > 0) {
-                showToast(`Загружено строк: ${result.added || 0}. ${result.message || 'В реестре уже есть эта партия товара'}: ${result.skipped_duplicates}`);
+                alert(formatDuplicateBatches(result.duplicates));
+                showToast(`Загружено строк: ${result.added || 0}. Пропущено дублей: ${result.skipped_duplicates}`);
             } else {
                 showToast(`Загружено строк: ${result.added || 0}`);
             }
@@ -486,6 +524,7 @@ function bindEvents() {
     });
 
     ['#filterArticle', '#filterStatus', '#filterDaysTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
+    qsa('[data-sort]').forEach((button) => button.addEventListener('click', () => toggleRegistrySort(button.dataset.sort)));
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
     qs('#exportAllButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.batches), 'reestr_vse_partii.xlsx', batchExportMapper));

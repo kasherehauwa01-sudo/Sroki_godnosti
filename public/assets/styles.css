@@ -49,6 +49,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 table { width: 100%; border-collapse: collapse; min-width: 760px; }
 th, td { padding: 13px 14px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
 th { background: #f8fafc; color: #475569; position: sticky; top: 0; z-index: 1; }
+.sort-button { display: inline-flex; align-items: center; gap: 6px; padding: 0; min-height: auto; background: transparent; color: inherit; border-radius: 0; font: inherit; }
+.sort-indicator { min-width: 12px; color: var(--primary); }
 tr.indicator-yellow td { background: var(--yellow); }
 tr.indicator-orange td { background: var(--orange); }
 tr.indicator-red td { background: var(--red); }

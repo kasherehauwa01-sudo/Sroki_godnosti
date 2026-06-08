@@ -147,7 +147,7 @@ function createBatch(PDO $pdo, array $payload): array
 {
     $batch = normalizeBatchPayload($payload);
     if (batchAlreadyExists($pdo, $batch['article'], $batch['expiry_date'])) {
-        return ['ok' => true, 'duplicate' => true, 'message' => DUPLICATE_BATCH_MESSAGE];
+        return ['ok' => true, 'duplicate' => true, 'message' => DUPLICATE_BATCH_MESSAGE, 'duplicate_batch' => duplicateBatchInfo($batch)];
     }
 
     $id = insertBatch($pdo, $batch);
@@ -162,6 +162,7 @@ function bulkCreateBatches(PDO $pdo, array $batches): array
     try {
         $added = 0;
         $skippedDuplicates = 0;
+        $duplicates = [];
         foreach ($batches as $batch) {
             if (!is_array($batch)) {
                 continue;
@@ -170,6 +171,7 @@ function bulkCreateBatches(PDO $pdo, array $batches): array
             $result = createBatch($pdo, $batch);
             if (!empty($result['duplicate'])) {
                 $skippedDuplicates++;
+                $duplicates[] = $result['duplicate_batch'];
                 continue;
             }
 
@@ -181,6 +183,7 @@ function bulkCreateBatches(PDO $pdo, array $batches): array
             'ok' => true,
             'added' => $added,
             'skipped_duplicates' => $skippedDuplicates,
+            'duplicates' => $duplicates,
             'message' => $skippedDuplicates > 0 ? DUPLICATE_BATCH_MESSAGE : '',
         ];
     } catch (Throwable $error) {
@@ -253,6 +256,14 @@ function batchAlreadyExists(PDO $pdo, string $article, string $expiryDate): bool
     return (int)$statement->fetchColumn() > 0;
 }
 
+function duplicateBatchInfo(array $batch): array
+{
+    return [
+        'article' => $batch['article'],
+        'expiry_date' => $batch['expiry_date'],
+    ];
+}
+
 function insertBatch(PDO $pdo, array $batch): int
 {
     $statement = $pdo->prepare(
@@ -295,11 +306,12 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
     $createdAt = (string)($payload['created_at'] ?? $payload['createdAt'] ?? date('Y-m-d H:i:s'));
     $article = trim((string)($payload['article'] ?? $payload['Артикул'] ?? ''));
     $name = trim((string)($payload['name'] ?? ''));
-    $quantity = (int)($payload['quantity'] ?? $payload['Количество в партии'] ?? 0);
+    $quantityValue = $payload['quantity'] ?? $payload['Количество в партии'] ?? null;
+    $quantity = (int)($quantityValue ?? 0);
     $expiryDate = normalizeDate((string)($payload['expiry_date'] ?? $payload['expiryDate'] ?? $payload['Срок годности до'] ?? ''));
     $status = (string)($payload['status'] ?? $payload['Статус партии'] ?? ACTIVE_STATUS);
-    if ($article === '' || $expiryDate === '') {
-        throw new InvalidArgumentException('Заполните артикул и срок годности.');
+    if ($article === '' || $quantityValue === null || trim((string)$quantityValue) === '' || $expiryDate === '') {
+        throw new InvalidArgumentException('Заполните артикул, количество и срок годности.');
     }
     if (!in_array($status, array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES), true)) {
         throw new InvalidArgumentException('Недопустимый статус партии.');
