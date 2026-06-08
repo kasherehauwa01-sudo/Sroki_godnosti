@@ -295,7 +295,15 @@ function sortRegistryRows() {
     if (!field) return;
 
     const multiplier = direction === 'desc' ? -1 : 1;
-    state.filteredBatches.sort((left, right) => toDateInputValue(left[field]).localeCompare(toDateInputValue(right[field])) * multiplier);
+    state.filteredBatches.sort((left, right) => {
+        if (field === 'daysLeft') {
+            const leftDays = left.daysLeft ?? daysLeft(left.expiryDate);
+            const rightDays = right.daysLeft ?? daysLeft(right.expiryDate);
+            return (leftDays - rightDays) * multiplier;
+        }
+
+        return toDateInputValue(left[field]).localeCompare(toDateInputValue(right[field])) * multiplier;
+    });
 }
 
 function updateSortButtons() {
