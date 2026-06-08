@@ -23,8 +23,8 @@ declare(strict_types=1);
     <main class="layout">
         <nav class="tabs" aria-label="Разделы администратора">
             <button class="tab active" data-tab="registry" type="button">Реестр</button>
-            <button class="tab" data-tab="settings" type="button">Настройки</button>
             <button class="tab" data-tab="history" type="button">История</button>
+            <button class="tab" data-tab="settings" type="button">Настройки</button>
         </nav>
 
         <section class="panel active" id="tab-registry">
