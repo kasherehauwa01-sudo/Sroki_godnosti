@@ -7,6 +7,11 @@
  */
 declare(strict_types=1);
 
+$configFile = __DIR__ . '/config.php';
+if (is_file($configFile)) {
+    require_once $configFile;
+}
+
 function getDatabaseConnection(): PDO
 {
     $host = getenv('DB_HOST') ?: 'localhost';

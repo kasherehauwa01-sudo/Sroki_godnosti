@@ -423,15 +423,21 @@ function sendTestNotification(PDO $pdo, array $payload): array
 
     $body = buildTestNotificationBody($batch);
     $subject = 'Тест уведомления о сроке годности';
-    $sent = sendEmail($emails, $subject, $body);
-    writeLog($pdo, $sent ? 'test_notification_sent' : 'test_notification_failed', [
-        'emails' => $emails,
-        'article' => $batch['article'] ?? '',
-        'days_left' => (int)($batch['days_left'] ?? 0),
-    ]);
-
-    if (!$sent) {
-        throw new RuntimeException('Не удалось отправить тестовое уведомление.');
+    try {
+        sendEmail($emails, $subject, $body);
+        writeLog($pdo, 'test_notification_sent', [
+            'emails' => $emails,
+            'article' => $batch['article'] ?? '',
+            'days_left' => (int)($batch['days_left'] ?? 0),
+        ]);
+    } catch (Throwable $error) {
+        writeLog($pdo, 'test_notification_failed', [
+            'emails' => $emails,
+            'article' => $batch['article'] ?? '',
+            'days_left' => (int)($batch['days_left'] ?? 0),
+            'error' => $error->getMessage(),
+        ]);
+        throw $error;
     }
 
     return ['ok' => true, 'message' => 'Тестовое уведомление отправлено.'];
@@ -460,12 +466,12 @@ function buildTestNotificationBody(array $batch): string
     );
 }
 
-function sendEmail(array $emails, string $subject, string $body): bool
+function sendEmail(array $emails, string $subject, string $body): void
 {
     $smtpPassword = getenv('SMTP_PASSWORD') ?: '';
     if ($smtpPassword !== '') {
         sendSmtpEmail($emails, $subject, $body);
-        return true;
+        return;
     }
 
     $headers = [
@@ -475,7 +481,10 @@ function sendEmail(array $emails, string $subject, string $body): bool
         'Reply-To: ' . SENDER_EMAIL,
     ];
 
-    return mail(implode(',', $emails), $subject, $body, implode("\r\n", $headers), '-f ' . SENDER_EMAIL);
+    $sent = mail(implode(',', $emails), $subject, $body, implode("\r\n", $headers), '-f ' . SENDER_EMAIL);
+    if (!$sent) {
+        throw new RuntimeException('Не удалось отправить письмо через mail(). Задайте SMTP_PASSWORD в переменных окружения или локальном app/config.php.');
+    }
 }
 
 function sendSmtpEmail(array $emails, string $subject, string $body): void
