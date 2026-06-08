@@ -13,6 +13,7 @@ require_once __DIR__ . '/../app/database.php';
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
 const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта партия товара';
+const SETTINGS_PASSWORD_HASH = 'ff10705eafbaa3ff925fb0429d4b3f10379a4dd9dc1725654bbe0a5c9ce1a10f';
 const WRITE_OFF_PASSWORD_HASH = '321a31af6798d259093855414aba2906cb8f51cdd734d0f848a3504a9ff4642e';
 
 try {
@@ -434,11 +435,8 @@ function saveProtectedSettings(PDO $pdo, array $payload): array
 
 function assertSettingsPassword(array $payload): void
 {
-    $settingsPassword = getenv('SETTINGS_PASSWORD') ?: '';
-    if ($settingsPassword === '') {
-        throw new RuntimeException('Для доступа к настройкам задайте SETTINGS_PASSWORD в окружении.');
-    }
-    if ((string)($payload['settings_password'] ?? '') !== $settingsPassword) {
+    $password = (string)($payload['settings_password'] ?? '');
+    if (!hash_equals(SETTINGS_PASSWORD_HASH, hash('sha256', $password))) {
         throw new InvalidArgumentException('Неверный пароль для вкладки «Настройки».');
     }
 }

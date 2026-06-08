@@ -168,8 +168,6 @@ export DB_CHARSET=utf8mb4
 export SETTINGS_PASSWORD='YOUR_SETTINGS_PASSWORD'
 ```
 
-`SETTINGS_PASSWORD` — пароль для вкладки «Настройки». Значение задаётся только в окружении или локальном `app/config.php`, не в коде репозитория.
-
 Если переменные окружения недоступны, создайте локальный `app/config.php` на сервере и не добавляйте его в git.
 
 ## Размещение проекта на Timeweb
