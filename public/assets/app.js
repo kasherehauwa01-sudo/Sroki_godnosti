@@ -160,7 +160,6 @@ function normalizeBatch(row) {
         id: String(getRowValue(row, ['id', 'ID']) || crypto.randomUUID()),
         createdAt: toDateInputValue(getRowValue(row, ['createdAt', 'created_at', 'Дата внесения'])) || new Date().toISOString().slice(0, 10),
         article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара', 'Артикул.'])).trim(),
-        name: String(getRowValue(row, ['name', 'Наименование', 'Наименование товара', 'Товар', 'Наименованиетовара'])).trim(),
         quantity: Number(getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']) || 0),
         expiryDate: toDateInputValue(getRowValue(row, ['expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности до.', 'Срок годности', 'Годен до', 'Срокгодностидо'])),
         daysLeft: Number.isFinite(Number(row.daysLeft ?? row.days_left)) ? Number(row.daysLeft ?? row.days_left) : null,
@@ -171,7 +170,6 @@ function normalizeBatch(row) {
 function getFilterParams() {
     return {
         article: qs('#filterArticle').value.trim(),
-        name: qs('#filterName').value.trim(),
         status: qs('#filterStatus').value,
         days_to: qs('#filterDaysTo').value,
     };
@@ -182,7 +180,6 @@ function renderRegistry() {
     state.filteredBatches = state.batches.filter((batch) => {
         const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
         return (!filters.article || batch.article.toLowerCase().includes(filters.article.toLowerCase()))
-            && (!filters.name || batch.name.toLowerCase().includes(filters.name.toLowerCase()))
             && (!filters.status || batch.status === filters.status)
             && (!filters.days_to || (filters.days_to === 'expired' ? days < 0 : days >= 0 && days <= Number(filters.days_to)));
     });
@@ -192,7 +189,6 @@ function renderRegistry() {
         const options = statusOptions.map((option) => `<option ${option === batch.status ? 'selected' : ''}>${option}</option>`).join('');
         return `<tr class="${indicatorClass(days)}">
             <td>${escapeHtml(batch.article)}</td>
-            <td>${escapeHtml(batch.name)}</td>
             <td>${escapeHtml(batch.quantity)}</td>
             <td>${escapeHtml(formatDateRu(batch.expiryDate))}</td>
             <td>${formatDays(days)}</td>
@@ -205,7 +201,7 @@ function renderRegistry() {
                 </div>
             </td>
         </tr>`;
-    }).join('') || '<tr><td colspan="8">Партий не найдено.</td></tr>';
+    }).join('') || '<tr><td colspan="7">Партий не найдено.</td></tr>';
 
     qsa('.status-select').forEach((select) => select.addEventListener('change', onStatusChange));
     qsa('.edit-batch-button').forEach((button) => button.addEventListener('click', () => openEditDialog(button.dataset.id)));
@@ -234,7 +230,6 @@ function openEditDialog(id) {
 
     qs('#editBatchId').value = batch.id;
     qs('#editArticle').value = batch.article;
-    qs('#editName').value = batch.name;
     qs('#editQuantity').value = batch.quantity;
     qs('#editExpiryDate').value = batch.expiryDate;
     qs('#editStatus').value = batch.status;
@@ -266,7 +261,7 @@ async function submitEditForm(event) {
 async function deleteBatch(id) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
-    if (!confirm(`Удалить партию ${batch.article} — ${batch.name}?`)) return;
+    if (!confirm(`Удалить партию ${batch.article}?`)) return;
 
     try {
         await api('delete', { id });
@@ -363,11 +358,10 @@ function downloadTemplateXlsx() {
     }
 
     const worksheet = XLSX.utils.aoa_to_sheet([
-        ['Артикул', 'Наименование', 'Количество', 'Срок годности до'],
+        ['Артикул', 'Количество', 'Срок годности до'],
     ]);
     worksheet['!cols'] = [
         { wch: 18 },
-        { wch: 34 },
         { wch: 14 },
         { wch: 18 },
     ];
@@ -394,16 +388,16 @@ function readXlsx(file) {
             const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: false });
             const detectedHeaders = rawRows[0] ? Object.keys(rawRows[0]).join(', ') : 'не найдены';
             const normalizedRows = rawRows.map(normalizeBatch);
-            state.importRows = normalizedRows.filter((row) => row.article && row.name && row.expiryDate);
+            state.importRows = normalizedRows.filter((row) => row.article && row.expiryDate);
             const skipped = normalizedRows.length - state.importRows.length;
-            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.name} — ${row.quantity} — ${row.expiryDate}`).join('\n');
+            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.quantity} — ${row.expiryDate}`).join('\n');
             qs('#importPreview').textContent = [
                 `Файл: ${file.name}`,
                 `Найдено строк: ${rawRows.length}`,
                 `Готово к загрузке: ${state.importRows.length}`,
-                skipped > 0 ? `Пропущено строк без артикула, наименования или срока годности: ${skipped}` : '',
+                skipped > 0 ? `Пропущено строк без артикула или срока годности: ${skipped}` : '',
                 `Распознанные заголовки: ${detectedHeaders}`,
-                exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте, что первая строка — это заголовки: Артикул, Наименование, Количество, Срок годности до.',
+                exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте, что первая строка — это заголовки: Артикул, Количество, Срок годности до.',
             ].filter(Boolean).join('\n');
             qs('#importButton').disabled = state.importRows.length === 0;
         } catch (error) {
@@ -423,7 +417,7 @@ function readXlsx(file) {
 }
 
 function resetRegistryFilters() {
-    ['#filterArticle', '#filterName', '#filterDaysTo'].forEach((selector) => {
+    ['#filterArticle', '#filterDaysTo'].forEach((selector) => {
         qs(selector).value = '';
     });
     qs('#filterStatus').value = '';
@@ -491,7 +485,7 @@ function bindEvents() {
         }
     });
 
-    ['#filterArticle', '#filterName', '#filterStatus', '#filterDaysTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
+    ['#filterArticle', '#filterStatus', '#filterDaysTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
     qs('#exportAllButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.batches), 'reestr_vse_partii.xlsx', batchExportMapper));
@@ -516,7 +510,6 @@ function batchExportMapper(batch) {
     const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
     return {
         Артикул: batch.article,
-        Наименование: batch.name,
         Количество: batch.quantity,
         'Срок годности': batch.expiryDate,
         'Остаток дней': formatDays(days),

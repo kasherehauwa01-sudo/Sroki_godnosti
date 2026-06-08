@@ -31,7 +31,7 @@ try {
 
     $placeholders = implode(',', array_fill(0, count(NOTIFICATION_DAYS), '?'));
     $statement = $pdo->prepare(
-        "SELECT article, name, quantity, expiry_date, days_left
+        "SELECT article, quantity, expiry_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND (days_left < 0 OR days_left IN ($placeholders))
          ORDER BY days_left ASC, expiry_date ASC, article ASC"
@@ -193,7 +193,6 @@ function buildBatchNotificationText(array $batch, string $appUrl): string
     return implode("\n", [
         $prefix,
         'Артикул: ' . $batch['article'] . '.',
-        'Наименование: ' . $batch['name'] . '.',
         'Количество: ' . $batch['quantity'] . '.',
         'Срок годности: ' . date('d.m.Y', strtotime((string)$batch['expiry_date'])) . '.',
         'Актуализируйте статус товара в реестре партий.',

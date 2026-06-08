@@ -102,18 +102,15 @@ function buildBatchFilters(array $filters): array
     $conditions = [];
     $params = [];
 
-    foreach (['article', 'name'] as $field) {
-        if (isset($filters[$field]) && trim((string)$filters[$field]) !== '') {
-            $conditions[] = "$field LIKE :$field";
-            $params[":$field"] = '%' . trim((string)$filters[$field]) . '%';
-        }
+    if (isset($filters['article']) && trim((string)$filters['article']) !== '') {
+        $conditions[] = 'article LIKE :article';
+        $params[':article'] = '%' . trim((string)$filters['article']) . '%';
     }
 
     if (!empty($filters['search'])) {
-        $conditions[] = '(article LIKE :search_article OR name LIKE :search_name)';
+        $conditions[] = 'article LIKE :search_article';
         $searchValue = '%' . trim((string)$filters['search']) . '%';
         $params[':search_article'] = $searchValue;
-        $params[':search_name'] = $searchValue;
     }
 
     if (!empty($filters['status'])) {
@@ -282,13 +279,13 @@ function deleteBatch(PDO $pdo, array $payload): array
         throw new InvalidArgumentException('Не указан id партии для удаления.');
     }
 
-    $selectStatement = $pdo->prepare('SELECT article, name FROM batches WHERE id = :id');
+    $selectStatement = $pdo->prepare('SELECT article FROM batches WHERE id = :id');
     $selectStatement->execute([':id' => $id]);
     $deletedBatch = $selectStatement->fetch() ?: [];
 
     $statement = $pdo->prepare('DELETE FROM batches WHERE id = :id');
     $statement->execute([':id' => $id]);
-    writeLog($pdo, 'delete', ['id' => $id, 'article' => $deletedBatch['article'] ?? '', 'name' => $deletedBatch['name'] ?? '']);
+    writeLog($pdo, 'delete', ['id' => $id, 'article' => $deletedBatch['article'] ?? '']);
 
     return ['ok' => true];
 }
@@ -297,12 +294,12 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
 {
     $createdAt = (string)($payload['created_at'] ?? $payload['createdAt'] ?? date('Y-m-d H:i:s'));
     $article = trim((string)($payload['article'] ?? $payload['Артикул'] ?? ''));
-    $name = trim((string)($payload['name'] ?? $payload['Наименование'] ?? ''));
+    $name = trim((string)($payload['name'] ?? ''));
     $quantity = (int)($payload['quantity'] ?? $payload['Количество в партии'] ?? 0);
     $expiryDate = normalizeDate((string)($payload['expiry_date'] ?? $payload['expiryDate'] ?? $payload['Срок годности до'] ?? ''));
     $status = (string)($payload['status'] ?? $payload['Статус партии'] ?? ACTIVE_STATUS);
-    if ($article === '' || $name === '' || $expiryDate === '') {
-        throw new InvalidArgumentException('Заполните артикул, наименование и срок годности.');
+    if ($article === '' || $expiryDate === '') {
+        throw new InvalidArgumentException('Заполните артикул и срок годности.');
     }
     if (!in_array($status, array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES), true)) {
         throw new InvalidArgumentException('Недопустимый статус партии.');
