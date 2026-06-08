@@ -13,6 +13,7 @@ require_once __DIR__ . '/../app/database.php';
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
 const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта партия товара';
+const SENDER_EMAIL = 'vr-vk@yandex.ru';
 const SETTINGS_PASSWORD_HASH = 'ff10705eafbaa3ff925fb0429d4b3f10379a4dd9dc1725654bbe0a5c9ce1a10f';
 const WRITE_OFF_PASSWORD_HASH = '321a31af6798d259093855414aba2906cb8f51cdd734d0f848a3504a9ff4642e';
 
@@ -39,6 +40,7 @@ try {
             'update' => updateBatch($pdo, $payload),
             'delete' => deleteBatch($pdo, $payload),
             'settings' => saveProtectedSettings($pdo, $payload),
+            'test_notification' => sendTestNotification($pdo, $payload),
             'verify_write_off' => verifyWriteOffPassword($payload),
             default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
         };
@@ -402,6 +404,149 @@ function normalizeBatchRow(array $row): array
         'status' => $row['status'],
         'updated_at' => $row['updated_at'],
     ];
+}
+
+function sendTestNotification(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    $settings = getSettings($pdo);
+    $emails = $settings['emails'] ?? [];
+    if (!$emails) {
+        throw new RuntimeException('Добавьте хотя бы одного получателя перед отправкой тестового уведомления.');
+    }
+
+    $batch = findNearestExpiringBatch($pdo);
+    if (!$batch) {
+        throw new RuntimeException('В реестре нет партий со статусом «В наличии» и будущим сроком годности.');
+    }
+
+    $body = buildTestNotificationBody($batch);
+    $subject = 'Тест уведомления о сроке годности';
+    $sent = sendEmail($emails, $subject, $body);
+    writeLog($pdo, $sent ? 'test_notification_sent' : 'test_notification_failed', [
+        'emails' => $emails,
+        'article' => $batch['article'] ?? '',
+        'days_left' => (int)($batch['days_left'] ?? 0),
+    ]);
+
+    if (!$sent) {
+        throw new RuntimeException('Не удалось отправить тестовое уведомление.');
+    }
+
+    return ['ok' => true, 'message' => 'Тестовое уведомление отправлено.'];
+}
+
+function findNearestExpiringBatch(PDO $pdo): ?array
+{
+    $statement = $pdo->query(
+        "SELECT article, days_left
+         FROM batches
+         WHERE status = 'В наличии' AND days_left >= 0
+         ORDER BY days_left ASC, expiry_date ASC, article ASC
+         LIMIT 1"
+    );
+    $batch = $statement->fetch();
+
+    return $batch ?: null;
+}
+
+function buildTestNotificationBody(array $batch): string
+{
+    return sprintf(
+        'Истекает срок годности через %d дней у партии артикул %s.',
+        (int)$batch['days_left'],
+        (string)$batch['article']
+    );
+}
+
+function sendEmail(array $emails, string $subject, string $body): bool
+{
+    $smtpPassword = getenv('SMTP_PASSWORD') ?: '';
+    if ($smtpPassword !== '') {
+        sendSmtpEmail($emails, $subject, $body);
+        return true;
+    }
+
+    $headers = [
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+        'From: ' . SENDER_EMAIL,
+        'Reply-To: ' . SENDER_EMAIL,
+    ];
+
+    return mail(implode(',', $emails), $subject, $body, implode("\r\n", $headers), '-f ' . SENDER_EMAIL);
+}
+
+function sendSmtpEmail(array $emails, string $subject, string $body): void
+{
+    $host = getenv('SMTP_HOST') ?: 'smtp.yandex.ru';
+    $port = (int)(getenv('SMTP_PORT') ?: 465);
+    $username = getenv('SMTP_USERNAME') ?: SENDER_EMAIL;
+    $password = getenv('SMTP_PASSWORD') ?: '';
+    $fromName = getenv('SMTP_FROM_NAME') ?: 'Сроки годности';
+
+    if ($password === '') {
+        throw new RuntimeException('Для SMTP-отправки задайте SMTP_PASSWORD.');
+    }
+
+    $socket = fsockopen('ssl://' . $host, $port, $errno, $errstr, 30);
+    if (!$socket) {
+        throw new RuntimeException('Не удалось подключиться к SMTP: ' . $errstr . ' (' . $errno . ')');
+    }
+
+    smtpExpect($socket, [220]);
+    smtpCommand($socket, 'EHLO kvasmix.ru', [250]);
+    smtpCommand($socket, 'AUTH LOGIN', [334]);
+    smtpCommand($socket, base64_encode($username), [334]);
+    smtpCommand($socket, base64_encode($password), [235]);
+    smtpCommand($socket, 'MAIL FROM:<' . SENDER_EMAIL . '>', [250]);
+    foreach ($emails as $email) {
+        smtpCommand($socket, 'RCPT TO:<' . $email . '>', [250, 251]);
+    }
+    smtpCommand($socket, 'DATA', [354]);
+
+    $headers = [
+        'From: ' . encodeMimeHeader($fromName) . ' <' . SENDER_EMAIL . '>',
+        'To: ' . implode(', ', $emails),
+        'Subject: ' . encodeMimeHeader($subject),
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: 8bit',
+        'Date: ' . date(DATE_RFC2822),
+    ];
+    fwrite($socket, implode("\r\n", $headers) . "\r\n\r\n" . str_replace("\n.", "\n..", $body) . "\r\n.\r\n");
+    smtpExpect($socket, [250]);
+    smtpCommand($socket, 'QUIT', [221]);
+    fclose($socket);
+}
+
+function smtpCommand($socket, string $command, array $expectedCodes): string
+{
+    fwrite($socket, $command . "\r\n");
+    return smtpExpect($socket, $expectedCodes);
+}
+
+function smtpExpect($socket, array $expectedCodes): string
+{
+    $response = '';
+    while (($line = fgets($socket, 515)) !== false) {
+        $response .= $line;
+        if (isset($line[3]) && $line[3] === ' ') {
+            break;
+        }
+    }
+    $code = (int)substr($response, 0, 3);
+    if (!in_array($code, $expectedCodes, true)) {
+        throw new RuntimeException('SMTP вернул неожиданный ответ: ' . trim($response));
+    }
+
+    return $response;
+}
+
+function encodeMimeHeader(string $value): string
+{
+    return '=?UTF-8?B?' . base64_encode($value) . '?=';
 }
 
 function verifyWriteOffPassword(array $payload): array

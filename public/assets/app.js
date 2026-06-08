@@ -26,7 +26,7 @@ function showToast(message, isError = false) {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'verify_write_off']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'test_notification', 'verify_write_off']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -594,6 +594,15 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
+
+    if (action === 'delete') {
+        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (parsed.text) return parsed.text;
+
+    // Запасной вариант нужен для старых записей истории со служебными полями.
+    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
 function formatHistoryBatch(batch) {
@@ -696,6 +705,20 @@ async function persistSettings(partial) {
     state.settings = result.settings;
     renderSettings();
     showToast('Настройки сохранены.');
+}
+
+async function sendTestNotification() {
+    const button = qs('#sendTestNotificationButton');
+    button.disabled = true;
+
+    try {
+        const result = await api('test_notification', { settings_password: state.settingsPassword });
+        showToast(result.message || 'Тестовое уведомление отправлено.');
+    } catch (error) {
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
 }
 
 function downloadTemplateXlsx() {
@@ -840,6 +863,8 @@ function bindEvents() {
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
     qs('#exportAllButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.batches), 'reestr_vse_partii.xlsx', batchExportMapper));
+
+    qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
 
     qs('#emailForm').addEventListener('submit', async (event) => {
         event.preventDefault();

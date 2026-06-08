@@ -70,7 +70,10 @@ declare(strict_types=1);
                 <form class="card form" id="emailForm">
                     <h3>Email получатели</h3>
                     <label>Email<input id="emailInput" type="email" placeholder="user@example.com"></label>
-                    <button class="primary" type="submit">Добавить</button>
+                    <div class="settings-actions">
+                        <button class="primary" type="submit">Добавить</button>
+                        <button class="ghost-button" id="sendTestNotificationButton" type="button">Тест уведомления</button>
+                    </div>
                     <div class="chips" id="emailList"></div>
                 </form>
                 <div class="card form">
