@@ -13,6 +13,7 @@ require_once __DIR__ . '/../app/database.php';
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
 const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта партия товара';
+const SETTINGS_PASSWORD = '8852285';
 
 try {
     $pdo = getDatabaseConnection();
@@ -26,7 +27,7 @@ try {
         $result = match ($action) {
             'list' => ['ok' => true, 'batches' => listBatches($pdo, $_GET)],
             'report' => ['ok' => true, 'batches' => reportBatches($pdo, $_GET)],
-            'settings' => ['ok' => true, 'settings' => getSettings($pdo)],
+            'settings' => getProtectedSettings($pdo, $_GET),
             'logs' => ['ok' => true, 'logs' => getLogs($pdo)],
             default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
         };
@@ -36,7 +37,7 @@ try {
             'bulk_create' => bulkCreateBatches($pdo, $payload['batches'] ?? []),
             'update' => updateBatch($pdo, $payload),
             'delete' => deleteBatch($pdo, $payload),
-            'settings' => saveSettings($pdo, $payload['settings'] ?? $payload),
+            'settings' => saveProtectedSettings($pdo, $payload),
             default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
         };
     }
@@ -396,6 +397,27 @@ function normalizeBatchRow(array $row): array
         'status' => $row['status'],
         'updated_at' => $row['updated_at'],
     ];
+}
+
+function getProtectedSettings(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    return ['ok' => true, 'settings' => getSettings($pdo)];
+}
+
+function saveProtectedSettings(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    return saveSettings($pdo, $payload['settings'] ?? $payload);
+}
+
+function assertSettingsPassword(array $payload): void
+{
+    if ((string)($payload['settings_password'] ?? '') !== SETTINGS_PASSWORD) {
+        throw new InvalidArgumentException('Неверный пароль для вкладки «Настройки».');
+    }
 }
 
 function getSettings(PDO $pdo): array

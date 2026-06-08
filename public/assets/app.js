@@ -5,6 +5,8 @@ const state = {
     settings: { emails: [], rules: [] },
     history: [],
     registrySort: { field: 'expiryDate', direction: 'asc' },
+    settingsAccessGranted: false,
+    settingsPassword: '',
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -25,9 +27,9 @@ function getApiMethod(action, data = {}) {
     const writeActions = new Set(['create', 'bulk_create', 'update', 'delete']);
 
     // Действие settings используется и для чтения, и для сохранения:
-    // пустой payload читается GET-запросом, payload с настройками сохраняется POST-запросом.
+    // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
     if (action === 'settings') {
-        return Object.keys(data).length === 0 ? 'GET' : 'POST';
+        return Object.prototype.hasOwnProperty.call(data, 'settings') ? 'POST' : 'GET';
     }
     if (readActions.has(action)) return 'GET';
     if (writeActions.has(action)) return 'POST';
@@ -468,9 +470,45 @@ async function loadBatches() {
 }
 
 async function loadSettings() {
-    const result = await api('settings');
+    const result = await api('settings', { settings_password: state.settingsPassword });
     state.settings = result.settings || { emails: [], rules: [] };
     renderSettings();
+}
+
+function switchTab(tabName) {
+    qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
+    qs(`[data-tab="${tabName}"]`).classList.add('active');
+    qs(`#tab-${tabName}`).classList.add('active');
+}
+
+function openSettingsPasswordDialog() {
+    qs('#settingsPasswordInput').value = '';
+    qs('#settingsPasswordError').textContent = '';
+    qs('#settingsPasswordDialog').showModal();
+    qs('#settingsPasswordInput').focus();
+}
+
+function closeSettingsPasswordDialog() {
+    qs('#settingsPasswordDialog').close();
+}
+
+async function submitSettingsPassword(event) {
+    event.preventDefault();
+    const input = qs('#settingsPasswordInput');
+    const error = qs('#settingsPasswordError');
+
+    state.settingsPassword = input.value;
+
+    try {
+        await loadSettings();
+        state.settingsAccessGranted = true;
+        closeSettingsPasswordDialog();
+        switchTab('settings');
+    } catch (loadError) {
+        state.settingsPassword = '';
+        error.textContent = loadError.message;
+        input.select();
+    }
 }
 
 function formatHistoryAction(action) {
@@ -594,7 +632,7 @@ function renderSettings() {
 
 async function persistSettings(partial) {
     state.settings = { ...state.settings, ...partial };
-    const result = await api('settings', { settings: state.settings });
+    const result = await api('settings', { settings_password: state.settingsPassword, settings: state.settings });
     state.settings = result.settings;
     renderSettings();
     showToast('Настройки сохранены.');
@@ -679,18 +717,26 @@ function applyInitialUrlState() {
     if (article) qs('#filterArticle').value = article;
 
     if (params.get('tab') === 'registry') {
-        qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
-        qs('[data-tab="registry"]').classList.add('active');
-        qs('#tab-registry').classList.add('active');
+        switchTab('registry');
     }
 }
 
 function bindEvents() {
-    qsa('.tab').forEach((button) => button.addEventListener('click', () => {
-        qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
-        button.classList.add('active');
-        qs(`#tab-${button.dataset.tab}`).classList.add('active');
+    qsa('.tab').forEach((button) => button.addEventListener('click', async () => {
+        if (button.dataset.tab === 'settings' && !state.settingsAccessGranted) {
+            openSettingsPasswordDialog();
+            return;
+        }
+
+        switchTab(button.dataset.tab);
+        if (button.dataset.tab === 'settings') {
+            await loadSettings();
+        }
     }));
+
+    qs('#settingsPasswordForm').addEventListener('submit', submitSettingsPassword);
+    qs('#cancelSettingsPasswordButton').addEventListener('click', closeSettingsPasswordDialog);
+    qs('#closeSettingsPasswordDialogButton').addEventListener('click', closeSettingsPasswordDialog);
 
     bindExpiryMonthMask(qs('#editExpiryDate'));
     qs('#editBatchForm').addEventListener('submit', submitEditForm);
@@ -761,7 +807,7 @@ function batchExportMapper(batch) {
 
 async function bootstrap() {
     try {
-        await Promise.all([loadBatches(), loadSettings(), loadHistory()]);
+        await Promise.all([loadBatches(), loadHistory()]);
         showToast('Данные обновлены.');
     } catch (error) {
         showToast(error.message, true);

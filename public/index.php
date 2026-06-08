@@ -149,6 +149,22 @@ declare(strict_types=1);
         </div>
     </dialog>
 
+    <dialog class="modal" id="settingsPasswordDialog">
+        <form class="card form modal-card" id="settingsPasswordForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Доступ к настройкам</h2>
+                <button class="icon-button" id="closeSettingsPasswordDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Введите пароль, чтобы открыть вкладку «Настройки».</p>
+            <label>Пароль<input id="settingsPasswordInput" required autocomplete="current-password" type="password"></label>
+            <p class="field-error" id="settingsPasswordError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelSettingsPasswordButton" type="button">Отмена</button>
+                <button class="primary" type="submit">Открыть настройки</button>
+            </div>
+        </form>
+    </dialog>
+
     <dialog class="modal" id="editBatchDialog">
         <form class="card form modal-card" id="editBatchForm" method="dialog">
             <div class="modal-heading">
