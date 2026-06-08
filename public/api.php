@@ -13,6 +13,7 @@ require_once __DIR__ . '/../app/database.php';
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
 const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта партия товара';
+const SETTINGS_PASSWORD = '8852285';
 
 try {
     $pdo = getDatabaseConnection();
