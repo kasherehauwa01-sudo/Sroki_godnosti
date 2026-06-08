@@ -25,14 +25,10 @@ declare(strict_types=1);
             <button class="tab active" data-tab="registry" type="button">Реестр</button>
             <button class="tab" data-tab="history" type="button">История</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
+            <button class="primary nav-action" id="openAddBatchesButton" type="button">Добавить партию</button>
         </nav>
 
         <section class="panel active" id="tab-registry">
-            <div class="section-heading registry-heading">
-                <div class="registry-actions">
-                    <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
-                </div>
-            </div>
             <div class="card filters">
                 <label>Артикул<input id="filterArticle" placeholder="Например, 12345"></label>
                 <label>Статус
@@ -58,7 +54,7 @@ declare(strict_types=1);
             </div>
             <div class="table-wrap card wide">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Количество</th><th><button class="sort-button" data-sort="expiryDate" type="button">Срок годности <span class="sort-indicator" data-sort-indicator="expiryDate"></span></button></th><th><button class="sort-button" data-sort="daysLeft" type="button">Остаток дней <span class="sort-indicator" data-sort-indicator="daysLeft"></span></button></th><th>Статус</th><th><button class="sort-button" data-sort="createdAt" type="button">Дата внесения <span class="sort-indicator" data-sort-indicator="createdAt"></span></button></th><th>Действия</th></tr></thead>
+                    <thead><tr><th><button class="sort-button" data-sort="article" type="button">Артикул <span class="sort-indicator" data-sort-indicator="article"></span></button></th><th>Количество</th><th><button class="sort-button" data-sort="expiryDate" type="button">Срок годности <span class="sort-indicator" data-sort-indicator="expiryDate"></span></button></th><th><button class="sort-button" data-sort="daysLeft" type="button">Остаток дней <span class="sort-indicator" data-sort-indicator="daysLeft"></span></button></th><th>Статус</th><th><button class="sort-button" data-sort="createdAt" type="button">Дата внесения <span class="sort-indicator" data-sort-indicator="createdAt"></span></button></th><th>Действия</th></tr></thead>
                     <tbody id="registryBody"></tbody>
                 </table>
             </div>

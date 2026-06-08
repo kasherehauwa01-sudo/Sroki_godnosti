@@ -24,9 +24,10 @@ h1 { margin: 0; font-size: clamp(28px, 5vw, 46px); }
 .subtitle, .eyebrow { margin: 0; opacity: .9; }
 .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 12px; }
 .layout { padding: 22px clamp(12px, 3vw, 48px) 48px; }
-.tabs { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 10px; }
+.tabs { display: flex; gap: 10px; align-items: center; overflow-x: auto; padding-bottom: 10px; }
 .tab, button { border: 0; border-radius: 14px; cursor: pointer; font-weight: 700; }
 .tab { padding: 12px 18px; background: #e8eef8; color: var(--muted); white-space: nowrap; }
+.nav-action { margin-left: auto; white-space: nowrap; }
 .tab.active { background: var(--primary); color: #fff; }
 .panel { display: none; margin-top: 18px; }
 .panel.active { display: block; }
@@ -63,6 +64,7 @@ tr.indicator-orange td { background: var(--orange); }
 tr.indicator-red td { background: var(--red); }
 tr.indicator-gray td { background: var(--gray); color: #4b5563; }
 .status-select { min-width: 145px; }
+.history-details { white-space: pre-line; }
 .hidden { display: none !important; }
 .import-preview { min-height: 90px; border: 1px dashed var(--border); border-radius: 16px; padding: 14px; color: var(--muted); background: #f8fafc; white-space: pre-line; }
 .import-help { border: 1px solid var(--border); border-radius: 16px; padding: 12px 14px; background: #f8fafc; color: #475569; }
