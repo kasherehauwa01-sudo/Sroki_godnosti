@@ -784,7 +784,6 @@ function bindEvents() {
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
     qs('#exportAllButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.batches), 'reestr_vse_partii.xlsx', batchExportMapper));
-    qs('#refreshHistoryButton').addEventListener('click', loadHistory);
 
     qs('#emailForm').addEventListener('submit', async (event) => {
         event.preventDefault();

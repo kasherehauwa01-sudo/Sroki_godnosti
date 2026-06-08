@@ -29,10 +29,6 @@ declare(strict_types=1);
 
         <section class="panel active" id="tab-registry">
             <div class="section-heading registry-heading">
-                <div>
-                    <h2>Реестр партий товаров</h2>
-                    <p>Быстрый поиск и фильтрация выполняются без перезагрузки страницы.</p>
-                </div>
                 <div class="registry-actions">
                     <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
                     <button class="ghost-button" id="openXlsImportButton" type="button">XLS</button>
@@ -95,13 +91,6 @@ declare(strict_types=1);
         </section>
 
         <section class="panel" id="tab-history">
-            <div class="section-heading">
-                <h2>История</h2>
-                <p>История изменений в реестре: добавление партий, импорт, изменение статусов и удаление записей.</p>
-            </div>
-            <div class="card log-actions">
-                <button class="ghost-button" id="refreshHistoryButton" type="button">Обновить историю</button>
-            </div>
             <div class="table-wrap card">
                 <table>
                     <thead><tr><th>Дата</th><th>Действие</th><th>Детали</th></tr></thead>
