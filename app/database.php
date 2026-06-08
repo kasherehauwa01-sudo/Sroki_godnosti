@@ -7,12 +7,17 @@
  */
 declare(strict_types=1);
 
+$configFile = __DIR__ . '/config.php';
+if (is_file($configFile)) {
+    require_once $configFile;
+}
+
 function getDatabaseConnection(): PDO
 {
     $host = getenv('DB_HOST') ?: 'localhost';
     $database = getenv('DB_NAME') ?: 'sroki_godnosti';
     $user = getenv('DB_USER') ?: 'sroki';
-    $password = getenv('DB_PASSWORD') ?: '8852285';
+    $password = getenv('DB_PASSWORD') ?: '';
     $charset = getenv('DB_CHARSET') ?: 'utf8mb4';
 
     $dsn = "mysql:host={$host};dbname={$database};charset={$charset}";

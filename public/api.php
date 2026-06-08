@@ -13,6 +13,9 @@ require_once __DIR__ . '/../app/database.php';
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
 const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта партия товара';
+const SENDER_EMAIL = 'vr-vk@yandex.ru';
+const SETTINGS_PASSWORD_HASH = 'ff10705eafbaa3ff925fb0429d4b3f10379a4dd9dc1725654bbe0a5c9ce1a10f';
+const WRITE_OFF_PASSWORD_HASH = '321a31af6798d259093855414aba2906cb8f51cdd734d0f848a3504a9ff4642e';
 
 try {
     $pdo = getDatabaseConnection();
@@ -26,7 +29,7 @@ try {
         $result = match ($action) {
             'list' => ['ok' => true, 'batches' => listBatches($pdo, $_GET)],
             'report' => ['ok' => true, 'batches' => reportBatches($pdo, $_GET)],
-            'settings' => ['ok' => true, 'settings' => getSettings($pdo)],
+            'settings' => getProtectedSettings($pdo, $_GET),
             'logs' => ['ok' => true, 'logs' => getLogs($pdo)],
             default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
         };
@@ -36,7 +39,9 @@ try {
             'bulk_create' => bulkCreateBatches($pdo, $payload['batches'] ?? []),
             'update' => updateBatch($pdo, $payload),
             'delete' => deleteBatch($pdo, $payload),
-            'settings' => saveSettings($pdo, $payload['settings'] ?? $payload),
+            'settings' => saveProtectedSettings($pdo, $payload),
+            'test_notification' => sendTestNotification($pdo, $payload),
+            'verify_write_off' => verifyWriteOffPassword($payload),
             default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
         };
     }
@@ -143,7 +148,7 @@ function buildBatchFilters(array $filters): array
     return [$conditions ? 'WHERE ' . implode(' AND ', $conditions) : '', $params];
 }
 
-function createBatch(PDO $pdo, array $payload): array
+function createBatch(PDO $pdo, array $payload, bool $writeHistory = true): array
 {
     $batch = normalizeBatchPayload($payload);
     if (batchAlreadyExists($pdo, $batch['article'], $batch['expiry_date'])) {
@@ -151,9 +156,12 @@ function createBatch(PDO $pdo, array $payload): array
     }
 
     $id = insertBatch($pdo, $batch);
-    writeLog($pdo, 'create', ['id' => $id, 'article' => $batch['article']]);
+    $batchInfo = historyBatchInfo($batch, $id);
+    if ($writeHistory) {
+        writeLog($pdo, 'create', ['batch' => $batchInfo]);
+    }
 
-    return ['ok' => true, 'id' => $id, 'duplicate' => false];
+    return ['ok' => true, 'id' => $id, 'duplicate' => false, 'batch' => $batchInfo];
 }
 
 function bulkCreateBatches(PDO $pdo, array $batches): array
@@ -163,12 +171,13 @@ function bulkCreateBatches(PDO $pdo, array $batches): array
         $added = 0;
         $skippedDuplicates = 0;
         $duplicates = [];
+        $createdBatches = [];
         foreach ($batches as $batch) {
             if (!is_array($batch)) {
                 continue;
             }
 
-            $result = createBatch($pdo, $batch);
+            $result = createBatch($pdo, $batch, false);
             if (!empty($result['duplicate'])) {
                 $skippedDuplicates++;
                 $duplicates[] = $result['duplicate_batch'];
@@ -176,9 +185,14 @@ function bulkCreateBatches(PDO $pdo, array $batches): array
             }
 
             $added++;
+            $createdBatches[] = $result['batch'];
         }
         $pdo->commit();
-        writeLog($pdo, 'bulk_create', ['added' => $added, 'skipped_duplicates' => $skippedDuplicates]);
+        writeLog($pdo, 'bulk_create', [
+            'batches' => $createdBatches,
+            'duplicates' => $duplicates,
+            'skipped_duplicates' => $skippedDuplicates,
+        ]);
         return [
             'ok' => true,
             'added' => $added,
@@ -199,7 +213,11 @@ function updateBatch(PDO $pdo, array $payload): array
         throw new InvalidArgumentException('Не указан id партии для обновления.');
     }
 
+    $previousBatch = findBatchForHistory($pdo, $id);
     $batch = normalizeBatchPayload($payload, false);
+    if (($previousBatch['status'] ?? '') !== $batch['status']) {
+        assertWriteOffPassword($payload);
+    }
     $statement = $pdo->prepare(
         'UPDATE batches
          SET created_at = :created_at,
@@ -213,7 +231,10 @@ function updateBatch(PDO $pdo, array $payload): array
     );
     $params = buildUpdateBatchParams($batch, $id);
     $statement->execute($params);
-    writeLog($pdo, 'update', ['id' => $id, 'article' => $batch['article'], 'status' => $batch['status']]);
+    writeLog($pdo, 'update', [
+        'before' => $previousBatch,
+        'after' => historyBatchInfo($batch, $id),
+    ]);
 
     return ['ok' => true];
 }
@@ -275,6 +296,27 @@ function insertBatch(PDO $pdo, array $batch): int
     return (int)$pdo->lastInsertId();
 }
 
+function findBatchForHistory(PDO $pdo, int $id): array
+{
+    $statement = $pdo->prepare('SELECT id, article, quantity, expiry_date, status FROM batches WHERE id = :id');
+    $statement->execute([':id' => $id]);
+    $row = $statement->fetch();
+
+    return $row ? historyBatchInfo($row, $id) : ['id' => $id];
+}
+
+function historyBatchInfo(array $batch, ?int $id = null): array
+{
+    // В истории сохраняем только понятные пользователю поля партии.
+    return [
+        'id' => $id ?? (isset($batch['id']) ? (int)$batch['id'] : null),
+        'article' => (string)($batch['article'] ?? ''),
+        'quantity' => isset($batch['quantity']) ? (int)$batch['quantity'] : null,
+        'expiry_date' => (string)($batch['expiry_date'] ?? ''),
+        'status' => (string)($batch['status'] ?? ''),
+    ];
+}
+
 function calculateDaysLeft(string $expiryDate): int
 {
     $today = new DateTimeImmutable('today');
@@ -290,13 +332,11 @@ function deleteBatch(PDO $pdo, array $payload): array
         throw new InvalidArgumentException('Не указан id партии для удаления.');
     }
 
-    $selectStatement = $pdo->prepare('SELECT article FROM batches WHERE id = :id');
-    $selectStatement->execute([':id' => $id]);
-    $deletedBatch = $selectStatement->fetch() ?: [];
+    $deletedBatch = findBatchForHistory($pdo, $id);
 
     $statement = $pdo->prepare('DELETE FROM batches WHERE id = :id');
     $statement->execute([':id' => $id]);
-    writeLog($pdo, 'delete', ['id' => $id, 'article' => $deletedBatch['article'] ?? '']);
+    writeLog($pdo, 'delete', ['batch' => $deletedBatch]);
 
     return ['ok' => true];
 }
@@ -364,6 +404,195 @@ function normalizeBatchRow(array $row): array
         'status' => $row['status'],
         'updated_at' => $row['updated_at'],
     ];
+}
+
+function sendTestNotification(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    $settings = getSettings($pdo);
+    $emails = $settings['emails'] ?? [];
+    if (!$emails) {
+        throw new RuntimeException('Добавьте хотя бы одного получателя перед отправкой тестового уведомления.');
+    }
+
+    $batch = findNearestExpiringBatch($pdo);
+    if (!$batch) {
+        throw new RuntimeException('В реестре нет партий со статусом «В наличии» и будущим сроком годности.');
+    }
+
+    $body = buildTestNotificationBody($batch);
+    $subject = 'Тест уведомления о сроке годности';
+    try {
+        sendEmail($emails, $subject, $body);
+        writeLog($pdo, 'test_notification_sent', [
+            'emails' => $emails,
+            'article' => $batch['article'] ?? '',
+            'days_left' => (int)($batch['days_left'] ?? 0),
+        ]);
+    } catch (Throwable $error) {
+        writeLog($pdo, 'test_notification_failed', [
+            'emails' => $emails,
+            'article' => $batch['article'] ?? '',
+            'days_left' => (int)($batch['days_left'] ?? 0),
+            'error' => $error->getMessage(),
+        ]);
+        throw $error;
+    }
+
+    return ['ok' => true, 'message' => 'Тестовое уведомление отправлено.'];
+}
+
+function findNearestExpiringBatch(PDO $pdo): ?array
+{
+    $statement = $pdo->query(
+        "SELECT article, days_left
+         FROM batches
+         WHERE status = 'В наличии' AND days_left >= 0
+         ORDER BY days_left ASC, expiry_date ASC, article ASC
+         LIMIT 1"
+    );
+    $batch = $statement->fetch();
+
+    return $batch ?: null;
+}
+
+function buildTestNotificationBody(array $batch): string
+{
+    return sprintf(
+        'Истекает срок годности через %d дней у партии артикул %s.',
+        (int)$batch['days_left'],
+        (string)$batch['article']
+    );
+}
+
+function sendEmail(array $emails, string $subject, string $body): void
+{
+    $smtpPassword = getenv('SMTP_PASSWORD') ?: '';
+    if ($smtpPassword !== '') {
+        sendSmtpEmail($emails, $subject, $body);
+        return;
+    }
+
+    $headers = [
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+        'From: ' . SENDER_EMAIL,
+        'Reply-To: ' . SENDER_EMAIL,
+    ];
+
+    $sent = mail(implode(',', $emails), $subject, $body, implode("\r\n", $headers), '-f ' . SENDER_EMAIL);
+    if (!$sent) {
+        throw new RuntimeException('Не удалось отправить письмо через mail(). Задайте SMTP_PASSWORD в переменных окружения или локальном app/config.php.');
+    }
+}
+
+function sendSmtpEmail(array $emails, string $subject, string $body): void
+{
+    $host = getenv('SMTP_HOST') ?: 'smtp.yandex.ru';
+    $port = (int)(getenv('SMTP_PORT') ?: 465);
+    $username = getenv('SMTP_USERNAME') ?: SENDER_EMAIL;
+    $password = getenv('SMTP_PASSWORD') ?: '';
+    $fromName = getenv('SMTP_FROM_NAME') ?: 'Сроки годности';
+
+    if ($password === '') {
+        throw new RuntimeException('Для SMTP-отправки задайте SMTP_PASSWORD.');
+    }
+
+    $socket = fsockopen('ssl://' . $host, $port, $errno, $errstr, 30);
+    if (!$socket) {
+        throw new RuntimeException('Не удалось подключиться к SMTP: ' . $errstr . ' (' . $errno . ')');
+    }
+
+    smtpExpect($socket, [220]);
+    smtpCommand($socket, 'EHLO kvasmix.ru', [250]);
+    smtpCommand($socket, 'AUTH LOGIN', [334]);
+    smtpCommand($socket, base64_encode($username), [334]);
+    smtpCommand($socket, base64_encode($password), [235]);
+    smtpCommand($socket, 'MAIL FROM:<' . SENDER_EMAIL . '>', [250]);
+    foreach ($emails as $email) {
+        smtpCommand($socket, 'RCPT TO:<' . $email . '>', [250, 251]);
+    }
+    smtpCommand($socket, 'DATA', [354]);
+
+    $headers = [
+        'From: ' . encodeMimeHeader($fromName) . ' <' . SENDER_EMAIL . '>',
+        'To: ' . implode(', ', $emails),
+        'Subject: ' . encodeMimeHeader($subject),
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: 8bit',
+        'Date: ' . date(DATE_RFC2822),
+    ];
+    fwrite($socket, implode("\r\n", $headers) . "\r\n\r\n" . str_replace("\n.", "\n..", $body) . "\r\n.\r\n");
+    smtpExpect($socket, [250]);
+    smtpCommand($socket, 'QUIT', [221]);
+    fclose($socket);
+}
+
+function smtpCommand($socket, string $command, array $expectedCodes): string
+{
+    fwrite($socket, $command . "\r\n");
+    return smtpExpect($socket, $expectedCodes);
+}
+
+function smtpExpect($socket, array $expectedCodes): string
+{
+    $response = '';
+    while (($line = fgets($socket, 515)) !== false) {
+        $response .= $line;
+        if (isset($line[3]) && $line[3] === ' ') {
+            break;
+        }
+    }
+    $code = (int)substr($response, 0, 3);
+    if (!in_array($code, $expectedCodes, true)) {
+        throw new RuntimeException('SMTP вернул неожиданный ответ: ' . trim($response));
+    }
+
+    return $response;
+}
+
+function encodeMimeHeader(string $value): string
+{
+    return '=?UTF-8?B?' . base64_encode($value) . '?=';
+}
+
+function verifyWriteOffPassword(array $payload): array
+{
+    assertWriteOffPassword($payload);
+
+    return ['ok' => true];
+}
+
+function assertWriteOffPassword(array $payload): void
+{
+    $password = (string)($payload['write_off_password'] ?? '');
+    if (!hash_equals(WRITE_OFF_PASSWORD_HASH, hash('sha256', $password))) {
+        throw new InvalidArgumentException('Неверный пароль для списания партии.');
+    }
+}
+
+function getProtectedSettings(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    return ['ok' => true, 'settings' => getSettings($pdo)];
+}
+
+function saveProtectedSettings(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    return saveSettings($pdo, $payload['settings'] ?? $payload);
+}
+
+function assertSettingsPassword(array $payload): void
+{
+    $password = (string)($payload['settings_password'] ?? '');
+    if (!hash_equals(SETTINGS_PASSWORD_HASH, hash('sha256', $password))) {
+        throw new InvalidArgumentException('Неверный пароль для вкладки «Настройки».');
+    }
 }
 
 function getSettings(PDO $pdo): array
