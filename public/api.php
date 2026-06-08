@@ -415,7 +415,11 @@ function saveProtectedSettings(PDO $pdo, array $payload): array
 
 function assertSettingsPassword(array $payload): void
 {
-    if ((string)($payload['settings_password'] ?? '') !== SETTINGS_PASSWORD) {
+    $settingsPassword = getenv('SETTINGS_PASSWORD') ?: '';
+    if ($settingsPassword === '') {
+        throw new RuntimeException('Для доступа к настройкам задайте SETTINGS_PASSWORD в окружении.');
+    }
+    if ((string)($payload['settings_password'] ?? '') !== $settingsPassword) {
         throw new InvalidArgumentException('Неверный пароль для вкладки «Настройки».');
     }
 }
