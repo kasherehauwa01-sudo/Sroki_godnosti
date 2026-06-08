@@ -23,47 +23,20 @@ declare(strict_types=1);
     <main class="layout">
         <nav class="tabs" aria-label="Разделы администратора">
             <button class="tab active" data-tab="registry" type="button">Реестр</button>
-            <button class="tab" data-tab="upload" type="button">Загрузка партии</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
             <button class="tab" data-tab="history" type="button">История</button>
         </nav>
 
-        <section class="panel" id="tab-upload">
-            <div class="section-heading">
-                <h2>Загрузка новой партии</h2>
-                <p>Добавьте одну партию вручную или импортируйте файл XLSX.</p>
-            </div>
-            <div class="grid two">
-                <form class="card form" id="manualBatchForm">
-                    <h3>Ручное добавление</h3>
-                    <label>Артикул<input name="article" required autocomplete="off"></label>
-                    <label>Количество в партии<input name="quantity" required min="0" step="1" type="number"></label>
-                    <label>Срок годности до<input name="expiryDate" required pattern="^(0[1-9]|1[0-2])\.\d{4}$" placeholder="мм.гггг" inputmode="numeric"></label>
-                    <button class="primary" type="submit">Сохранить партию</button>
-                </form>
-
-                <div class="card form">
-                    <h3>Импорт из XLSX</h3>
-                    <div class="import-help">
-                        <p><b>Порядок колонок в XLSX:</b></p>
-                        <ul>
-                            <li>Скачайте шаблон таблицы</li>
-                            <li>Заполните шаблон</li>
-                            <li>Загрузите шаблон</li>
-                        </ul>
-                    </div>
-                    <button class="ghost-button" id="downloadTemplateButton" type="button">Скачать шаблон таблицы</button>
-                    <label>Файл XLSX<input id="xlsxInput" accept=".xlsx,.xls" type="file"></label>
-                    <div class="import-preview" id="importPreview">Файл не выбран.</div>
-                    <button class="primary" id="importButton" disabled type="button">Загрузить строки</button>
-                </div>
-            </div>
-        </section>
-
         <section class="panel active" id="tab-registry">
-            <div class="section-heading">
-                <h2>Реестр партий товаров</h2>
-                <p>Быстрый поиск и фильтрация выполняются без перезагрузки страницы.</p>
+            <div class="section-heading registry-heading">
+                <div>
+                    <h2>Реестр партий товаров</h2>
+                    <p>Быстрый поиск и фильтрация выполняются без перезагрузки страницы.</p>
+                </div>
+                <div class="registry-actions">
+                    <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
+                    <button class="ghost-button" id="openXlsImportButton" type="button">XLS</button>
+                </div>
             </div>
             <div class="card filters">
                 <label>Артикул<input id="filterArticle" placeholder="Например, 12345"></label>
@@ -138,6 +111,44 @@ declare(strict_types=1);
         </section>
     </main>
 
+    <dialog class="modal batch-modal" id="addBatchesDialog">
+        <form class="card form modal-card" id="addBatchesForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Добавить партии</h2>
+                <button class="icon-button" id="closeAddBatchesDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="batch-lines" id="batchRowsContainer"></div>
+            <button class="ghost-button" id="addBatchRowButton" type="button">Добавить строку</button>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelAddBatchesButton" type="button">Отмена</button>
+                <button class="primary" type="submit">Добавить партии в реестр</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal" id="xlsImportDialog">
+        <div class="card form modal-card">
+            <div class="modal-heading">
+                <h2>Загрузка XLS</h2>
+                <button class="icon-button" id="closeXlsImportDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="import-help">
+                <ul>
+                    <li>Скачайте шаблон таблицы</li>
+                    <li>Заполните шаблон</li>
+                    <li>Загрузите шаблон</li>
+                </ul>
+            </div>
+            <button class="ghost-button" id="downloadTemplateButton" type="button">Скачать шаблон таблицы</button>
+            <label>Файл XLSX<input id="xlsxInput" accept=".xlsx,.xls" type="file"></label>
+            <div class="import-preview" id="importPreview">Файл не выбран.</div>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelXlsImportButton" type="button">Отмена</button>
+                <button class="primary" id="importButton" disabled type="button">Загрузить шаблон</button>
+            </div>
+        </div>
+    </dialog>
+
     <dialog class="modal" id="editBatchDialog">
         <form class="card form modal-card" id="editBatchForm" method="dialog">
             <div class="modal-heading">
@@ -147,7 +158,7 @@ declare(strict_types=1);
             <input id="editBatchId" name="id" type="hidden">
             <label>Артикул<input id="editArticle" name="article" required autocomplete="off"></label>
             <label>Количество в партии<input id="editQuantity" name="quantity" required min="0" step="1" type="number"></label>
-            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^(0[1-9]|1[0-2])\.\d{4}$" placeholder="мм.гггг" inputmode="numeric"></label>
+            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric"></label>
             <label>Статус
                 <select id="editStatus" name="status" required>
                     <option>В наличии</option>

@@ -333,6 +333,78 @@ function closeEditDialog() {
     qs('#editBatchForm').reset();
 }
 
+function createBatchRow(values = {}) {
+    const row = document.createElement('div');
+    row.className = 'batch-row';
+    row.innerHTML = `
+        <label>Артикул<input class="batch-row-article" required autocomplete="off" value="${escapeHtml(values.article || '')}"></label>
+        <label>Количество в партии<input class="batch-row-quantity" required min="0" step="1" type="number" value="${escapeHtml(values.quantity ?? '')}"></label>
+        <label>Срок годности<input class="batch-row-expiry" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric" value="${escapeHtml(values.expiryDate || '')}"></label>
+        <button class="small-button danger remove-batch-row-button" type="button" aria-label="Удалить строку">🗑️</button>
+    `;
+    row.querySelector('.remove-batch-row-button').addEventListener('click', () => {
+        row.remove();
+        updateBatchRowRemoveButtons();
+    });
+    qs('#batchRowsContainer').append(row);
+    updateBatchRowRemoveButtons();
+}
+
+function updateBatchRowRemoveButtons() {
+    const rows = qsa('.batch-row');
+    rows.forEach((row) => {
+        row.querySelector('.remove-batch-row-button').disabled = rows.length === 1;
+    });
+}
+
+function openAddBatchesDialog() {
+    qs('#batchRowsContainer').innerHTML = '';
+    createBatchRow();
+    qs('#addBatchesDialog').showModal();
+}
+
+function closeAddBatchesDialog() {
+    qs('#addBatchesDialog').close();
+    qs('#addBatchesForm').reset();
+    qs('#batchRowsContainer').innerHTML = '';
+}
+
+function collectBatchRows() {
+    return qsa('.batch-row').map((row) => normalizeBatch({
+        article: row.querySelector('.batch-row-article').value,
+        quantity: row.querySelector('.batch-row-quantity').value,
+        expiryDate: row.querySelector('.batch-row-expiry').value,
+    }));
+}
+
+async function submitAddBatchesForm(event) {
+    event.preventDefault();
+    const batches = collectBatchRows();
+    try {
+        const result = await api('bulk_create', { batches });
+        if (Number(result.skipped_duplicates || 0) > 0) {
+            alert(formatDuplicateBatches(result.duplicates));
+        }
+        closeAddBatchesDialog();
+        showToast(`Добавлено партий: ${result.added || 0}`);
+        await Promise.all([loadBatches(), loadHistory()]);
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+function openXlsImportDialog() {
+    qs('#xlsImportDialog').showModal();
+}
+
+function closeXlsImportDialog() {
+    qs('#xlsImportDialog').close();
+    state.importRows = [];
+    qs('#xlsxInput').value = '';
+    qs('#importPreview').textContent = 'Файл не выбран.';
+    qs('#importButton').disabled = true;
+}
+
 async function submitEditForm(event) {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -538,23 +610,15 @@ function bindEvents() {
     qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
     qs('#cancelEditButton').addEventListener('click', closeEditDialog);
 
-    qs('#manualBatchForm').addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const form = new FormData(event.target);
-        const batch = normalizeBatch(Object.fromEntries(form.entries()));
-        try {
-            const result = await api('create', batch);
-            if (result.duplicate) {
-                alert(formatDuplicateBatches(result.duplicates || [result.duplicate_batch]));
-                return;
-            }
-            event.target.reset();
-            showToast('Партия сохранена.');
-            await loadBatches();
-        } catch (error) {
-            showToast(error.message, true);
-        }
-    });
+    qs('#openAddBatchesButton').addEventListener('click', openAddBatchesDialog);
+    qs('#addBatchesForm').addEventListener('submit', submitAddBatchesForm);
+    qs('#addBatchRowButton').addEventListener('click', () => createBatchRow());
+    qs('#closeAddBatchesDialogButton').addEventListener('click', closeAddBatchesDialog);
+    qs('#cancelAddBatchesButton').addEventListener('click', closeAddBatchesDialog);
+
+    qs('#openXlsImportButton').addEventListener('click', openXlsImportDialog);
+    qs('#closeXlsImportDialogButton').addEventListener('click', closeXlsImportDialog);
+    qs('#cancelXlsImportButton').addEventListener('click', closeXlsImportDialog);
 
     qs('#downloadTemplateButton').addEventListener('click', downloadTemplateXlsx);
     qs('#xlsxInput').addEventListener('change', (event) => event.target.files[0] && readXlsx(event.target.files[0]));
@@ -567,10 +631,7 @@ function bindEvents() {
             } else {
                 showToast(`Загружено строк: ${result.added || 0}`);
             }
-            state.importRows = [];
-            qs('#xlsxInput').value = '';
-            qs('#importPreview').textContent = 'Файл не выбран.';
-            qs('#importButton').disabled = true;
+            closeXlsImportDialog();
             await loadBatches();
         } catch (error) {
             showToast(error.message, true);
