@@ -19,6 +19,7 @@ const WRITE_OFF_PASSWORD_HASH = '321a31af6798d259093855414aba2906cb8f51cdd734d0f
 
 try {
     $pdo = getDatabaseConnection();
+    ensureSettingsSchema($pdo);
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
     $payload = readPayload();
     $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
@@ -70,6 +71,29 @@ function readPayload(): array
 function refreshDaysLeft(PDO $pdo): void
 {
     $pdo->exec('UPDATE batches SET days_left = DATEDIFF(expiry_date, CURDATE())');
+}
+
+function ensureSettingsSchema(PDO $pdo): void
+{
+    $columns = [
+        'smtp_host' => "ALTER TABLE settings ADD COLUMN smtp_host VARCHAR(255) NULL AFTER notification_email",
+        'smtp_port' => "ALTER TABLE settings ADD COLUMN smtp_port SMALLINT UNSIGNED NULL AFTER smtp_host",
+        'smtp_username' => "ALTER TABLE settings ADD COLUMN smtp_username VARCHAR(255) NULL AFTER smtp_port",
+        'smtp_password' => "ALTER TABLE settings ADD COLUMN smtp_password TEXT NULL AFTER smtp_username",
+        'smtp_from_email' => "ALTER TABLE settings ADD COLUMN smtp_from_email VARCHAR(255) NULL AFTER smtp_password",
+        'smtp_from_name' => "ALTER TABLE settings ADD COLUMN smtp_from_name VARCHAR(255) NULL AFTER smtp_from_email",
+        'notification_time' => "ALTER TABLE settings ADD COLUMN notification_time CHAR(5) NOT NULL DEFAULT '09:00' AFTER smtp_from_name",
+    ];
+
+    foreach ($columns as $column => $sql) {
+        $statement = $pdo->prepare(
+            'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+        );
+        $statement->execute([':table' => 'settings', ':column' => $column]);
+        if ((int)$statement->fetchColumn() === 0) {
+            $pdo->exec($sql);
+        }
+    }
 }
 
 function listBatches(PDO $pdo, array $filters): array
@@ -424,7 +448,7 @@ function sendTestNotification(PDO $pdo, array $payload): array
     $body = buildTestNotificationBody($batch);
     $subject = 'Тест уведомления о сроке годности';
     try {
-        sendEmail($emails, $subject, $body);
+        sendEmail($emails, $subject, $body, $settings);
         writeLog($pdo, 'test_notification_sent', [
             'emails' => $emails,
             'article' => $batch['article'] ?? '',
@@ -466,11 +490,11 @@ function buildTestNotificationBody(array $batch): string
     );
 }
 
-function sendEmail(array $emails, string $subject, string $body): void
+function sendEmail(array $emails, string $subject, string $body, array $settings = []): void
 {
-    $smtpPassword = getenv('SMTP_PASSWORD') ?: '';
+    $smtpPassword = (string)($settings['smtp_password'] ?? '') ?: (getenv('SMTP_PASSWORD') ?: '');
     if ($smtpPassword !== '') {
-        sendSmtpEmail($emails, $subject, $body);
+        sendSmtpEmail($emails, $subject, $body, $settings);
         return;
     }
 
@@ -487,13 +511,14 @@ function sendEmail(array $emails, string $subject, string $body): void
     }
 }
 
-function sendSmtpEmail(array $emails, string $subject, string $body): void
+function sendSmtpEmail(array $emails, string $subject, string $body, array $settings = []): void
 {
-    $host = getenv('SMTP_HOST') ?: 'smtp.yandex.ru';
-    $port = (int)(getenv('SMTP_PORT') ?: 465);
-    $username = getenv('SMTP_USERNAME') ?: SENDER_EMAIL;
-    $password = getenv('SMTP_PASSWORD') ?: '';
-    $fromName = getenv('SMTP_FROM_NAME') ?: 'Сроки годности';
+    $host = (string)($settings['smtp_host'] ?? '') ?: (getenv('SMTP_HOST') ?: 'smtp.yandex.ru');
+    $port = (int)((int)($settings['smtp_port'] ?? 0) ?: (getenv('SMTP_PORT') ?: 465));
+    $username = (string)($settings['smtp_username'] ?? '') ?: (getenv('SMTP_USERNAME') ?: SENDER_EMAIL);
+    $password = (string)($settings['smtp_password'] ?? '') ?: (getenv('SMTP_PASSWORD') ?: '');
+    $fromEmail = (string)($settings['smtp_from_email'] ?? '') ?: SENDER_EMAIL;
+    $fromName = (string)($settings['smtp_from_name'] ?? '') ?: (getenv('SMTP_FROM_NAME') ?: 'Сроки годности');
 
     if ($password === '') {
         throw new RuntimeException('Для SMTP-отправки задайте SMTP_PASSWORD.');
@@ -509,14 +534,14 @@ function sendSmtpEmail(array $emails, string $subject, string $body): void
     smtpCommand($socket, 'AUTH LOGIN', [334]);
     smtpCommand($socket, base64_encode($username), [334]);
     smtpCommand($socket, base64_encode($password), [235]);
-    smtpCommand($socket, 'MAIL FROM:<' . SENDER_EMAIL . '>', [250]);
+    smtpCommand($socket, 'MAIL FROM:<' . $fromEmail . '>', [250]);
     foreach ($emails as $email) {
         smtpCommand($socket, 'RCPT TO:<' . $email . '>', [250, 251]);
     }
     smtpCommand($socket, 'DATA', [354]);
 
     $headers = [
-        'From: ' . encodeMimeHeader($fromName) . ' <' . SENDER_EMAIL . '>',
+        'From: ' . encodeMimeHeader($fromName) . ' <' . $fromEmail . '>',
         'To: ' . implode(', ', $emails),
         'Subject: ' . encodeMimeHeader($subject),
         'MIME-Version: 1.0',
@@ -597,6 +622,7 @@ function assertSettingsPassword(array $payload): void
 
 function getSettings(PDO $pdo): array
 {
+    $GLOBALS['pdo_for_settings_info'] = $pdo;
     $statement = $pdo->query('SELECT * FROM settings WHERE id = 1');
     $settings = $statement->fetch();
     if (!$settings) {
@@ -612,9 +638,11 @@ function normalizeSettings(array $settings): array
     $rules = [];
     foreach ([90, 60, 30, 15, 7, 1] as $days) {
         if ((int)$settings['notify_' . $days . '_days'] === 1) {
-            $rules[] = ['id' => 'notify_' . $days, 'days' => $days, 'title' => 'Истекает через ' . $days . ' дней'];
+            $rules[] = ['id' => 'notify_' . $days, 'days' => $days, 'title' => 'За ' . $days . ' дней'];
         }
     }
+
+    $smtpPassword = (string)($settings['smtp_password'] ?? '');
 
     return [
         'id' => 1,
@@ -627,11 +655,21 @@ function normalizeSettings(array $settings): array
         'notification_email' => (string)($settings['notification_email'] ?? ''),
         'emails' => splitEmails((string)($settings['notification_email'] ?? '')),
         'rules' => $rules,
+        'smtp_host' => (string)($settings['smtp_host'] ?? 'smtp.yandex.ru'),
+        'smtp_port' => (int)($settings['smtp_port'] ?? 587),
+        'smtp_username' => (string)($settings['smtp_username'] ?? SENDER_EMAIL),
+        'smtp_password' => '',
+        'smtp_password_set' => $smtpPassword !== '',
+        'smtp_from_email' => (string)($settings['smtp_from_email'] ?? SENDER_EMAIL),
+        'smtp_from_name' => (string)($settings['smtp_from_name'] ?? 'Сроки годности'),
+        'notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
+        'system' => getSystemSettingsInfo($GLOBALS['pdo_for_settings_info'] ?? null),
     ];
 }
 
 function saveSettings(PDO $pdo, array $settings): array
 {
+    $current = getRawSettings($pdo);
     $emails = $settings['emails'] ?? splitEmails((string)($settings['notification_email'] ?? ''));
     $rules = $settings['rules'] ?? [];
     $enabledDays = [];
@@ -648,6 +686,11 @@ function saveSettings(PDO $pdo, array $settings): array
             : in_array($days, $enabledDays, true);
     }
 
+    $smtpPassword = trim((string)($settings['smtp_password'] ?? ''));
+    if ($smtpPassword === '') {
+        $smtpPassword = (string)($current['smtp_password'] ?? '');
+    }
+
     $params = [
         ':notify_90_days' => (int)(bool)$settings['notify_90_days'],
         ':notify_60_days' => (int)(bool)$settings['notify_60_days'],
@@ -655,7 +698,14 @@ function saveSettings(PDO $pdo, array $settings): array
         ':notify_15_days' => (int)(bool)$settings['notify_15_days'],
         ':notify_7_days' => (int)(bool)$settings['notify_7_days'],
         ':notify_1_day' => (int)(bool)$settings['notify_1_day'],
-        ':notification_email' => implode(',', array_unique(array_filter(array_map('trim', $emails)))),
+        ':notification_email' => implode(',', array_values(array_unique(array_filter(array_map('trim', $emails))))),
+        ':smtp_host' => trim((string)($settings['smtp_host'] ?? 'smtp.yandex.ru')),
+        ':smtp_port' => (int)($settings['smtp_port'] ?? 587),
+        ':smtp_username' => trim((string)($settings['smtp_username'] ?? SENDER_EMAIL)),
+        ':smtp_password' => $smtpPassword,
+        ':smtp_from_email' => trim((string)($settings['smtp_from_email'] ?? SENDER_EMAIL)),
+        ':smtp_from_name' => trim((string)($settings['smtp_from_name'] ?? 'Сроки годности')),
+        ':notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
     ];
 
     $statement = $pdo->prepare(
@@ -666,13 +716,63 @@ function saveSettings(PDO $pdo, array $settings): array
              notify_15_days = :notify_15_days,
              notify_7_days = :notify_7_days,
              notify_1_day = :notify_1_day,
-             notification_email = :notification_email
+             notification_email = :notification_email,
+             smtp_host = :smtp_host,
+             smtp_port = :smtp_port,
+             smtp_username = :smtp_username,
+             smtp_password = :smtp_password,
+             smtp_from_email = :smtp_from_email,
+             smtp_from_name = :smtp_from_name,
+             notification_time = :notification_time
          WHERE id = 1'
     );
     $statement->execute($params);
-    writeLog($pdo, 'settings', $params);
+    writeLog($pdo, 'settings', array_diff_key($params, [':smtp_password' => true]));
 
     return ['ok' => true, 'settings' => getSettings($pdo)];
+}
+
+function getRawSettings(PDO $pdo): array
+{
+    $statement = $pdo->query('SELECT * FROM settings WHERE id = 1');
+    return $statement->fetch() ?: [];
+}
+
+function normalizeNotificationTime(string $time): string
+{
+    return preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time) ? $time : '09:00';
+}
+
+function getSystemSettingsInfo(?PDO $pdo): array
+{
+    if (!$pdo) {
+        return [];
+    }
+
+    $lastCheck = findLastLogDate($pdo, ['expiry_notifications_sent', 'expiry_notifications_failed', 'expiry_check_no_matches', 'expiry_check_skipped']);
+    $lastSent = findLastLogDate($pdo, ['expiry_notifications_sent', 'test_notification_sent']);
+    $lastSmtpError = findLastLogDate($pdo, ['expiry_notifications_failed', 'test_notification_failed']);
+
+    $smtpStatus = 'Не выполнялось';
+    if ($lastSent || $lastSmtpError) {
+        $smtpStatus = $lastSmtpError && (!$lastSent || strtotime($lastSmtpError) > strtotime($lastSent)) ? 'Ошибка' : 'OK';
+    }
+
+    return [
+        'check_schedule' => 'ежедневно в 09:00',
+        'last_check' => $lastCheck ?: 'Не выполнялось',
+        'last_sent' => $lastSent ?: 'Не выполнялось',
+        'smtp_status' => $smtpStatus,
+    ];
+}
+
+function findLastLogDate(PDO $pdo, array $actions): string
+{
+    $placeholders = implode(',', array_fill(0, count($actions), '?'));
+    $statement = $pdo->prepare("SELECT created_at FROM logs WHERE action IN ($placeholders) ORDER BY id DESC LIMIT 1");
+    $statement->execute($actions);
+
+    return (string)($statement->fetchColumn() ?: '');
 }
 
 function splitEmails(string $emails): array

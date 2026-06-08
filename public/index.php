@@ -62,32 +62,61 @@ declare(strict_types=1);
         </section>
 
         <section class="panel" id="tab-settings">
-            <div class="section-heading">
-                <h2>Настройки уведомлений</h2>
-                <p>Укажите получателей. Сервис ежедневно проверяет просроченные партии и партии, у которых осталось 15, 30 или 60 дней.</p>
-            </div>
-            <div class="grid two">
-                <form class="card form" id="emailForm">
-                    <h3>Email получатели</h3>
-                    <label>Email<input id="emailInput" type="email" placeholder="user@example.com"></label>
+            <form class="settings-grid" id="settingsForm">
+                <div class="card form">
+                    <h3>Уведомления</h3>
+                    <label class="checkbox-row"><input id="notify90" name="notify_90_days" type="checkbox"> За 90 дней</label>
+                    <label class="checkbox-row"><input id="notify60" name="notify_60_days" type="checkbox"> За 60 дней</label>
+                    <label class="checkbox-row"><input id="notify30" name="notify_30_days" type="checkbox"> За 30 дней</label>
+                    <label class="checkbox-row"><input id="notify15" name="notify_15_days" type="checkbox"> За 15 дней</label>
+                    <label class="checkbox-row"><input id="notify7" name="notify_7_days" type="checkbox"> За 7 дней</label>
+                    <label class="checkbox-row"><input id="notify1" name="notify_1_day" type="checkbox"> За 1 день</label>
+                </div>
+
+                <div class="card form">
+                    <h3>Получатели уведомлений</h3>
+                    <label>Email получателей<textarea id="notificationEmails" rows="6" placeholder="vr-vk@yandex.ru
+manager@site.ru"></textarea></label>
+                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
                     <div class="settings-actions">
-                        <button class="primary" type="submit">Добавить</button>
+                        <button class="primary" type="submit">Сохранить настройки</button>
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
                     </div>
                     <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
-                    <div class="chips" id="emailList"></div>
-                </form>
-                <div class="card form">
-                    <h3>Когда приходят письма</h3>
-                    <p class="subtitle">Уведомления отправляются один раз в день в 09:00 по МСК, если в реестре есть партии со статусом «В наличии» по одному из критериев.</p>
-                    <ul class="notification-criteria">
-                        <li>Срок годности партии истек</li>
-                        <li>Осталось 15 дней</li>
-                        <li>Осталось 30 дней</li>
-                        <li>Осталось 60 дней</li>
-                    </ul>
                 </div>
-            </div>
+
+                <div class="card form">
+                    <h3>SMTP</h3>
+                    <label>SMTP сервер<input id="smtpHost" placeholder="smtp.yandex.ru"></label>
+                    <label>SMTP порт<input id="smtpPort" min="1" max="65535" type="number" placeholder="587"></label>
+                    <label>SMTP логин<input id="smtpUsername" type="email" placeholder="vr-vk@yandex.ru"></label>
+                    <label>SMTP пароль
+                        <div class="password-field">
+                            <input id="smtpPassword" autocomplete="new-password" type="password" placeholder="Оставьте пустым, чтобы сохранить текущий пароль">
+                            <button class="ghost-button" id="toggleSmtpPasswordButton" type="button">Показать</button>
+                        </div>
+                    </label>
+                    <label>Email отправителя<input id="smtpFromEmail" type="email" placeholder="vr-vk@yandex.ru"></label>
+                    <label>Имя отправителя<input id="smtpFromName" placeholder="Сроки годности"></label>
+                    <p class="subtitle" id="smtpPasswordState"></p>
+                </div>
+
+                <div class="card form">
+                    <h3>Время отправки уведомлений</h3>
+                    <label>Отправлять уведомления в:<input id="notificationTime" type="time" required value="09:00"></label>
+                    <p class="subtitle">Изменение времени будет использоваться после настройки cron.</p>
+                </div>
+
+                <div class="card form settings-system-card">
+                    <h3>Система</h3>
+                    <dl class="system-info">
+                        <dt>Проверка сроков:</dt><dd id="systemCheckSchedule">Не выполнялось</dd>
+                        <dt>Последняя проверка:</dt><dd id="systemLastCheck">Не выполнялось</dd>
+                        <dt>Последняя отправка письма:</dt><dd id="systemLastSent">Не выполнялось</dd>
+                        <dt>Статус SMTP:</dt><dd id="systemSmtpStatus">Не выполнялось</dd>
+                    </dl>
+                </div>
+            </form>
         </section>
 
         <section class="panel" id="tab-history">

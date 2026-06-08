@@ -594,230 +594,6 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
-
-    if (parsed.text) return parsed.text;
-
-    // Запасной вариант нужен для старых записей истории со служебными полями.
-    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
-}
-
-function formatHistoryBatch(batch) {
-    if (!batch) return 'партия не найдена';
-
-    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
-    const expiry = batch.expiry_date || batch.expiryDate
-        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate)}`
-        : 'без указанного срока годности';
-    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
-    const status = batch.status ? `, статус «${batch.status}»` : '';
-
-    return `партия ${article} ${expiry}${quantity}${status}`;
-}
-
-function formatHistoryBatchList(batches) {
-    return (batches || []).map(formatHistoryBatch).join('\n');
-}
-
-function formatChangedFields(before, after) {
-    const changes = [];
-    if (!before || !after) return changes;
-
-    if (before.article && after.article && before.article !== after.article) {
-        changes.push(`артикул изменён с ${before.article} на ${after.article}`);
-    }
-    if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
-        changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date)} на ${formatExpiryMonthRu(after.expiry_date)}`);
-    }
-    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
-        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
-    }
-    if (before.status && after.status && before.status !== after.status) {
-        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
-    }
-
-    return changes;
-}
-
-function formatHistoryDetails(action, payload) {
-    const parsed = parseHistoryPayload(payload);
-
-    if (action === 'create') {
-        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (action === 'bulk_create') {
-        const addedText = parsed.batches && parsed.batches.length
-            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
-            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
-        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
-            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
-            : '';
-
-        return `${addedText}${duplicatesText}`;
-    }
-
-    if (action === 'update') {
-        const before = parsed.before || {};
-        const after = parsed.after || parsed;
-        const changes = formatChangedFields(before, after);
-        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
-        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
-    }
-
-    if (action === 'delete') {
-        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (parsed.text) return parsed.text;
-
-    // Запасной вариант нужен для старых записей истории со служебными полями.
-    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
-}
-
-function formatHistoryBatch(batch) {
-    if (!batch) return 'партия не найдена';
-
-    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
-    const expiry = batch.expiry_date || batch.expiryDate
-        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate)}`
-        : 'без указанного срока годности';
-    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
-    const status = batch.status ? `, статус «${batch.status}»` : '';
-
-    return `партия ${article} ${expiry}${quantity}${status}`;
-}
-
-function formatHistoryBatchList(batches) {
-    return (batches || []).map(formatHistoryBatch).join('\n');
-}
-
-function formatChangedFields(before, after) {
-    const changes = [];
-    if (!before || !after) return changes;
-
-    if (before.article && after.article && before.article !== after.article) {
-        changes.push(`артикул изменён с ${before.article} на ${after.article}`);
-    }
-    if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
-        changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date)} на ${formatExpiryMonthRu(after.expiry_date)}`);
-    }
-    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
-        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
-    }
-    if (before.status && after.status && before.status !== after.status) {
-        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
-    }
-
-    return changes;
-}
-
-function formatHistoryDetails(action, payload) {
-    const parsed = parseHistoryPayload(payload);
-
-    if (action === 'create') {
-        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (action === 'bulk_create') {
-        const addedText = parsed.batches && parsed.batches.length
-            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
-            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
-        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
-            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
-            : '';
-
-        return `${addedText}${duplicatesText}`;
-    }
-
-    if (action === 'update') {
-        const before = parsed.before || {};
-        const after = parsed.after || parsed;
-        const changes = formatChangedFields(before, after);
-        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
-        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
-    }
-
-    if (action === 'delete') {
-        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (parsed.text) return parsed.text;
-
-    // Запасной вариант нужен для старых записей истории со служебными полями.
-    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
-}
-
-function formatHistoryBatch(batch) {
-    if (!batch) return 'партия не найдена';
-
-    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
-    const expiry = batch.expiry_date || batch.expiryDate
-        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate)}`
-        : 'без указанного срока годности';
-    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
-    const status = batch.status ? `, статус «${batch.status}»` : '';
-
-    return `партия ${article} ${expiry}${quantity}${status}`;
-}
-
-function formatHistoryBatchList(batches) {
-    return (batches || []).map(formatHistoryBatch).join('\n');
-}
-
-function formatChangedFields(before, after) {
-    const changes = [];
-    if (!before || !after) return changes;
-
-    if (before.article && after.article && before.article !== after.article) {
-        changes.push(`артикул изменён с ${before.article} на ${after.article}`);
-    }
-    if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
-        changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date)} на ${formatExpiryMonthRu(after.expiry_date)}`);
-    }
-    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
-        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
-    }
-    if (before.status && after.status && before.status !== after.status) {
-        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
-    }
-
-    return changes;
-}
-
-function formatHistoryDetails(action, payload) {
-    const parsed = parseHistoryPayload(payload);
-
-    if (action === 'create') {
-        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (action === 'bulk_create') {
-        const addedText = parsed.batches && parsed.batches.length
-            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
-            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
-        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
-            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
-            : '';
-
-        return `${addedText}${duplicatesText}`;
-    }
-
-    if (action === 'update') {
-        const before = parsed.before || {};
-        const after = parsed.after || parsed;
-        const changes = formatChangedFields(before, after);
-        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
-        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
-    }
-
-    if (action === 'delete') {
-        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (parsed.text) return parsed.text;
-
-    // Запасной вариант нужен для старых записей истории со служебными полями.
-    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
 function formatHistoryBatch(batch) {
@@ -905,31 +681,76 @@ async function loadHistory() {
 }
 
 function renderSettings() {
-    qs('#emailList').innerHTML = (state.settings.emails || []).map((email) => `<div class="chip">
-        <span>${escapeHtml(email)}</span><button class="small-danger" data-email="${escapeHtml(email)}" type="button">Удалить</button>
-    </div>`).join('') || '<p class="subtitle">Получатели не добавлены.</p>';
+    const settings = state.settings || {};
+    qs('#notify90').checked = Boolean(settings.notify_90_days);
+    qs('#notify60').checked = Boolean(settings.notify_60_days);
+    qs('#notify30').checked = Boolean(settings.notify_30_days);
+    qs('#notify15').checked = Boolean(settings.notify_15_days);
+    qs('#notify7').checked = Boolean(settings.notify_7_days);
+    qs('#notify1').checked = Boolean(settings.notify_1_day);
+    qs('#notificationEmails').value = (settings.emails || []).join('\n');
+    qs('#smtpHost').value = settings.smtp_host || 'smtp.yandex.ru';
+    qs('#smtpPort').value = settings.smtp_port || 587;
+    qs('#smtpUsername').value = settings.smtp_username || 'vr-vk@yandex.ru';
+    qs('#smtpPassword').value = '';
+    qs('#smtpFromEmail').value = settings.smtp_from_email || 'vr-vk@yandex.ru';
+    qs('#smtpFromName').value = settings.smtp_from_name || 'Сроки годности';
+    qs('#notificationTime').value = settings.notification_time || '09:00';
+    qs('#smtpPasswordState').textContent = settings.smtp_password_set
+        ? 'SMTP пароль сохранён. Оставьте поле пустым, чтобы не менять его.'
+        : 'SMTP пароль пока не сохранён.';
 
-    qsa('[data-email]').forEach((button) => button.addEventListener('click', async () => {
-        await persistSettings({ emails: state.settings.emails.filter((email) => email !== button.dataset.email) });
-    }));
+    const system = settings.system || {};
+    qs('#systemCheckSchedule').textContent = system.check_schedule || 'ежедневно в 09:00';
+    qs('#systemLastCheck').textContent = system.last_check || 'Не выполнялось';
+    qs('#systemLastSent').textContent = system.last_sent || 'Не выполнялось';
+    qs('#systemSmtpStatus').textContent = system.smtp_status || 'Не выполнялось';
 }
 
-async function persistSettings(partial) {
-    state.settings = { ...state.settings, ...partial };
+function collectSettingsForm() {
+    const emails = qs('#notificationEmails').value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean);
+    return {
+        notify_90_days: qs('#notify90').checked,
+        notify_60_days: qs('#notify60').checked,
+        notify_30_days: qs('#notify30').checked,
+        notify_15_days: qs('#notify15').checked,
+        notify_7_days: qs('#notify7').checked,
+        notify_1_day: qs('#notify1').checked,
+        emails,
+        smtp_host: qs('#smtpHost').value.trim(),
+        smtp_port: Number(qs('#smtpPort').value || 587),
+        smtp_username: qs('#smtpUsername').value.trim(),
+        smtp_password: qs('#smtpPassword').value,
+        smtp_from_email: qs('#smtpFromEmail').value.trim(),
+        smtp_from_name: qs('#smtpFromName').value.trim(),
+        notification_time: qs('#notificationTime').value || '09:00',
+    };
+}
+
+async function persistSettings(partial = null) {
+    state.settings = partial ? { ...state.settings, ...partial } : collectSettingsForm();
     const result = await api('settings', { settings_password: state.settingsPassword, settings: state.settings });
     state.settings = result.settings;
     renderSettings();
     showToast('Настройки сохранены.');
 }
 
+function toggleSmtpPasswordVisibility() {
+    const input = qs('#smtpPassword');
+    const button = qs('#toggleSmtpPasswordButton');
+    input.type = input.type === 'password' ? 'text' : 'password';
+    button.textContent = input.type === 'password' ? 'Показать' : 'Скрыть';
+}
+
 async function sendTestNotification() {
     const button = qs('#sendTestNotificationButton');
     const status = qs('#testNotificationStatus');
     button.disabled = true;
-    status.textContent = 'Отправляю тестовое уведомление...';
+    status.textContent = 'Сохраняю настройки и отправляю тестовое уведомление...';
     showToast('Отправляю тестовое уведомление...');
 
     try {
+        await persistSettings();
         const result = await api('test_notification', { settings_password: state.settingsPassword });
         status.textContent = result.message || 'Тестовое уведомление отправлено.';
         showToast(status.textContent);
@@ -1085,13 +906,13 @@ function bindEvents() {
     qs('#exportAllButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.batches), 'reestr_vse_partii.xlsx', batchExportMapper));
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
-
-    qs('#emailForm').addEventListener('submit', async (event) => {
+    qs('#toggleSmtpPasswordButton').addEventListener('click', toggleSmtpPasswordVisibility);
+    qs('#settingsForm').addEventListener('submit', async (event) => {
         event.preventDefault();
-        const email = qs('#emailInput').value.trim();
-        if (email && !state.settings.emails.includes(email)) {
-            await persistSettings({ emails: [...state.settings.emails, email] });
-            qs('#emailInput').value = '';
+        try {
+            await persistSettings();
+        } catch (error) {
+            showToast(error.message, true);
         }
     });
 
