@@ -33,8 +33,8 @@ h1 { margin: 0; font-size: clamp(28px, 5vw, 46px); }
 .section-heading { margin-bottom: 18px; }
 .section-heading h2 { margin-bottom: 6px; }
 .section-heading p { color: var(--muted); margin: 0; }
-.registry-heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-.registry-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.registry-heading { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
+.registry-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
 .batch-modal { width: min(920px, calc(100vw - 28px)); }
 .batch-lines { display: grid; gap: 10px; }
 .batch-row { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(130px, 1fr) minmax(130px, 1fr) auto; gap: 10px; align-items: end; padding: 12px; border: 1px solid var(--border); border-radius: 16px; background: #f8fafc; }
