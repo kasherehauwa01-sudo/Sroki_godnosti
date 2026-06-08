@@ -817,14 +817,6 @@ function bindEvents() {
         }
     }));
 
-    qs('#settingsPasswordForm').addEventListener('submit', submitSettingsPassword);
-    qs('#cancelSettingsPasswordButton').addEventListener('click', closeSettingsPasswordDialog);
-    qs('#closeSettingsPasswordDialogButton').addEventListener('click', closeSettingsPasswordDialog);
-    qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
-    qs('#writeOffPasswordForm').addEventListener('submit', submitWriteOffPassword);
-    qs('#cancelWriteOffPasswordButton').addEventListener('click', closeWriteOffPasswordDialog);
-    qs('#closeWriteOffPasswordDialogButton').addEventListener('click', closeWriteOffPasswordDialog);
-
     bindExpiryMonthMask(qs('#editExpiryDate'));
     qs('#editBatchForm').addEventListener('submit', submitEditForm);
     qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
