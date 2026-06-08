@@ -448,7 +448,7 @@ function sendTestNotification(PDO $pdo, array $payload): array
     $body = buildTestNotificationBody($batch);
     $subject = 'Тест уведомления о сроке годности';
     try {
-        sendEmail($emails, $subject, $body, $settings);
+        sendEmail($pdo, $emails, $subject, $body, $settings);
         writeLog($pdo, 'test_notification_sent', [
             'emails' => $emails,
             'article' => $batch['article'] ?? '',
@@ -490,11 +490,11 @@ function buildTestNotificationBody(array $batch): string
     );
 }
 
-function sendEmail(array $emails, string $subject, string $body, array $settings = []): void
+function sendEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings = []): void
 {
     $smtpPassword = (string)($settings['smtp_password'] ?? '') ?: (getenv('SMTP_PASSWORD') ?: '');
     if ($smtpPassword !== '') {
-        sendSmtpEmail($emails, $subject, $body, $settings);
+        sendSmtpEmail($pdo, $emails, $subject, $body, $settings);
         return;
     }
 
@@ -511,7 +511,7 @@ function sendEmail(array $emails, string $subject, string $body, array $settings
     }
 }
 
-function sendSmtpEmail(array $emails, string $subject, string $body, array $settings = []): void
+function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings = []): void
 {
     $host = (string)($settings['smtp_host'] ?? '') ?: (getenv('SMTP_HOST') ?: 'smtp.yandex.ru');
     $port = (int)((int)($settings['smtp_port'] ?? 0) ?: (getenv('SMTP_PORT') ?: 465));
@@ -519,21 +519,45 @@ function sendSmtpEmail(array $emails, string $subject, string $body, array $sett
     $password = (string)($settings['smtp_password'] ?? '') ?: (getenv('SMTP_PASSWORD') ?: '');
     $fromEmail = (string)($settings['smtp_from_email'] ?? '') ?: SENDER_EMAIL;
     $fromName = (string)($settings['smtp_from_name'] ?? '') ?: (getenv('SMTP_FROM_NAME') ?: 'Сроки годности');
+    $mode = $port === 465 ? 'SSL' : 'STARTTLS';
+    $transportHost = $mode === 'SSL' ? 'ssl://' . $host : $host;
 
     if ($password === '') {
         throw new RuntimeException('Для SMTP-отправки задайте SMTP_PASSWORD.');
     }
 
-    $socket = fsockopen('ssl://' . $host, $port, $errno, $errstr, 30);
+    writeLog($pdo, 'smtp_connection_attempt', ['host' => $host, 'port' => $port, 'mode' => $mode]);
+    $socket = fsockopen($transportHost, $port, $errno, $errstr, 30);
     if (!$socket) {
+        writeLog($pdo, 'smtp_connection_failed', ['host' => $host, 'port' => $port, 'mode' => $mode, 'error' => $errstr, 'code' => $errno]);
         throw new RuntimeException('Не удалось подключиться к SMTP: ' . $errstr . ' (' . $errno . ')');
     }
+    writeLog($pdo, 'smtp_connection_success', ['host' => $host, 'port' => $port, 'mode' => $mode]);
 
     smtpExpect($socket, [220]);
     smtpCommand($socket, 'EHLO kvasmix.ru', [250]);
-    smtpCommand($socket, 'AUTH LOGIN', [334]);
-    smtpCommand($socket, base64_encode($username), [334]);
-    smtpCommand($socket, base64_encode($password), [235]);
+    if ($mode === 'STARTTLS') {
+        smtpCommand($socket, 'STARTTLS', [220]);
+        $cryptoEnabled = stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+        if ($cryptoEnabled !== true) {
+            fclose($socket);
+            writeLog($pdo, 'smtp_starttls_failed', ['host' => $host, 'port' => $port, 'mode' => $mode]);
+            throw new RuntimeException('Не удалось включить TLS для SMTP STARTTLS.');
+        }
+        writeLog($pdo, 'smtp_starttls_success', ['host' => $host, 'port' => $port, 'mode' => $mode]);
+        smtpCommand($socket, 'EHLO kvasmix.ru', [250]);
+    }
+
+    try {
+        smtpCommand($socket, 'AUTH LOGIN', [334]);
+        smtpCommand($socket, base64_encode($username), [334]);
+        smtpCommand($socket, base64_encode($password), [235]);
+        writeLog($pdo, 'smtp_auth_success', ['host' => $host, 'port' => $port, 'mode' => $mode, 'username' => $username]);
+    } catch (Throwable $error) {
+        fclose($socket);
+        writeLog($pdo, 'smtp_auth_failed', ['host' => $host, 'port' => $port, 'mode' => $mode, 'username' => $username, 'error' => $error->getMessage()]);
+        throw $error;
+    }
     smtpCommand($socket, 'MAIL FROM:<' . $fromEmail . '>', [250]);
     foreach ($emails as $email) {
         smtpCommand($socket, 'RCPT TO:<' . $email . '>', [250, 251]);
