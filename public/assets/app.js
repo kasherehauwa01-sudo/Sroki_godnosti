@@ -449,7 +449,11 @@ function bindEvents() {
         const form = new FormData(event.target);
         const batch = normalizeBatch(Object.fromEntries(form.entries()));
         try {
-            await api('create', batch);
+            const result = await api('create', batch);
+            if (result.duplicate) {
+                showToast(result.message || 'В реестре уже есть эта партия товара', true);
+                return;
+            }
             event.target.reset();
             showToast('Партия сохранена.');
             await loadBatches();
@@ -462,8 +466,12 @@ function bindEvents() {
     qs('#xlsxInput').addEventListener('change', (event) => event.target.files[0] && readXlsx(event.target.files[0]));
     qs('#importButton').addEventListener('click', async () => {
         try {
-            await api('bulk_create', { batches: state.importRows });
-            showToast(`Загружено строк: ${state.importRows.length}`);
+            const result = await api('bulk_create', { batches: state.importRows });
+            if (Number(result.skipped_duplicates || 0) > 0) {
+                showToast(`Загружено строк: ${result.added || 0}. ${result.message || 'В реестре уже есть эта партия товара'}: ${result.skipped_duplicates}`);
+            } else {
+                showToast(`Загружено строк: ${result.added || 0}`);
+            }
             state.importRows = [];
             qs('#xlsxInput').value = '';
             qs('#importPreview').textContent = 'Файл не выбран.';

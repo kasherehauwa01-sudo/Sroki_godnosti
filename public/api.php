@@ -12,6 +12,7 @@ require_once __DIR__ . '/../app/database.php';
 
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
+const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта партия товара';
 
 try {
     $pdo = getDatabaseConnection();
@@ -148,16 +149,14 @@ function buildBatchFilters(array $filters): array
 function createBatch(PDO $pdo, array $payload): array
 {
     $batch = normalizeBatchPayload($payload);
-    $statement = $pdo->prepare(
-        'INSERT INTO batches (created_at, article, name, quantity, expiry_date, days_left, status)
-         VALUES (:created_at, :article, :name, :quantity, :expiry_date, :days_left, :status)'
-    );
-    $params = buildCreateBatchParams($batch);
-    $statement->execute($params);
-    $id = (int)$pdo->lastInsertId();
+    if (batchAlreadyExists($pdo, $batch['article'], $batch['expiry_date'])) {
+        return ['ok' => true, 'duplicate' => true, 'message' => DUPLICATE_BATCH_MESSAGE];
+    }
+
+    $id = insertBatch($pdo, $batch);
     writeLog($pdo, 'create', ['id' => $id, 'article' => $batch['article']]);
 
-    return ['ok' => true, 'id' => $id];
+    return ['ok' => true, 'id' => $id, 'duplicate' => false];
 }
 
 function bulkCreateBatches(PDO $pdo, array $batches): array
@@ -165,16 +164,28 @@ function bulkCreateBatches(PDO $pdo, array $batches): array
     $pdo->beginTransaction();
     try {
         $added = 0;
+        $skippedDuplicates = 0;
         foreach ($batches as $batch) {
             if (!is_array($batch)) {
                 continue;
             }
-            createBatch($pdo, $batch);
+
+            $result = createBatch($pdo, $batch);
+            if (!empty($result['duplicate'])) {
+                $skippedDuplicates++;
+                continue;
+            }
+
             $added++;
         }
         $pdo->commit();
-        writeLog($pdo, 'bulk_create', ['added' => $added]);
-        return ['ok' => true, 'added' => $added];
+        writeLog($pdo, 'bulk_create', ['added' => $added, 'skipped_duplicates' => $skippedDuplicates]);
+        return [
+            'ok' => true,
+            'added' => $added,
+            'skipped_duplicates' => $skippedDuplicates,
+            'message' => $skippedDuplicates > 0 ? DUPLICATE_BATCH_MESSAGE : '',
+        ];
     } catch (Throwable $error) {
         $pdo->rollBack();
         throw $error;
@@ -232,6 +243,28 @@ function buildUpdateBatchParams(array $batch, int $id): array
         'status' => $batch['status'],
         'id' => $id,
     ];
+}
+
+function batchAlreadyExists(PDO $pdo, string $article, string $expiryDate): bool
+{
+    $statement = $pdo->prepare('SELECT COUNT(*) FROM batches WHERE article = :article AND expiry_date = :expiry_date');
+    $statement->execute([
+        'article' => $article,
+        'expiry_date' => $expiryDate,
+    ]);
+
+    return (int)$statement->fetchColumn() > 0;
+}
+
+function insertBatch(PDO $pdo, array $batch): int
+{
+    $statement = $pdo->prepare(
+        'INSERT INTO batches (created_at, article, name, quantity, expiry_date, days_left, status)
+         VALUES (:created_at, :article, :name, :quantity, :expiry_date, :days_left, :status)'
+    );
+    $statement->execute(buildCreateBatchParams($batch));
+
+    return (int)$pdo->lastInsertId();
 }
 
 function calculateDaysLeft(string $expiryDate): int
