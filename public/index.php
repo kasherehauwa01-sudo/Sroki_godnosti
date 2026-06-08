@@ -26,6 +26,7 @@ declare(strict_types=1);
             <button class="tab" data-tab="history" type="button">История</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
             <button class="primary nav-action" id="openAddBatchesButton" type="button">Добавить партию</button>
+            <button class="ghost-button" id="openWriteOffButton" type="button">Списать партию</button>
         </nav>
 
         <section class="panel active" id="tab-registry">
@@ -148,6 +149,22 @@ declare(strict_types=1);
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelSettingsPasswordButton" type="button">Отмена</button>
                 <button class="primary" type="submit">Открыть настройки</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal" id="writeOffPasswordDialog">
+        <form class="card form modal-card" id="writeOffPasswordForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Списать партию</h2>
+                <button class="icon-button" id="closeWriteOffPasswordDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Введите пароль, чтобы разрешить изменение статусов в колонке «Статус».</p>
+            <label>Пароль<input id="writeOffPasswordInput" required autocomplete="current-password" type="password"></label>
+            <p class="field-error" id="writeOffPasswordError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelWriteOffPasswordButton" type="button">Отмена</button>
+                <button class="primary" type="submit">Разрешить изменение статусов</button>
             </div>
         </form>
     </dialog>

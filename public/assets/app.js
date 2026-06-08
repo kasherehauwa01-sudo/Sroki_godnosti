@@ -7,6 +7,8 @@ const state = {
     registrySort: { field: 'expiryDate', direction: 'asc' },
     settingsAccessGranted: false,
     settingsPassword: '',
+    writeOffAccessGranted: false,
+    writeOffPassword: '',
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -24,7 +26,7 @@ function showToast(message, isError = false) {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'verify_write_off']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -274,7 +276,7 @@ function renderRegistry() {
             <td>${escapeHtml(batch.quantity)}</td>
             <td>${escapeHtml(formatExpiryMonthRu(batch.expiryDate))}</td>
             <td>${formatDays(days)}</td>
-            <td><select class="status-select" data-id="${escapeHtml(batch.id)}">${options}</select></td>
+            <td><select class="status-select" data-id="${escapeHtml(batch.id)}" ${state.writeOffAccessGranted ? '' : 'disabled'}>${options}</select></td>
             <td>${escapeHtml(formatDateRu(batch.createdAt))}</td>
             <td>
                 <div class="row-actions">
@@ -332,7 +334,7 @@ async function onStatusChange(event) {
     if (!batch) return;
 
     try {
-        await api('update', { ...batch, status });
+        await api('update', { ...batch, status, write_off_password: state.writeOffPassword });
         batch.status = status;
         showToast('Статус партии обновлен.');
         await loadBatches();
@@ -445,6 +447,7 @@ async function submitEditForm(event) {
     const form = new FormData(event.target);
     const batch = normalizeBatch(Object.fromEntries(form.entries()));
     batch.id = String(form.get('id'));
+    batch.write_off_password = state.writeOffPassword;
 
     try {
         await api('update', batch);
@@ -511,6 +514,41 @@ function closeSettingsPasswordDialog() {
     qs('#settingsPasswordDialog').close();
 }
 
+function openWriteOffPasswordDialog() {
+    if (state.writeOffAccessGranted) {
+        showToast('Изменение статусов уже разрешено.');
+        return;
+    }
+
+    qs('#writeOffPasswordInput').value = '';
+    qs('#writeOffPasswordError').textContent = '';
+    qs('#writeOffPasswordDialog').showModal();
+    qs('#writeOffPasswordInput').focus();
+}
+
+function closeWriteOffPasswordDialog() {
+    qs('#writeOffPasswordDialog').close();
+}
+
+async function submitWriteOffPassword(event) {
+    event.preventDefault();
+    const input = qs('#writeOffPasswordInput');
+    const error = qs('#writeOffPasswordError');
+
+    try {
+        await api('verify_write_off', { write_off_password: input.value });
+        state.writeOffPassword = input.value;
+        state.writeOffAccessGranted = true;
+        closeWriteOffPasswordDialog();
+        renderRegistry();
+        showToast('Теперь можно изменять статусы партий в реестре.');
+    } catch (verifyError) {
+        state.writeOffPassword = '';
+        error.textContent = verifyError.message;
+        input.select();
+    }
+}
+
 async function submitSettingsPassword(event) {
     event.preventDefault();
     const input = qs('#settingsPasswordInput');
@@ -553,6 +591,79 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
+}
+
+function formatHistoryBatch(batch) {
+    if (!batch) return 'партия не найдена';
+
+    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
+    const expiry = batch.expiry_date || batch.expiryDate
+        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate)}`
+        : 'без указанного срока годности';
+    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
+    const status = batch.status ? `, статус «${batch.status}»` : '';
+
+    return `партия ${article} ${expiry}${quantity}${status}`;
+}
+
+function formatHistoryBatchList(batches) {
+    return (batches || []).map(formatHistoryBatch).join('\n');
+}
+
+function formatChangedFields(before, after) {
+    const changes = [];
+    if (!before || !after) return changes;
+
+    if (before.article && after.article && before.article !== after.article) {
+        changes.push(`артикул изменён с ${before.article} на ${after.article}`);
+    }
+    if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
+        changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date)} на ${formatExpiryMonthRu(after.expiry_date)}`);
+    }
+    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
+        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
+    }
+    if (before.status && after.status && before.status !== after.status) {
+        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
+    }
+
+    return changes;
+}
+
+function formatHistoryDetails(action, payload) {
+    const parsed = parseHistoryPayload(payload);
+
+    if (action === 'create') {
+        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (action === 'bulk_create') {
+        const addedText = parsed.batches && parsed.batches.length
+            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
+            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
+        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
+            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
+            : '';
+
+        return `${addedText}${duplicatesText}`;
+    }
+
+    if (action === 'update') {
+        const before = parsed.before || {};
+        const after = parsed.after || parsed;
+        const changes = formatChangedFields(before, after);
+        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
+        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
+    }
+
+    if (action === 'delete') {
+        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (parsed.text) return parsed.text;
+
+    // Запасной вариант нужен для старых записей истории со служебными полями.
+    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
 function formatHistoryBatch(batch) {
@@ -829,6 +940,10 @@ function bindEvents() {
     qs('#settingsPasswordForm').addEventListener('submit', submitSettingsPassword);
     qs('#cancelSettingsPasswordButton').addEventListener('click', closeSettingsPasswordDialog);
     qs('#closeSettingsPasswordDialogButton').addEventListener('click', closeSettingsPasswordDialog);
+    qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
+    qs('#writeOffPasswordForm').addEventListener('submit', submitWriteOffPassword);
+    qs('#cancelWriteOffPasswordButton').addEventListener('click', closeWriteOffPasswordDialog);
+    qs('#closeWriteOffPasswordDialogButton').addEventListener('click', closeWriteOffPasswordDialog);
 
     bindExpiryMonthMask(qs('#editExpiryDate'));
     qs('#editBatchForm').addEventListener('submit', submitEditForm);

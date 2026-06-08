@@ -13,7 +13,7 @@ require_once __DIR__ . '/../app/database.php';
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
 const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта партия товара';
-const SETTINGS_PASSWORD = '8852285';
+const WRITE_OFF_PASSWORD_HASH = '321a31af6798d259093855414aba2906cb8f51cdd734d0f848a3504a9ff4642e';
 
 try {
     $pdo = getDatabaseConnection();
@@ -38,6 +38,7 @@ try {
             'update' => updateBatch($pdo, $payload),
             'delete' => deleteBatch($pdo, $payload),
             'settings' => saveProtectedSettings($pdo, $payload),
+            'verify_write_off' => verifyWriteOffPassword($payload),
             default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
         };
     }
@@ -211,6 +212,9 @@ function updateBatch(PDO $pdo, array $payload): array
 
     $previousBatch = findBatchForHistory($pdo, $id);
     $batch = normalizeBatchPayload($payload, false);
+    if (($previousBatch['status'] ?? '') !== $batch['status']) {
+        assertWriteOffPassword($payload);
+    }
     $statement = $pdo->prepare(
         'UPDATE batches
          SET created_at = :created_at,
@@ -397,6 +401,21 @@ function normalizeBatchRow(array $row): array
         'status' => $row['status'],
         'updated_at' => $row['updated_at'],
     ];
+}
+
+function verifyWriteOffPassword(array $payload): array
+{
+    assertWriteOffPassword($payload);
+
+    return ['ok' => true];
+}
+
+function assertWriteOffPassword(array $payload): void
+{
+    $password = (string)($payload['write_off_password'] ?? '');
+    if (!hash_equals(WRITE_OFF_PASSWORD_HASH, hash('sha256', $password))) {
+        throw new InvalidArgumentException('Неверный пароль для списания партии.');
+    }
 }
 
 function getProtectedSettings(PDO $pdo, array $payload): array
