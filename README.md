@@ -94,13 +94,13 @@ sudo mariadb
 
 ```sql
 CREATE DATABASE sroki_godnosti CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'sroki'@'localhost' IDENTIFIED BY '8852285';
+CREATE USER 'sroki'@'localhost' IDENTIFIED BY 'YOUR_DB_PASSWORD';
 GRANT ALL PRIVILEGES ON sroki_godnosti.* TO 'sroki'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 ```
 
-Используется существующий пароль пользователя MariaDB: `8852285`.
+Используйте собственный пароль пользователя MariaDB и не сохраняйте реальное значение в репозитории.
 
 ## Установка структуры БД
 
@@ -155,26 +155,20 @@ mysql -u sroki -p sroki_godnosti < database/install.sql
 app/database.php
 ```
 
-По умолчанию используются параметры:
+Подключение берёт пароль из переменной окружения `DB_PASSWORD`. Не храните реальные пароли в репозитории.
 
-```php
-$host = 'localhost';
-$database = 'sroki_godnosti';
-$user = 'sroki';
-$password = '8852285';
-```
-
-На VPS рекомендуется не хранить пароль в репозитории, а задать переменные окружения веб-сервера и cron-пользователя:
+На VPS задайте переменные окружения веб-сервера и cron-пользователя:
 
 ```bash
 export DB_HOST=localhost
 export DB_NAME=sroki_godnosti
 export DB_USER=sroki
-export DB_PASSWORD='8852285'
+export DB_PASSWORD='YOUR_DB_PASSWORD'
 export DB_CHARSET=utf8mb4
+export SETTINGS_PASSWORD='YOUR_SETTINGS_PASSWORD'
 ```
 
-Если переменные окружения недоступны, измените значения по умолчанию в `app/database.php` на сервере.
+Если переменные окружения недоступны, создайте локальный `app/config.php` на сервере и не добавляйте его в git.
 
 ## Размещение проекта на Timeweb
 
@@ -396,7 +390,7 @@ crontab -e
 export SMTP_HOST=smtp.yandex.ru
 export SMTP_PORT=465
 export SMTP_USERNAME=vr-vk@yandex.ru
-export SMTP_PASSWORD='ПАРОЛЬ_ПРИЛОЖЕНИЯ_ЯНДЕКС'
+export SMTP_PASSWORD='YOUR_APP_PASSWORD'
 export SMTP_FROM_NAME='Сроки годности'
 export APP_URL='https://kvasmix.ru/vr/sroki_godnosti/'
 ```
@@ -407,7 +401,7 @@ export APP_URL='https://kvasmix.ru/vr/sroki_godnosti/'
 SMTP_HOST=smtp.yandex.ru
 SMTP_PORT=465
 SMTP_USERNAME=vr-vk@yandex.ru
-SMTP_PASSWORD='ПАРОЛЬ_ПРИЛОЖЕНИЯ_ЯНДЕКС'
+SMTP_PASSWORD=YOUR_APP_PASSWORD
 SMTP_FROM_NAME='Сроки годности'
 APP_URL='https://kvasmix.ru/vr/sroki_godnosti/'
 ```
@@ -500,7 +494,7 @@ mysqldump -u sroki -p sroki_godnosti > /var/backups/sroki_godnosti/sroki_godnost
 Cron для ежедневного бэкапа в 02:30:
 
 ```cron
-30 2 * * * mysqldump -u sroki -p'8852285' sroki_godnosti | gzip > /var/backups/sroki_godnosti/sroki_godnosti_$(date +\%F).sql.gz
+30 2 * * * mysqldump -u sroki -p'YOUR_DB_PASSWORD' sroki_godnosti | gzip > /var/backups/sroki_godnosti/sroki_godnosti_$(date +\%F).sql.gz
 ```
 
 ### Резервная копия файлов проекта
