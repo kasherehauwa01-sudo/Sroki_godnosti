@@ -142,11 +142,21 @@ function formatExpiryMonthRu(value) {
     return `${month}.${year}`;
 }
 
-function formatDuplicateBatches(duplicates) {
+function formatDuplicateBatches(duplicates, intro = 'В реестре уже есть эта партия товара') {
     const rows = (duplicates || [])
         .filter(Boolean)
-        .map((batch) => `Артикул: ${batch.article}, срок годности: ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate)}`);
-    return ['В реестре уже есть эта партия товара', ...rows].join('\n');
+        .flatMap((batch) => [
+            `Артикул: ${batch.article}`,
+            `Срок годности: ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate)}`,
+        ]);
+    return [intro, '', 'Перечень партий дубликатов:', ...rows].join('\n');
+}
+
+function formatImportDuplicateBatches(duplicates) {
+    return formatDuplicateBatches(
+        duplicates,
+        'В файле найдены партии, уже внесённые в реестр. Они исключены из загрузки. Остальные данные успешно загружены.'
+    );
 }
 
 function toDateInputValue(value) {
@@ -552,7 +562,7 @@ function bindEvents() {
         try {
             const result = await api('bulk_create', { batches: state.importRows });
             if (Number(result.skipped_duplicates || 0) > 0) {
-                alert(formatDuplicateBatches(result.duplicates));
+                alert(formatImportDuplicateBatches(result.duplicates));
                 showToast(`Загружено строк: ${result.added || 0}. Пропущено дублей: ${result.skipped_duplicates}`);
             } else {
                 showToast(`Загружено строк: ${result.added || 0}`);
