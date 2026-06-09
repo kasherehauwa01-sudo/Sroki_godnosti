@@ -2,18 +2,29 @@
 /**
  * Подключение к MariaDB через PDO.
  *
- * На Timeweb VPS можно задать параметры через переменные окружения или изменить
- * значения по умолчанию ниже. Сайт работает напрямую с MariaDB.
+ * Приоритет настроек:
+ * 1) переменные окружения DB_* (например, из .env.cron для CLI/cron);
+ * 2) массив, возвращаемый локальным app/config.php;
+ * 3) безопасные значения по умолчанию для хоста, базы, пользователя и charset.
  */
 declare(strict_types=1);
 
+$appConfig = [];
+$configFile = __DIR__ . '/config.php';
+if (is_file($configFile)) {
+    $loadedConfig = require $configFile;
+    if (is_array($loadedConfig)) {
+        $appConfig = $loadedConfig;
+    }
+}
+
 function getDatabaseConnection(): PDO
 {
-    $host = getenv('DB_HOST') ?: 'localhost';
-    $database = getenv('DB_NAME') ?: 'sroki_godnosti';
-    $user = getenv('DB_USER') ?: 'sroki';
-    $password = getenv('DB_PASSWORD') ?: '8852285';
-    $charset = getenv('DB_CHARSET') ?: 'utf8mb4';
+    $host = getDatabaseConfigValue('DB_HOST', 'db_host', 'localhost');
+    $database = getDatabaseConfigValue('DB_NAME', 'db_name', 'sroki_godnosti');
+    $user = getDatabaseConfigValue('DB_USER', 'db_user', 'sroki');
+    $password = getDatabaseConfigValue('DB_PASSWORD', 'db_password', null, true);
+    $charset = getDatabaseConfigValue('DB_CHARSET', 'db_charset', 'utf8mb4');
 
     $dsn = "mysql:host={$host};dbname={$database};charset={$charset}";
 
@@ -22,4 +33,29 @@ function getDatabaseConnection(): PDO
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
+}
+
+function getDatabaseConfigValue(string $envKey, string $configKey, ?string $default = null, bool $required = false): string
+{
+    $envValue = getenv($envKey);
+    if ($envValue !== false && $envValue !== '') {
+        return (string)$envValue;
+    }
+
+    global $appConfig;
+    if (isset($appConfig[$configKey]) && (string)$appConfig[$configKey] !== '') {
+        return (string)$appConfig[$configKey];
+    }
+
+    if ($default !== null) {
+        return $default;
+    }
+
+    if ($required) {
+        throw new RuntimeException(
+            "Не задан пароль MariaDB. Укажите {$envKey} в окружении или {$configKey} в app/config.php."
+        );
+    }
+
+    return '';
 }
