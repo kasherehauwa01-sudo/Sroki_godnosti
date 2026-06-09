@@ -281,7 +281,7 @@ function renderRegistry() {
             <td>
                 <div class="row-actions">
                     <button class="small-button icon-action edit-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Редактировать" aria-label="Редактировать партию">✏️</button>
-                    <button class="small-button danger delete-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Списать/удалить" aria-label="Списать или удалить партию" ${state.writeOffAccessGranted ? '' : 'disabled'}>Списать/удалить</button>
+                    <button class="small-button icon-action danger delete-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Удалить" aria-label="Удалить партию" ${state.writeOffAccessGranted ? '' : 'disabled'}>🗑️</button>
                 </div>
             </td>
         </tr>`;
@@ -466,7 +466,7 @@ async function deleteBatch(id) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Списать партию» и введите пароль.', true);
+        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
         return;
     }
     if (!confirm('Уверены, что хотите списать/удалить партию безвозвратно?')) return;

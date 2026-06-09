@@ -26,7 +26,7 @@ declare(strict_types=1);
             <button class="tab" data-tab="history" type="button">История</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
             <button class="primary nav-action" id="openAddBatchesButton" type="button">Добавить партию</button>
-            <button class="ghost-button" id="openWriteOffButton" type="button">Списать партию</button>
+            <button class="ghost-button" id="openWriteOffButton" type="button">Списать / Удалить</button>
         </nav>
 
         <section class="panel active" id="tab-registry">
@@ -190,7 +190,7 @@ manager@site.ru"></textarea></label>
     <dialog class="modal" id="writeOffPasswordDialog">
         <form class="card form modal-card" id="writeOffPasswordForm" method="dialog">
             <div class="modal-heading">
-                <h2>Списать партию</h2>
+                <h2>Списать / Удалить</h2>
                 <button class="icon-button" id="closeWriteOffPasswordDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
             <p class="subtitle">Введите пароль, чтобы разрешить изменение статусов в колонке «Статус».</p>
