@@ -281,7 +281,7 @@ function renderRegistry() {
             <td>
                 <div class="row-actions">
                     <button class="small-button icon-action edit-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Редактировать" aria-label="Редактировать партию">✏️</button>
-                    <button class="small-button icon-action danger delete-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Удалить" aria-label="Удалить партию">🗑️</button>
+                    <button class="small-button danger delete-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Списать/удалить" aria-label="Списать или удалить партию" ${state.writeOffAccessGranted ? '' : 'disabled'}>Списать/удалить</button>
                 </div>
             </td>
         </tr>`;
@@ -465,11 +465,15 @@ async function submitEditForm(event) {
 async function deleteBatch(id) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
-    if (!confirm('Уверены, что хотите удалить партию безвозвратно?')) return;
+    if (!state.writeOffAccessGranted) {
+        showToast('Сначала нажмите «Списать партию» и введите пароль.', true);
+        return;
+    }
+    if (!confirm('Уверены, что хотите списать/удалить партию безвозвратно?')) return;
 
     try {
-        await api('delete', { id });
-        showToast('Партия удалена.');
+        await api('delete', { id, write_off_password: state.writeOffPassword });
+        showToast('Партия списана/удалена.');
         await Promise.all([loadBatches(), loadHistory()]);
     } catch (error) {
         showToast(error.message, true);
@@ -544,7 +548,7 @@ async function submitWriteOffPassword(event) {
         state.writeOffAccessGranted = true;
         closeWriteOffPasswordDialog();
         renderRegistry();
-        showToast('Теперь можно изменять статусы партий в реестре.');
+        showToast('Теперь можно изменять статусы и списывать/удалять партии в реестре.');
     } catch (verifyError) {
         state.writeOffPassword = '';
         error.textContent = verifyError.message;

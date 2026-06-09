@@ -357,6 +357,7 @@ function deleteBatch(PDO $pdo, array $payload): array
         throw new InvalidArgumentException('Не указан id партии для удаления.');
     }
 
+    assertWriteOffPassword($payload);
     $deletedBatch = findBatchForHistory($pdo, $id);
 
     $statement = $pdo->prepare('DELETE FROM batches WHERE id = :id');
