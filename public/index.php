@@ -48,6 +48,7 @@ declare(strict_types=1);
                         <option value="30">30 дней</option>
                         <option value="60">60 дней</option>
                         <option value="90">90 дней</option>
+                        <option value="180">180 дней</option>
                     </select>
                 </label>
                 <button class="ghost-button" id="resetFiltersButton" type="button">Сбросить фильтры</button>
