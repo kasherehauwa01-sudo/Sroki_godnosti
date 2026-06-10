@@ -77,6 +77,7 @@ function refreshDaysLeft(PDO $pdo): void
 function ensureSettingsSchema(PDO $pdo): void
 {
     $columns = [
+        'notify_180_days' => "ALTER TABLE settings ADD COLUMN notify_180_days TINYINT(1) NOT NULL DEFAULT 0 AFTER id",
         'smtp_host' => "ALTER TABLE settings ADD COLUMN smtp_host VARCHAR(255) NULL AFTER notification_email",
         'smtp_port' => "ALTER TABLE settings ADD COLUMN smtp_port SMALLINT UNSIGNED NULL AFTER smtp_host",
         'smtp_username' => "ALTER TABLE settings ADD COLUMN smtp_username VARCHAR(255) NULL AFTER smtp_port",
@@ -455,6 +456,7 @@ function sendTestNotification(PDO $pdo, array $payload): array
             'emails' => $emails,
             'article' => $batch['article'] ?? '',
             'days_left' => (int)($batch['days_left'] ?? 0),
+            'text' => $body,
         ]);
     } catch (Throwable $error) {
         writeLog($pdo, 'test_notification_failed', [
@@ -545,7 +547,7 @@ function getSettings(PDO $pdo): array
 function normalizeSettings(array $settings): array
 {
     $rules = [];
-    foreach ([90, 60, 30, 15, 7, 1] as $days) {
+    foreach ([180, 90, 60, 30, 15, 7, 1] as $days) {
         if ((int)$settings['notify_' . $days . '_days'] === 1) {
             $rules[] = ['id' => 'notify_' . $days, 'days' => $days, 'title' => 'За ' . $days . ' дней'];
         }
@@ -555,6 +557,7 @@ function normalizeSettings(array $settings): array
 
     return [
         'id' => 1,
+        'notify_180_days' => (bool)($settings['notify_180_days'] ?? false),
         'notify_90_days' => (bool)$settings['notify_90_days'],
         'notify_60_days' => (bool)$settings['notify_60_days'],
         'notify_30_days' => (bool)$settings['notify_30_days'],
@@ -572,6 +575,7 @@ function normalizeSettings(array $settings): array
         'smtp_from_email' => (string)($settings['smtp_from_email'] ?? SENDER_EMAIL),
         'smtp_from_name' => (string)($settings['smtp_from_name'] ?? 'Сроки годности'),
         'notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
+        'notification_history' => getNotificationHistory($GLOBALS['pdo_for_settings_info'] ?? null),
         'system' => getSystemSettingsInfo($GLOBALS['pdo_for_settings_info'] ?? null),
     ];
 }
@@ -588,7 +592,7 @@ function saveSettings(PDO $pdo, array $settings): array
         }
     }
 
-    foreach ([90, 60, 30, 15, 7, 1] as $days) {
+    foreach ([180, 90, 60, 30, 15, 7, 1] as $days) {
         $key = 'notify_' . $days . '_days';
         $settings[$key] = array_key_exists($key, $settings)
             ? filter_var($settings[$key], FILTER_VALIDATE_BOOLEAN)
@@ -601,6 +605,7 @@ function saveSettings(PDO $pdo, array $settings): array
     }
 
     $params = [
+        ':notify_180_days' => (int)(bool)$settings['notify_180_days'],
         ':notify_90_days' => (int)(bool)$settings['notify_90_days'],
         ':notify_60_days' => (int)(bool)$settings['notify_60_days'],
         ':notify_30_days' => (int)(bool)$settings['notify_30_days'],
@@ -608,18 +613,19 @@ function saveSettings(PDO $pdo, array $settings): array
         ':notify_7_days' => (int)(bool)$settings['notify_7_days'],
         ':notify_1_day' => (int)(bool)$settings['notify_1_day'],
         ':notification_email' => implode(',', array_values(array_unique(array_filter(array_map('trim', $emails))))),
-        ':smtp_host' => trim((string)($settings['smtp_host'] ?? 'smtp.yandex.ru')),
-        ':smtp_port' => (int)($settings['smtp_port'] ?? 587),
-        ':smtp_username' => trim((string)($settings['smtp_username'] ?? SENDER_EMAIL)),
+        ':smtp_host' => trim((string)($settings['smtp_host'] ?? $current['smtp_host'] ?? 'smtp.yandex.ru')),
+        ':smtp_port' => (int)($settings['smtp_port'] ?? $current['smtp_port'] ?? 587),
+        ':smtp_username' => trim((string)($settings['smtp_username'] ?? $current['smtp_username'] ?? SENDER_EMAIL)),
         ':smtp_password' => $smtpPassword,
-        ':smtp_from_email' => trim((string)($settings['smtp_from_email'] ?? SENDER_EMAIL)),
-        ':smtp_from_name' => trim((string)($settings['smtp_from_name'] ?? 'Сроки годности')),
-        ':notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
+        ':smtp_from_email' => trim((string)($settings['smtp_from_email'] ?? $current['smtp_from_email'] ?? SENDER_EMAIL)),
+        ':smtp_from_name' => trim((string)($settings['smtp_from_name'] ?? $current['smtp_from_name'] ?? 'Сроки годности')),
+        ':notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? $current['notification_time'] ?? '09:00')),
     ];
 
     $statement = $pdo->prepare(
         'UPDATE settings
-         SET notify_90_days = :notify_90_days,
+         SET notify_180_days = :notify_180_days,
+             notify_90_days = :notify_90_days,
              notify_60_days = :notify_60_days,
              notify_30_days = :notify_30_days,
              notify_15_days = :notify_15_days,
@@ -650,6 +656,51 @@ function getRawSettings(PDO $pdo): array
 function normalizeNotificationTime(string $time): string
 {
     return preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time) ? $time : '09:00';
+}
+
+function getNotificationHistory(?PDO $pdo): array
+{
+    if (!$pdo) {
+        return [];
+    }
+
+    $statement = $pdo->prepare(
+        "SELECT action, payload, created_at
+         FROM logs
+         WHERE action IN ('expiry_notifications_sent', 'test_notification_sent')
+         ORDER BY id DESC"
+    );
+    $statement->execute();
+
+    return array_map(static function (array $row): array {
+        $payload = json_decode((string)($row['payload'] ?? ''), true);
+        $payload = is_array($payload) ? $payload : [];
+
+        return [
+            'date' => (string)$row['created_at'],
+            'text' => notificationHistoryText((string)$row['action'], $payload),
+        ];
+    }, $statement->fetchAll());
+}
+
+function notificationHistoryText(string $action, array $payload): string
+{
+    if (isset($payload['text']) && trim((string)$payload['text']) !== '') {
+        return (string)$payload['text'];
+    }
+
+    if ($action === 'test_notification_sent' && isset($payload['article'], $payload['days_left'])) {
+        return sprintf(
+            'Истекает срок годности через %d дней у партии артикул %s.',
+            (int)$payload['days_left'],
+            (string)$payload['article']
+        );
+    }
+
+    $rows = isset($payload['rows']) ? (int)$payload['rows'] : 0;
+    return $rows > 0
+        ? 'Отправлено уведомление по партиям: ' . $rows . '.'
+        : 'Уведомление отправлено.';
 }
 
 function getSystemSettingsInfo(?PDO $pdo): array

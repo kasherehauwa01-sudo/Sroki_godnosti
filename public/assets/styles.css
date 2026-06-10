@@ -111,3 +111,27 @@ tr.indicator-gray td { background: var(--gray); color: #4b5563; }
     .password-field { flex-direction: column; }
     .system-info { grid-template-columns: 1fr; }
 }
+.notification-history-list {
+    max-height: 320px;
+    overflow-y: auto;
+    display: grid;
+    gap: 10px;
+    padding-right: 6px;
+}
+.notification-history-item {
+    display: grid;
+    gap: 6px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: #f8fafc;
+}
+.notification-history-item time {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+}
+.notification-history-item p {
+    margin: 0;
+    white-space: pre-line;
+}

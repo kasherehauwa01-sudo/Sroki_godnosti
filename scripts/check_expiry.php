@@ -53,6 +53,7 @@ try {
         'criteria' => ['expired', ...$notificationDays],
         'rows' => count($batches),
         'sender' => SENDER_EMAIL,
+        'text' => $body,
     ]);
 
     exit($sent ? 0 : 1);
@@ -81,7 +82,7 @@ function splitEmails(string $emails): array
 function getEnabledNotificationDays(array $settings): array
 {
     $days = [];
-    foreach ([90, 60, 30, 15, 7, 1] as $day) {
+    foreach ([180, 90, 60, 30, 15, 7, 1] as $day) {
         if ((int)($settings['notify_' . $day . '_days'] ?? 0) === 1) {
             $days[] = $day;
         }

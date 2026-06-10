@@ -598,6 +598,47 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
+    if (before.status && after.status && before.status !== after.status) {
+        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
+    }
+
+    return changes;
+}
+
+function formatHistoryDetails(action, payload) {
+    const parsed = parseHistoryPayload(payload);
+
+    if (action === 'create') {
+        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (action === 'bulk_create') {
+        const addedText = parsed.batches && parsed.batches.length
+            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
+            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
+        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
+            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
+            : '';
+
+        return `${addedText}${duplicatesText}`;
+    }
+
+    if (action === 'update') {
+        const before = parsed.before || {};
+        const after = parsed.after || parsed;
+        const changes = formatChangedFields(before, after);
+        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
+        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
+    }
+
+    if (action === 'delete') {
+        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (parsed.text) return parsed.text;
+
+    // Запасной вариант нужен для старых записей истории со служебными полями.
+    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
 function formatHistoryBatch(batch) {
@@ -686,6 +727,7 @@ async function loadHistory() {
 
 function renderSettings() {
     const settings = state.settings || {};
+    qs('#notify180').checked = Boolean(settings.notify_180_days);
     qs('#notify90').checked = Boolean(settings.notify_90_days);
     qs('#notify60').checked = Boolean(settings.notify_60_days);
     qs('#notify30').checked = Boolean(settings.notify_30_days);
@@ -693,16 +735,7 @@ function renderSettings() {
     qs('#notify7').checked = Boolean(settings.notify_7_days);
     qs('#notify1').checked = Boolean(settings.notify_1_day);
     qs('#notificationEmails').value = (settings.emails || []).join('\n');
-    qs('#smtpHost').value = settings.smtp_host || 'smtp.yandex.ru';
-    qs('#smtpPort').value = settings.smtp_port || 587;
-    qs('#smtpUsername').value = settings.smtp_username || 'vr-vk@yandex.ru';
-    qs('#smtpPassword').value = '';
-    qs('#smtpFromEmail').value = settings.smtp_from_email || 'vr-vk@yandex.ru';
-    qs('#smtpFromName').value = settings.smtp_from_name || 'Сроки годности';
-    qs('#notificationTime').value = settings.notification_time || '09:00';
-    qs('#smtpPasswordState').textContent = settings.smtp_password_set
-        ? 'SMTP пароль сохранён. Оставьте поле пустым, чтобы не менять его.'
-        : 'SMTP пароль пока не сохранён.';
+    renderNotificationHistory(settings.notification_history || []);
 
     const system = settings.system || {};
     qs('#systemCheckSchedule').textContent = system.check_schedule || 'ежедневно в 09:00';
@@ -711,9 +744,25 @@ function renderSettings() {
     qs('#systemSmtpStatus').textContent = system.smtp_status || 'Не выполнялось';
 }
 
+function renderNotificationHistory(history) {
+    const container = qs('#notificationHistoryList');
+    if (!history.length) {
+        container.textContent = 'Уведомления пока не отправлялись.';
+        return;
+    }
+
+    container.innerHTML = history.map((item) => `
+        <article class="notification-history-item">
+            <time>${escapeHtml(item.date || 'Дата не указана')}</time>
+            <p>${escapeHtml(item.text || 'Текст уведомления не указан')}</p>
+        </article>
+    `).join('');
+}
+
 function collectSettingsForm() {
     const emails = qs('#notificationEmails').value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean);
     return {
+        notify_180_days: qs('#notify180').checked,
         notify_90_days: qs('#notify90').checked,
         notify_60_days: qs('#notify60').checked,
         notify_30_days: qs('#notify30').checked,
@@ -721,13 +770,6 @@ function collectSettingsForm() {
         notify_7_days: qs('#notify7').checked,
         notify_1_day: qs('#notify1').checked,
         emails,
-        smtp_host: qs('#smtpHost').value.trim(),
-        smtp_port: Number(qs('#smtpPort').value || 587),
-        smtp_username: qs('#smtpUsername').value.trim(),
-        smtp_password: qs('#smtpPassword').value,
-        smtp_from_email: qs('#smtpFromEmail').value.trim(),
-        smtp_from_name: qs('#smtpFromName').value.trim(),
-        notification_time: qs('#notificationTime').value || '09:00',
     };
 }
 
@@ -756,6 +798,7 @@ async function sendTestNotification() {
     try {
         await persistSettings();
         const result = await api('test_notification', { settings_password: state.settingsPassword });
+        await loadSettings();
         status.textContent = result.message || 'Тестовое уведомление отправлено.';
         showToast(status.textContent);
     } catch (error) {
@@ -910,7 +953,6 @@ function bindEvents() {
     qs('#exportAllButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.batches), 'reestr_vse_partii.xlsx', batchExportMapper));
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
-    qs('#toggleSmtpPasswordButton').addEventListener('click', toggleSmtpPasswordVisibility);
     qs('#settingsForm').addEventListener('submit', async (event) => {
         event.preventDefault();
         try {

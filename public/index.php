@@ -67,6 +67,7 @@ declare(strict_types=1);
             <form class="settings-grid" id="settingsForm">
                 <div class="card form">
                     <h3>Уведомления</h3>
+                    <label class="checkbox-row"><input id="notify180" name="notify_180_days" type="checkbox"> За 180 дней</label>
                     <label class="checkbox-row"><input id="notify90" name="notify_90_days" type="checkbox"> За 90 дней</label>
                     <label class="checkbox-row"><input id="notify60" name="notify_60_days" type="checkbox"> За 60 дней</label>
                     <label class="checkbox-row"><input id="notify30" name="notify_30_days" type="checkbox"> За 30 дней</label>
@@ -87,26 +88,10 @@ manager@site.ru"></textarea></label>
                     <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
                 </div>
 
-                <div class="card form">
-                    <h3>SMTP</h3>
-                    <label>SMTP сервер<input id="smtpHost" placeholder="smtp.yandex.ru"></label>
-                    <label>SMTP порт<input id="smtpPort" min="1" max="65535" type="number" placeholder="587"></label>
-                    <label>SMTP логин<input id="smtpUsername" type="email" placeholder="vr-vk@yandex.ru"></label>
-                    <label>SMTP пароль
-                        <div class="password-field">
-                            <input id="smtpPassword" autocomplete="new-password" type="password" placeholder="Оставьте пустым, чтобы сохранить текущий пароль">
-                            <button class="ghost-button" id="toggleSmtpPasswordButton" type="button">Показать</button>
-                        </div>
-                    </label>
-                    <label>Email отправителя<input id="smtpFromEmail" type="email" placeholder="vr-vk@yandex.ru"></label>
-                    <label>Имя отправителя<input id="smtpFromName" placeholder="Сроки годности"></label>
-                    <p class="subtitle" id="smtpPasswordState"></p>
-                </div>
 
-                <div class="card form">
-                    <h3>Время отправки уведомлений</h3>
-                    <label>Отправлять уведомления в:<input id="notificationTime" type="time" required value="09:00"></label>
-                    <p class="subtitle">Изменение времени будет использоваться после настройки cron.</p>
+                <div class="card form notification-history-card">
+                    <h3>История уведомлений</h3>
+                    <div class="notification-history-list" id="notificationHistoryList" aria-live="polite">Уведомления пока не отправлялись.</div>
                 </div>
 
                 <div class="card form settings-system-card">
