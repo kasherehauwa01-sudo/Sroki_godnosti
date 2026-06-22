@@ -9,6 +9,7 @@ const state = {
     settingsPassword: '',
     writeOffAccessGranted: false,
     writeOffPassword: '',
+    selectedBatchIds: new Set(),
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -26,7 +27,7 @@ function showToast(message, isError = false) {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'test_notification', 'verify_write_off']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'verify_write_off']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -279,6 +280,32 @@ function getFilterParams() {
     };
 }
 
+function updateSelectionControls() {
+    const visibleIds = state.filteredBatches.map((batch) => String(batch.id));
+    const selectedVisibleCount = visibleIds.filter((id) => state.selectedBatchIds.has(id)).length;
+    const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+    const selectAll = qs('#selectAllBatches');
+
+    qs('#selectionHeader').classList.toggle('hidden', !state.writeOffAccessGranted);
+    qs('#bulkDeleteButton').classList.toggle('hidden', !state.writeOffAccessGranted || state.selectedBatchIds.size === 0);
+    qs('#bulkDeleteButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
+
+    if (selectAll) {
+        selectAll.checked = allVisibleSelected;
+        selectAll.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
+        selectAll.disabled = !state.writeOffAccessGranted || visibleIds.length === 0;
+    }
+}
+
+function pruneSelectedBatchesToFilteredRows() {
+    const visibleIds = new Set(state.filteredBatches.map((batch) => String(batch.id)));
+    state.selectedBatchIds.forEach((id) => {
+        if (!visibleIds.has(id)) {
+            state.selectedBatchIds.delete(id);
+        }
+    });
+}
+
 function renderRegistry() {
     const filters = getFilterParams();
     state.filteredBatches = state.batches.filter((batch) => {
@@ -288,12 +315,20 @@ function renderRegistry() {
             && (!filters.days_to || (filters.days_to === 'expired' ? days < 0 : days >= 0 && days <= Number(filters.days_to)));
     });
     sortRegistryRows();
+    if (!state.writeOffAccessGranted) {
+        state.selectedBatchIds.clear();
+    }
+    pruneSelectedBatchesToFilteredRows();
     updateSortButtons();
 
     qs('#registryBody').innerHTML = state.filteredBatches.map((batch) => {
         const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
         const options = statusOptions.map((option) => `<option ${option === batch.status ? 'selected' : ''}>${option}</option>`).join('');
+        const selectionCell = state.writeOffAccessGranted
+            ? `<td class="selection-column"><input class="batch-select-checkbox" data-id="${escapeHtml(batch.id)}" type="checkbox" ${state.selectedBatchIds.has(String(batch.id)) ? 'checked' : ''}></td>`
+            : '';
         return `<tr class="${indicatorClass(days)}">
+            ${selectionCell}
             <td>${escapeHtml(batch.article)}</td>
             <td>${escapeHtml(batch.quantity)}</td>
             <td>${escapeHtml(formatExpiryMonthRu(batch.expiryDate))}</td>
@@ -307,11 +342,35 @@ function renderRegistry() {
                 </div>
             </td>
         </tr>`;
-    }).join('') || '<tr><td colspan="7">Партий не найдено.</td></tr>';
+    }).join('') || `<tr><td colspan="${state.writeOffAccessGranted ? 8 : 7}">Партий не найдено.</td></tr>`;
 
+    qsa('.batch-select-checkbox').forEach((checkbox) => checkbox.addEventListener('change', onBatchSelectionChange));
+    updateSelectionControls();
     qsa('.status-select').forEach((select) => select.addEventListener('change', onStatusChange));
     qsa('.edit-batch-button').forEach((button) => button.addEventListener('click', () => openEditDialog(button.dataset.id)));
     qsa('.delete-batch-button').forEach((button) => button.addEventListener('click', () => deleteBatch(button.dataset.id)));
+}
+
+function onBatchSelectionChange(event) {
+    const id = String(event.target.dataset.id || '');
+    if (!id) return;
+
+    if (event.target.checked) {
+        state.selectedBatchIds.add(id);
+    } else {
+        state.selectedBatchIds.delete(id);
+    }
+    updateSelectionControls();
+}
+
+function toggleSelectAllBatches(event) {
+    const visibleIds = state.filteredBatches.map((batch) => String(batch.id));
+    if (event.target.checked) {
+        visibleIds.forEach((id) => state.selectedBatchIds.add(id));
+    } else {
+        visibleIds.forEach((id) => state.selectedBatchIds.delete(id));
+    }
+    renderRegistry();
 }
 
 function sortRegistryRows() {
@@ -502,6 +561,25 @@ async function deleteBatch(id) {
     }
 }
 
+async function deleteSelectedBatches() {
+    const ids = [...state.selectedBatchIds];
+    if (!ids.length) return;
+    if (!state.writeOffAccessGranted) {
+        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        return;
+    }
+    if (!confirm(`Удалить выбранные партии (${ids.length}) безвозвратно?`)) return;
+
+    try {
+        const result = await api('bulk_delete', { ids, write_off_password: state.writeOffPassword });
+        state.selectedBatchIds.clear();
+        showToast(`Удалено партий: ${result.deleted || ids.length}`);
+        await Promise.all([loadBatches(), loadHistory()]);
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
 function exportXlsx(rows, filename, mapper) {
     if (!window.XLSX) {
         showToast('Библиотека XLSX еще не загрузилась. Повторите действие через несколько секунд.', true);
@@ -570,7 +648,7 @@ async function submitWriteOffPassword(event) {
         state.writeOffAccessGranted = true;
         closeWriteOffPasswordDialog();
         renderRegistry();
-        showToast('Теперь можно изменять статусы и списывать/удалять партии в реестре.');
+        showToast('Теперь можно выделять, изменять статусы и удалять партии в реестре.');
     } catch (verifyError) {
         state.writeOffPassword = '';
         error.textContent = verifyError.message;
@@ -619,29 +697,6 @@ function parseHistoryPayload(payload) {
         return typeof payload === 'string' ? JSON.parse(payload) : payload;
     } catch (error) {
         return { text: String(payload) };
-    }
-
-    if (action === 'bulk_create') {
-        const addedText = parsed.batches && parsed.batches.length
-            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
-            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
-        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
-            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
-            : '';
-
-        return `${addedText}${duplicatesText}`;
-    }
-
-    if (action === 'update') {
-        const before = parsed.before || {};
-        const after = parsed.after || parsed;
-        const changes = formatChangedFields(before, after);
-        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
-        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
-    }
-
-    if (action === 'delete') {
-        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
     }
 
     if (parsed.text) return parsed.text;
@@ -1075,6 +1130,8 @@ function bindEvents() {
     qs('#cancelSettingsPasswordButton').addEventListener('click', closeSettingsPasswordDialog);
     qs('#closeSettingsPasswordDialogButton').addEventListener('click', closeSettingsPasswordDialog);
     qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
+    qs('#bulkDeleteButton').addEventListener('click', deleteSelectedBatches);
+    qs('#selectAllBatches').addEventListener('change', toggleSelectAllBatches);
     qs('#writeOffPasswordForm').addEventListener('submit', submitWriteOffPassword);
     qs('#cancelWriteOffPasswordButton').addEventListener('click', closeWriteOffPasswordDialog);
     qs('#closeWriteOffPasswordDialogButton').addEventListener('click', closeWriteOffPasswordDialog);

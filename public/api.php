@@ -41,6 +41,7 @@ try {
             'bulk_create' => bulkCreateBatches($pdo, $payload['batches'] ?? []),
             'update' => updateBatch($pdo, $payload),
             'delete' => deleteBatch($pdo, $payload),
+            'bulk_delete' => deleteBatches($pdo, $payload),
             'settings' => saveProtectedSettings($pdo, $payload),
             'test_notification' => sendTestNotification($pdo, $payload),
             'verify_write_off' => verifyWriteOffPassword($payload),
@@ -366,6 +367,37 @@ function deleteBatch(PDO $pdo, array $payload): array
     writeLog($pdo, 'delete', ['batch' => $deletedBatch]);
 
     return ['ok' => true];
+}
+
+function deleteBatches(PDO $pdo, array $payload): array
+{
+    $ids = array_values(array_unique(array_map('intval', $payload['ids'] ?? [])));
+    $ids = array_values(array_filter($ids, static fn (int $id): bool => $id > 0));
+    if (!$ids) {
+        throw new InvalidArgumentException('Не выбраны партии для удаления.');
+    }
+
+    assertWriteOffPassword($payload);
+
+    $pdo->beginTransaction();
+    try {
+        $deleted = 0;
+        foreach ($ids as $id) {
+            $deletedBatch = findBatchForHistory($pdo, $id);
+            $statement = $pdo->prepare('DELETE FROM batches WHERE id = :id');
+            $statement->execute([':id' => $id]);
+            if ($statement->rowCount() > 0) {
+                $deleted++;
+                writeLog($pdo, 'delete', ['batch' => $deletedBatch]);
+            }
+        }
+        $pdo->commit();
+    } catch (Throwable $error) {
+        $pdo->rollBack();
+        throw $error;
+    }
+
+    return ['ok' => true, 'deleted' => $deleted];
 }
 
 function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): array

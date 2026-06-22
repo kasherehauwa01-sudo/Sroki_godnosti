@@ -135,3 +135,6 @@ tr.indicator-gray td { background: var(--gray); color: #4b5563; }
     margin: 0;
     white-space: pre-line;
 }
+.selection-column { width: 120px; min-width: 120px; }
+.select-all-row { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font-weight: 700; }
+.select-all-row input, .batch-select-checkbox { width: auto; }
