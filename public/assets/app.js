@@ -234,6 +234,28 @@ function getRowValue(row, aliases) {
     return '';
 }
 
+
+function repairExcelText(value) {
+    if (typeof value !== 'string' || !/[À-ÿ]{2}/.test(value) || typeof TextDecoder === 'undefined') {
+        return value;
+    }
+
+    try {
+        // Старые .xls иногда отдают кириллицу как байты Windows-1251, прочитанные Latin-1.
+        const bytes = Uint8Array.from([...value].map((char) => char.charCodeAt(0) & 0xff));
+        return new TextDecoder('windows-1251').decode(bytes);
+    } catch (error) {
+        return value;
+    }
+}
+
+function normalizeSpreadsheetRowEncoding(row) {
+    return Object.fromEntries(Object.entries(row).map(([key, value]) => [
+        repairExcelText(key),
+        typeof value === 'string' ? repairExcelText(value) : value,
+    ]));
+}
+
 function normalizeBatch(row) {
     const quantityRaw = getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']);
 
@@ -598,6 +620,66 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
+
+    if (action === 'bulk_create') {
+        const addedText = parsed.batches && parsed.batches.length
+            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
+            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
+        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
+            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
+            : '';
+
+        return `${addedText}${duplicatesText}`;
+    }
+
+    if (action === 'update') {
+        const before = parsed.before || {};
+        const after = parsed.after || parsed;
+        const changes = formatChangedFields(before, after);
+        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
+        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
+    }
+
+    if (action === 'delete') {
+        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (parsed.text) return parsed.text;
+
+    // Запасной вариант нужен для старых записей истории со служебными полями.
+    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
+}
+
+function formatHistoryBatch(batch) {
+    if (!batch) return 'партия не найдена';
+
+    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
+    const expiry = batch.expiry_date || batch.expiryDate
+        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate)}`
+        : 'без указанного срока годности';
+    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
+    const status = batch.status ? `, статус «${batch.status}»` : '';
+
+    return `партия ${article} ${expiry}${quantity}${status}`;
+}
+
+function formatHistoryBatchList(batches) {
+    return (batches || []).map(formatHistoryBatch).join('\n');
+}
+
+function formatChangedFields(before, after) {
+    const changes = [];
+    if (!before || !after) return changes;
+
+    if (before.article && after.article && before.article !== after.article) {
+        changes.push(`артикул изменён с ${before.article} на ${after.article}`);
+    }
+    if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
+        changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date)} на ${formatExpiryMonthRu(after.expiry_date)}`);
+    }
+    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
+        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
+    }
     if (before.status && after.status && before.status !== after.status) {
         changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
     }
@@ -923,11 +1005,13 @@ function readXlsx(file) {
     reader.onload = (event) => {
         try {
             // SheetJS читает и современные .xlsx, и старые бинарные .xls из ArrayBuffer.
-            const workbook = XLSX.read(new Uint8Array(event.target.result), { type: 'array', cellDates: true });
+            // codepage помогает старым .xls с кириллицей в Windows-1251.
+            const workbook = XLSX.read(new Uint8Array(event.target.result), { type: 'array', cellDates: true, codepage: 1251 });
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: false });
-            const detectedHeaders = rawRows[0] ? Object.keys(rawRows[0]).join(', ') : 'не найдены';
-            const normalizedRows = rawRows.map(normalizeBatch);
+            const decodedRows = rawRows.map(normalizeSpreadsheetRowEncoding);
+            const detectedHeaders = decodedRows[0] ? Object.keys(decodedRows[0]).join(', ') : 'не найдены';
+            const normalizedRows = decodedRows.map(normalizeBatch);
             state.importRows = normalizedRows.filter((row) => row.article && row.hasQuantity && row.expiryDate);
             const skipped = normalizedRows.length - state.importRows.length;
             const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.quantity} — ${formatExpiryMonthRu(row.expiryDate)}`).join('\n');
