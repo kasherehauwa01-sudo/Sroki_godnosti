@@ -148,7 +148,7 @@ manager@site.ru"></textarea></label>
                 </ul>
             </div>
             <button class="ghost-button" id="downloadTemplateButton" type="button">Скачать шаблон таблицы</button>
-            <label>Файл XLSX<input id="xlsxInput" accept=".xlsx,.xls" type="file"></label>
+            <label>Файл XLS или XLSX<input id="xlsxInput" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" type="file"></label>
             <div class="import-preview" id="importPreview">Файл не выбран.</div>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelXlsImportButton" type="button">Отмена</button>
