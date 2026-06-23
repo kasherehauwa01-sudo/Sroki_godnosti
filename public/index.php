@@ -129,7 +129,35 @@ manager@site.ru"></textarea></label>
                     <h3>Настройки уведомлений</h3>
                     <p>Во вкладке «Настройки» задаются дни уведомлений, получатели и доступна кнопка «Тест уведомления». История отправленных писем отображается в блоке «История уведомлений».</p>
                 </div>
-            </div>
+
+                <div class="card form">
+                    <h3>Получатели уведомлений</h3>
+                    <label>Email получателей<textarea id="notificationEmails" rows="6" placeholder="vr-vk@yandex.ru
+manager@site.ru"></textarea></label>
+                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
+                    <div class="settings-actions">
+                        <button class="primary" type="submit">Сохранить настройки</button>
+                        <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                    </div>
+                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
+                </div>
+
+
+                <div class="card form notification-history-card">
+                    <h3>История уведомлений</h3>
+                    <div class="notification-history-list" id="notificationHistoryList" aria-live="polite">Уведомления пока не отправлялись.</div>
+                </div>
+
+                <div class="card form settings-system-card">
+                    <h3>Система</h3>
+                    <dl class="system-info">
+                        <dt>Проверка сроков:</dt><dd id="systemCheckSchedule">Не выполнялось</dd>
+                        <dt>Последняя проверка:</dt><dd id="systemLastCheck">Не выполнялось</dd>
+                        <dt>Последняя отправка письма:</dt><dd id="systemLastSent">Не выполнялось</dd>
+                        <dt>Статус SMTP:</dt><dd id="systemSmtpStatus">Не выполнялось</dd>
+                    </dl>
+                </div>
+            </form>
         </section>
 
         <section class="panel" id="tab-history">
