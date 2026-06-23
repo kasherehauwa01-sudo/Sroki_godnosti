@@ -82,7 +82,7 @@ function splitEmails(string $emails): array
 function getEnabledNotificationDays(array $settings): array
 {
     $days = [];
-    foreach ([180, 90, 60, 30, 15, 7, 1] as $day) {
+    foreach ([0, 180, 90, 60, 30, 15, 7, 1] as $day) {
         if ((int)($settings['notify_' . $day . '_days'] ?? 0) === 1) {
             $days[] = $day;
         }
@@ -111,9 +111,13 @@ function buildEmailBody(array $batches, string $appUrl): string
 function buildBatchNotificationText(array $batch, string $appUrl): string
 {
     $daysLeft = (int)$batch['days_left'];
-    $prefix = $daysLeft < 0
-        ? 'Срок годности партии истек.'
-        : 'Срок годности партии заканчивается через ' . $daysLeft . ' дней.';
+    if ($daysLeft === 0) {
+        $prefix = 'Истек срок годности у партии товаров с артикулом ' . $batch['article'] . '.';
+    } else {
+        $prefix = $daysLeft < 0
+            ? 'Срок годности партии истек.'
+            : 'Срок годности партии заканчивается через ' . $daysLeft . ' дней.';
+    }
 
     return implode("\n", [
         $prefix,

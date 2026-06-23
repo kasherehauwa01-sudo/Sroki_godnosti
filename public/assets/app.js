@@ -4,6 +4,8 @@ const state = {
     importRows: [],
     settings: { emails: [], rules: [] },
     history: [],
+    allHistory: [],
+    notificationDetails: '',
     registrySort: { field: 'expiryDate', direction: 'asc' },
     settingsAccessGranted: false,
     settingsPassword: '',
@@ -25,14 +27,32 @@ function showToast(message, isError = false) {
     setTimeout(() => toast.classList.remove('show'), 4200);
 }
 
-function showNotificationDialog(message, title = 'Уведомление') {
+function showNotificationDialog(message, title = 'Уведомление', details = '') {
+    state.notificationDetails = details;
     qs('#notificationDialogTitle').textContent = title;
     qs('#notificationDialogBody').textContent = message;
+    qs('#notificationDetailsButton').classList.toggle('hidden', !details);
     qs('#notificationDialog').showModal();
+}
+
+function showNotificationDetails() {
+    if (!state.notificationDetails) return;
+    qs('#notificationDialogTitle').textContent = 'Подробности';
+    qs('#notificationDialogBody').textContent = state.notificationDetails;
+    qs('#notificationDetailsButton').classList.add('hidden');
 }
 
 function closeNotificationDialog() {
     qs('#notificationDialog').close();
+    state.notificationDetails = '';
+}
+
+function showDuplicateNotification(added, skipped, details) {
+    showNotificationDialog(
+        `Загружено ${Number(added || 0)} партий. Исключено из загрузки ${Number(skipped || 0)} дублей.`,
+        'Найдены дубли',
+        details
+    );
 }
 
 function getApiMethod(action, data = {}) {
@@ -507,7 +527,7 @@ async function submitAddBatchesForm(event) {
     try {
         const result = await api('bulk_create', { batches });
         if (Number(result.skipped_duplicates || 0) > 0) {
-            showNotificationDialog(formatDuplicateBatches(result.duplicates), 'Найдены дубли');
+            showDuplicateNotification(result.added || 0, result.skipped_duplicates || 0, formatDuplicateBatches(result.duplicates));
         }
         closeAddBatchesDialog();
         showToast(`Добавлено партий: ${result.added || 0}`);
@@ -709,6 +729,11 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
+
+    if (parsed.text) return parsed.text;
+
+    // Запасной вариант нужен для старых записей истории со служебными полями.
+    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
 function formatHistoryBatch(batch) {
@@ -787,7 +812,59 @@ function formatHistoryDetails(action, payload) {
 async function loadHistory() {
     const result = await api('logs');
     const registryActions = new Set(['create', 'bulk_create', 'update', 'delete']);
-    state.history = (result.logs || []).filter((log) => registryActions.has(log.event || log.action));
+    state.allHistory = (result.logs || []).filter((log) => registryActions.has(log.event || log.action));
+    renderHistory();
+}
+
+function getDateRangeByPreset(preset) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    const end = new Date(today);
+
+    if (preset === 'yesterday') {
+        start.setDate(start.getDate() - 1);
+        end.setDate(end.getDate() - 1);
+    } else if (preset === 'week') {
+        start.setDate(start.getDate() - 6);
+    } else if (preset === 'month') {
+        start.setMonth(start.getMonth() - 1);
+    } else if (preset === 'year') {
+        start.setFullYear(start.getFullYear() - 1);
+    }
+
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+}
+
+function parseHistoryDate(value) {
+    const normalized = String(value || '').replace(' ', 'T');
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getCustomHistoryDateRange() {
+    const fromValue = qs('#historyDateFrom').value;
+    const toValue = qs('#historyDateTo').value;
+    const start = fromValue ? new Date(`${fromValue}T00:00:00`) : null;
+    const end = toValue ? new Date(`${toValue}T23:59:59`) : null;
+    return { start, end };
+}
+
+function renderHistory() {
+    const preset = qs('#historyDatePreset').value;
+    const actionFilter = qs('#historyActionFilter').value;
+    qsa('.history-custom-date').forEach((field) => field.classList.toggle('hidden', preset !== 'custom'));
+    const range = preset === 'custom' ? getCustomHistoryDateRange() : getDateRangeByPreset(preset);
+
+    state.history = state.allHistory.filter((log) => {
+        const action = log.event || log.action;
+        const date = parseHistoryDate(log.createdAt);
+        return (!actionFilter || action === actionFilter)
+            && (!range.start || (date && date >= range.start))
+            && (!range.end || (date && date <= range.end));
+    });
+
     qs('#historyBody').innerHTML = state.history.map((log) => `<tr>
         <td>${escapeHtml(log.createdAt)}</td>
         <td>${escapeHtml(formatHistoryAction(log.event || log.action))}</td>
@@ -797,6 +874,7 @@ async function loadHistory() {
 
 function renderSettings() {
     const settings = state.settings || {};
+    qs('#notify0').checked = Boolean(settings.notify_0_days);
     qs('#notify180').checked = Boolean(settings.notify_180_days);
     qs('#notify90').checked = Boolean(settings.notify_90_days);
     qs('#notify60').checked = Boolean(settings.notify_60_days);
@@ -832,6 +910,7 @@ function renderNotificationHistory(history) {
 function collectSettingsForm() {
     const emails = qs('#notificationEmails').value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean);
     return {
+        notify_0_days: qs('#notify0').checked,
         notify_180_days: qs('#notify180').checked,
         notify_90_days: qs('#notify90').checked,
         notify_60_days: qs('#notify60').checked,
@@ -988,6 +1067,7 @@ function bindEvents() {
 
     qs('#closeNotificationDialogButton').addEventListener('click', closeNotificationDialog);
     qs('#confirmNotificationDialogButton').addEventListener('click', closeNotificationDialog);
+    qs('#notificationDetailsButton').addEventListener('click', showNotificationDetails);
 
     qs('#settingsPasswordForm').addEventListener('submit', submitSettingsPassword);
     qs('#cancelSettingsPasswordButton').addEventListener('click', closeSettingsPasswordDialog);
@@ -1020,7 +1100,7 @@ function bindEvents() {
         try {
             const result = await api('bulk_create', { batches: state.importRows });
             if (Number(result.skipped_duplicates || 0) > 0) {
-                showNotificationDialog(formatImportDuplicateBatches(result.duplicates), 'Найдены дубли');
+                showDuplicateNotification(result.added || 0, result.skipped_duplicates || 0, formatImportDuplicateBatches(result.duplicates));
                 showToast(`Загружено строк: ${result.added || 0}. Пропущено дублей: ${result.skipped_duplicates}`);
             } else {
                 showToast(`Загружено строк: ${result.added || 0}`);
@@ -1031,6 +1111,8 @@ function bindEvents() {
             showToast(error.message, true);
         }
     });
+
+    ['#historyDatePreset', '#historyDateFrom', '#historyDateTo', '#historyActionFilter'].forEach((selector) => qs(selector).addEventListener('input', renderHistory));
 
     ['#filterArticle', '#filterStatus', '#filterDaysTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
     qsa('[data-sort]').forEach((button) => button.addEventListener('click', () => toggleRegistrySort(button.dataset.sort)));

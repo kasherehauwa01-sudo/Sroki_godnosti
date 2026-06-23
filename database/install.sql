@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS logs (
 
 CREATE TABLE IF NOT EXISTS settings (
     id TINYINT UNSIGNED NOT NULL,
+    notify_0_days TINYINT(1) NOT NULL DEFAULT 0,
     notify_180_days TINYINT(1) NOT NULL DEFAULT 0,
     notify_90_days TINYINT(1) NOT NULL DEFAULT 0,
     notify_60_days TINYINT(1) NOT NULL DEFAULT 1,
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 INSERT INTO settings (
     id,
+    notify_0_days,
     notify_180_days,
     notify_90_days,
     notify_60_days,
@@ -69,5 +71,5 @@ INSERT INTO settings (
     smtp_from_email,
     smtp_from_name,
     notification_time
-) VALUES (1, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00')
+) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00')
 ON DUPLICATE KEY UPDATE id = id;

@@ -78,6 +78,7 @@ function refreshDaysLeft(PDO $pdo): void
 function ensureSettingsSchema(PDO $pdo): void
 {
     $columns = [
+        'notify_0_days' => "ALTER TABLE settings ADD COLUMN notify_0_days TINYINT(1) NOT NULL DEFAULT 0 AFTER id",
         'notify_180_days' => "ALTER TABLE settings ADD COLUMN notify_180_days TINYINT(1) NOT NULL DEFAULT 0 AFTER id",
         'smtp_host' => "ALTER TABLE settings ADD COLUMN smtp_host VARCHAR(255) NULL AFTER notification_email",
         'smtp_port' => "ALTER TABLE settings ADD COLUMN smtp_port SMALLINT UNSIGNED NULL AFTER smtp_host",
@@ -579,9 +580,9 @@ function getSettings(PDO $pdo): array
 function normalizeSettings(array $settings): array
 {
     $rules = [];
-    foreach ([180, 90, 60, 30, 15, 7, 1] as $days) {
+    foreach ([0, 180, 90, 60, 30, 15, 7, 1] as $days) {
         if ((int)$settings['notify_' . $days . '_days'] === 1) {
-            $rules[] = ['id' => 'notify_' . $days, 'days' => $days, 'title' => 'За ' . $days . ' дней'];
+            $rules[] = ['id' => 'notify_' . $days, 'days' => $days, 'title' => $days === 0 ? 'В день просрочки' : 'За ' . $days . ' дней'];
         }
     }
 
@@ -589,6 +590,7 @@ function normalizeSettings(array $settings): array
 
     return [
         'id' => 1,
+        'notify_0_days' => (bool)($settings['notify_0_days'] ?? false),
         'notify_180_days' => (bool)($settings['notify_180_days'] ?? false),
         'notify_90_days' => (bool)$settings['notify_90_days'],
         'notify_60_days' => (bool)$settings['notify_60_days'],
@@ -624,7 +626,7 @@ function saveSettings(PDO $pdo, array $settings): array
         }
     }
 
-    foreach ([180, 90, 60, 30, 15, 7, 1] as $days) {
+    foreach ([0, 180, 90, 60, 30, 15, 7, 1] as $days) {
         $key = 'notify_' . $days . '_days';
         $settings[$key] = array_key_exists($key, $settings)
             ? filter_var($settings[$key], FILTER_VALIDATE_BOOLEAN)
@@ -637,6 +639,7 @@ function saveSettings(PDO $pdo, array $settings): array
     }
 
     $params = [
+        ':notify_0_days' => (int)(bool)$settings['notify_0_days'],
         ':notify_180_days' => (int)(bool)$settings['notify_180_days'],
         ':notify_90_days' => (int)(bool)$settings['notify_90_days'],
         ':notify_60_days' => (int)(bool)$settings['notify_60_days'],
@@ -656,7 +659,8 @@ function saveSettings(PDO $pdo, array $settings): array
 
     $statement = $pdo->prepare(
         'UPDATE settings
-         SET notify_180_days = :notify_180_days,
+         SET notify_0_days = :notify_0_days,
+             notify_180_days = :notify_180_days,
              notify_90_days = :notify_90_days,
              notify_60_days = :notify_60_days,
              notify_30_days = :notify_30_days,
