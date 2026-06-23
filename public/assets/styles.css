@@ -138,3 +138,10 @@ tr.indicator-gray td { background: var(--gray); color: #4b5563; }
 .selection-column { width: 120px; min-width: 120px; }
 .select-all-row { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font-weight: 700; }
 .select-all-row input, .batch-select-checkbox { width: auto; }
+.registry-summary { margin: 12px 0; color: var(--muted); font-weight: 700; }
+.instruction-card { max-width: 980px; }
+.instruction-content { display: grid; gap: 10px; }
+.instruction-content h3 { margin: 12px 0 0; }
+.instruction-content p { margin: 0; color: #475569; line-height: 1.55; }
+.notification-modal-card { max-height: min(82vh, 720px); display: flex; flex-direction: column; }
+.notification-dialog-body { max-height: min(52vh, 460px); overflow-y: auto; white-space: pre-line; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: #f8fafc; color: #475569; }

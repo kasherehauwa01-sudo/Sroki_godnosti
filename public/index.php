@@ -24,6 +24,7 @@ declare(strict_types=1);
         <nav class="tabs" aria-label="Разделы администратора">
             <button class="tab active" data-tab="registry" type="button">Реестр</button>
             <button class="tab" data-tab="history" type="button">История</button>
+            <button class="tab" data-tab="instruction" type="button">Инструкция</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
             <button class="primary nav-action" id="openAddBatchesButton" type="button">Добавить партию</button>
             <button class="ghost-button" id="openWriteOffButton" type="button">Списать / Удалить</button>
@@ -56,6 +57,7 @@ declare(strict_types=1);
                 <button class="ghost-button" id="exportFilteredButton" type="button">Выгрузить фильтр XLSX</button>
                 <button class="ghost-button" id="exportAllButton" type="button">Выгрузить все XLSX</button>
             </div>
+            <div class="registry-summary" id="registrySummary">Показано строк: 0</div>
             <div class="table-wrap card wide">
                 <table>
                     <thead><tr><th class="selection-column hidden" id="selectionHeader"><label class="select-all-row"><input id="selectAllBatches" type="checkbox"> Выделить все</label></th><th><button class="sort-button" data-sort="article" type="button">Артикул <span class="sort-indicator" data-sort-indicator="article"></span></button></th><th><button class="sort-button" data-sort="quantity" type="button">Количество <span class="sort-indicator" data-sort-indicator="quantity"></span></button></th><th><button class="sort-button" data-sort="expiryDate" type="button">Срок годности <span class="sort-indicator" data-sort-indicator="expiryDate"></span></button></th><th><button class="sort-button" data-sort="daysLeft" type="button">Остаток дней <span class="sort-indicator" data-sort-indicator="daysLeft"></span></button></th><th>Статус</th><th><button class="sort-button" data-sort="createdAt" type="button">Дата внесения <span class="sort-indicator" data-sort-indicator="createdAt"></span></button></th><th>Действия</th></tr></thead>
@@ -75,6 +77,57 @@ declare(strict_types=1);
                     <label class="checkbox-row"><input id="notify15" name="notify_15_days" type="checkbox"> За 15 дней</label>
                     <label class="checkbox-row"><input id="notify7" name="notify_7_days" type="checkbox"> За 7 дней</label>
                     <label class="checkbox-row"><input id="notify1" name="notify_1_day" type="checkbox"> За 1 день</label>
+                </div>
+
+                <div class="card form">
+                    <h3>Получатели уведомлений</h3>
+                    <label>Email получателей<textarea id="notificationEmails" rows="6" placeholder="vr-vk@yandex.ru
+manager@site.ru"></textarea></label>
+                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
+                    <div class="settings-actions">
+                        <button class="primary" type="submit">Сохранить настройки</button>
+                        <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                    </div>
+                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
+                </div>
+
+
+                <div class="card form notification-history-card">
+                    <h3>История уведомлений</h3>
+                    <div class="notification-history-list" id="notificationHistoryList" aria-live="polite">Уведомления пока не отправлялись.</div>
+                </div>
+
+                <div class="card form settings-system-card">
+                    <h3>Система</h3>
+                    <dl class="system-info">
+                        <dt>Проверка сроков:</dt><dd id="systemCheckSchedule">Не выполнялось</dd>
+                        <dt>Последняя проверка:</dt><dd id="systemLastCheck">Не выполнялось</dd>
+                        <dt>Последняя отправка письма:</dt><dd id="systemLastSent">Не выполнялось</dd>
+                        <dt>Статус SMTP:</dt><dd id="systemSmtpStatus">Не выполнялось</dd>
+                    </dl>
+                </div>
+            </form>
+        </section>
+
+
+        <section class="panel" id="tab-instruction">
+            <div class="card instruction-card">
+                <h2>Инструкция пользователя</h2>
+                <div class="instruction-content">
+                    <h3>Поиск и фильтры</h3>
+                    <p>Во вкладке «Реестр» используйте поле «Артикул», фильтр «Статус» и фильтр «Остаток дней до». Таблица обновляется без перезагрузки страницы. Кнопка «Сбросить фильтры» возвращает полный список.</p>
+                    <h3>Добавление партий</h3>
+                    <p>Нажмите «Добавить партию», заполните артикул, количество и срок годности в формате <strong>мм.гггг</strong>. Для нескольких строк используйте «Добавить строку».</p>
+                    <h3>Загрузка XLS/XLSX</h3>
+                    <p>В окне «Добавить партию» нажмите «Загрузить XLS», выберите файл .xls или .xlsx и проверьте предварительный просмотр. Обязательные колонки: артикул, количество и срок годности.</p>
+                    <h3>Редактирование и статусы</h3>
+                    <p>Карандаш в строке открывает редактирование партии. Чтобы менять статусы, нажмите «Списать / Удалить» и введите пароль ответственного пользователя.</p>
+                    <h3>Удаление</h3>
+                    <p>После ввода пароля можно удалить одну строку кнопкой корзины или отметить несколько строк чекбоксами. «Выделить все» выбирает только строки, оставшиеся после фильтров. Кнопка «Удалить» появляется, когда выбрана хотя бы одна строка.</p>
+                    <h3>Экспорт и история</h3>
+                    <p>«Выгрузить фильтр XLSX» сохраняет текущий отфильтрованный список, «Выгрузить все XLSX» — весь активный реестр. Все изменения смотрите во вкладке «История».</p>
+                    <h3>Настройки уведомлений</h3>
+                    <p>Во вкладке «Настройки» задаются дни уведомлений, получатели и доступна кнопка «Тест уведомления». История отправленных писем отображается в блоке «История уведомлений».</p>
                 </div>
 
                 <div class="card form">
@@ -213,6 +266,19 @@ manager@site.ru"></textarea></label>
                 <button class="primary" type="submit">Сохранить изменения</button>
             </div>
         </form>
+    </dialog>
+
+    <dialog class="modal" id="notificationDialog">
+        <div class="card form modal-card notification-modal-card">
+            <div class="modal-heading">
+                <h2 id="notificationDialogTitle">Уведомление</h2>
+                <button class="icon-button" id="closeNotificationDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="notification-dialog-body" id="notificationDialogBody"></div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmNotificationDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
