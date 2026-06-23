@@ -617,7 +617,9 @@ function normalizeSettings(array $settings): array
 function saveSettings(PDO $pdo, array $settings): array
 {
     $current = getRawSettings($pdo);
-    $emails = $settings['emails'] ?? splitEmails((string)($settings['notification_email'] ?? ''));
+    $emails = array_key_exists('emails', $settings)
+        ? (array)$settings['emails']
+        : splitEmails((string)($settings['notification_email'] ?? $current['notification_email'] ?? ''));
     $rules = $settings['rules'] ?? [];
     $enabledDays = [];
     foreach ($rules as $rule) {
