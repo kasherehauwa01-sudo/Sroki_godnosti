@@ -140,6 +140,54 @@ manager@site.ru"></textarea></label>
                     <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
                 </div>
 
+                <div class="card form notification-history-card">
+                    <h3>История уведомлений</h3>
+                    <div class="notification-history-list" id="notificationHistoryList" aria-live="polite">Уведомления пока не отправлялись.</div>
+                </div>
+
+                <div class="card form settings-system-card">
+                    <h3>Система</h3>
+                    <dl class="system-info">
+                        <dt>Проверка сроков:</dt><dd id="systemCheckSchedule">Не выполнялось</dd>
+                        <dt>Последняя проверка:</dt><dd id="systemLastCheck">Не выполнялось</dd>
+                        <dt>Последняя отправка письма:</dt><dd id="systemLastSent">Не выполнялось</dd>
+                        <dt>Статус SMTP:</dt><dd id="systemSmtpStatus">Не выполнялось</dd>
+                    </dl>
+                </div>
+            </form>
+        </section>
+
+
+        <section class="panel" id="tab-instruction">
+            <div class="card instruction-card">
+                <h2>Инструкция пользователя</h2>
+                <div class="instruction-content">
+                    <h3>Поиск и фильтры</h3>
+                    <p>Во вкладке «Реестр» используйте поле «Артикул», фильтр «Статус» и фильтр «Остаток дней до». Таблица обновляется без перезагрузки страницы. Кнопка «Сбросить фильтры» возвращает полный список.</p>
+                    <h3>Добавление партий</h3>
+                    <p>Нажмите «Добавить партию», заполните артикул, количество и срок годности в формате <strong>мм.гггг</strong>. Для нескольких строк используйте «Добавить строку».</p>
+                    <h3>Загрузка XLS/XLSX</h3>
+                    <p>В окне «Добавить партию» нажмите «Загрузить XLS», выберите файл .xls или .xlsx и проверьте предварительный просмотр. Обязательные колонки: артикул, количество и срок годности.</p>
+                    <h3>Редактирование и статусы</h3>
+                    <p>Карандаш в строке открывает редактирование партии. Чтобы менять статусы, нажмите «Списать / Удалить» и введите пароль ответственного пользователя.</p>
+                    <h3>Удаление</h3>
+                    <p>После ввода пароля можно удалить одну строку кнопкой корзины или отметить несколько строк чекбоксами. «Выделить все» выбирает только строки, оставшиеся после фильтров. Кнопка «Удалить» появляется, когда выбрана хотя бы одна строка.</p>
+                    <h3>Экспорт и история</h3>
+                    <p>«Выгрузить фильтр XLSX» сохраняет текущий отфильтрованный список, «Выгрузить все XLSX» — весь активный реестр. Все изменения смотрите во вкладке «История».</p>
+                </div>
+
+                <div class="card form">
+                    <h3>Получатели уведомлений</h3>
+                    <label>Email получателей<textarea id="notificationEmails" rows="6" placeholder="vr-vk@yandex.ru
+manager@site.ru"></textarea></label>
+                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
+                    <div class="settings-actions">
+                        <button class="primary" type="submit">Сохранить настройки</button>
+                        <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                    </div>
+                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
+                </div>
+
 
                 <div class="card form notification-history-card">
                     <h3>История уведомлений</h3>
