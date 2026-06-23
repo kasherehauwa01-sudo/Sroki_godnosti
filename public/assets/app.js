@@ -4,7 +4,14 @@ const state = {
     importRows: [],
     settings: { emails: [], rules: [] },
     history: [],
+    allHistory: [],
+    notificationDetails: '',
     registrySort: { field: 'expiryDate', direction: 'asc' },
+    settingsAccessGranted: false,
+    settingsPassword: '',
+    writeOffAccessGranted: false,
+    writeOffPassword: '',
+    selectedBatchIds: new Set(),
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -20,14 +27,42 @@ function showToast(message, isError = false) {
     setTimeout(() => toast.classList.remove('show'), 4200);
 }
 
+function showNotificationDialog(message, title = 'Уведомление', details = '') {
+    state.notificationDetails = details;
+    qs('#notificationDialogTitle').textContent = title;
+    qs('#notificationDialogBody').textContent = message;
+    qs('#notificationDetailsButton').classList.toggle('hidden', !details);
+    qs('#notificationDialog').showModal();
+}
+
+function showNotificationDetails() {
+    if (!state.notificationDetails) return;
+    qs('#notificationDialogTitle').textContent = 'Подробности';
+    qs('#notificationDialogBody').textContent = state.notificationDetails;
+    qs('#notificationDetailsButton').classList.add('hidden');
+}
+
+function closeNotificationDialog() {
+    qs('#notificationDialog').close();
+    state.notificationDetails = '';
+}
+
+function showDuplicateNotification(added, skipped, details) {
+    showNotificationDialog(
+        `Загружено ${Number(added || 0)} партий. Исключено из загрузки ${Number(skipped || 0)} дублей.`,
+        'Найдены дубли',
+        details
+    );
+}
+
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'verify_write_off']);
 
     // Действие settings используется и для чтения, и для сохранения:
-    // пустой payload читается GET-запросом, payload с настройками сохраняется POST-запросом.
+    // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
     if (action === 'settings') {
-        return Object.keys(data).length === 0 ? 'GET' : 'POST';
+        return Object.prototype.hasOwnProperty.call(data, 'settings') ? 'POST' : 'GET';
     }
     if (readActions.has(action)) return 'GET';
     if (writeActions.has(action)) return 'POST';
@@ -142,6 +177,19 @@ function formatExpiryMonthRu(value) {
     return `${month}.${year}`;
 }
 
+function maskExpiryMonthValue(value) {
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 6);
+    return digits.length > 2 ? `${digits.slice(0, 2)}.${digits.slice(2)}` : digits;
+}
+
+function bindExpiryMonthMask(input) {
+    input.value = maskExpiryMonthValue(input.value);
+    // Маска оставляет только цифры и автоматически добавляет точку после месяца.
+    input.addEventListener('input', () => {
+        input.value = maskExpiryMonthValue(input.value);
+    });
+}
+
 function formatDuplicateBatches(duplicates, intro = 'В реестре уже есть эта партия товара') {
     const rows = (duplicates || [])
         .filter(Boolean)
@@ -217,6 +265,28 @@ function getRowValue(row, aliases) {
     return '';
 }
 
+
+function repairExcelText(value) {
+    if (typeof value !== 'string' || !/[À-ÿ]{2}/.test(value) || typeof TextDecoder === 'undefined') {
+        return value;
+    }
+
+    try {
+        // Старые .xls иногда отдают кириллицу как байты Windows-1251, прочитанные Latin-1.
+        const bytes = Uint8Array.from([...value].map((char) => char.charCodeAt(0) & 0xff));
+        return new TextDecoder('windows-1251').decode(bytes);
+    } catch (error) {
+        return value;
+    }
+}
+
+function normalizeSpreadsheetRowEncoding(row) {
+    return Object.fromEntries(Object.entries(row).map(([key, value]) => [
+        repairExcelText(key),
+        typeof value === 'string' ? repairExcelText(value) : value,
+    ]));
+}
+
 function normalizeBatch(row) {
     const quantityRaw = getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']);
 
@@ -240,6 +310,32 @@ function getFilterParams() {
     };
 }
 
+function updateSelectionControls() {
+    const visibleIds = state.filteredBatches.map((batch) => String(batch.id));
+    const selectedVisibleCount = visibleIds.filter((id) => state.selectedBatchIds.has(id)).length;
+    const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+    const selectAll = qs('#selectAllBatches');
+
+    qs('#selectionHeader').classList.toggle('hidden', !state.writeOffAccessGranted);
+    qs('#bulkDeleteButton').classList.toggle('hidden', !state.writeOffAccessGranted || state.selectedBatchIds.size === 0);
+    qs('#bulkDeleteButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
+
+    if (selectAll) {
+        selectAll.checked = allVisibleSelected;
+        selectAll.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
+        selectAll.disabled = !state.writeOffAccessGranted || visibleIds.length === 0;
+    }
+}
+
+function pruneSelectedBatchesToFilteredRows() {
+    const visibleIds = new Set(state.filteredBatches.map((batch) => String(batch.id)));
+    state.selectedBatchIds.forEach((id) => {
+        if (!visibleIds.has(id)) {
+            state.selectedBatchIds.delete(id);
+        }
+    });
+}
+
 function renderRegistry() {
     const filters = getFilterParams();
     state.filteredBatches = state.batches.filter((batch) => {
@@ -249,30 +345,63 @@ function renderRegistry() {
             && (!filters.days_to || (filters.days_to === 'expired' ? days < 0 : days >= 0 && days <= Number(filters.days_to)));
     });
     sortRegistryRows();
+    if (!state.writeOffAccessGranted) {
+        state.selectedBatchIds.clear();
+    }
+    pruneSelectedBatchesToFilteredRows();
+    qs('#registrySummary').textContent = `Показано строк: ${state.filteredBatches.length}`;
     updateSortButtons();
 
     qs('#registryBody').innerHTML = state.filteredBatches.map((batch) => {
         const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
         const options = statusOptions.map((option) => `<option ${option === batch.status ? 'selected' : ''}>${option}</option>`).join('');
+        const selectionCell = state.writeOffAccessGranted
+            ? `<td class="selection-column"><input class="batch-select-checkbox" data-id="${escapeHtml(batch.id)}" type="checkbox" ${state.selectedBatchIds.has(String(batch.id)) ? 'checked' : ''}></td>`
+            : '';
         return `<tr class="${indicatorClass(days)}">
+            ${selectionCell}
             <td>${escapeHtml(batch.article)}</td>
             <td>${escapeHtml(batch.quantity)}</td>
             <td>${escapeHtml(formatExpiryMonthRu(batch.expiryDate))}</td>
             <td>${formatDays(days)}</td>
-            <td><select class="status-select" data-id="${escapeHtml(batch.id)}">${options}</select></td>
+            <td><select class="status-select" data-id="${escapeHtml(batch.id)}" ${state.writeOffAccessGranted ? '' : 'disabled'}>${options}</select></td>
             <td>${escapeHtml(formatDateRu(batch.createdAt))}</td>
             <td>
                 <div class="row-actions">
                     <button class="small-button icon-action edit-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Редактировать" aria-label="Редактировать партию">✏️</button>
-                    <button class="small-button icon-action danger delete-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Удалить" aria-label="Удалить партию">🗑️</button>
+                    <button class="small-button icon-action danger delete-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Удалить" aria-label="Удалить партию" ${state.writeOffAccessGranted ? '' : 'disabled'}>🗑️</button>
                 </div>
             </td>
         </tr>`;
-    }).join('') || '<tr><td colspan="7">Партий не найдено.</td></tr>';
+    }).join('') || `<tr><td colspan="${state.writeOffAccessGranted ? 8 : 7}">Партий не найдено.</td></tr>`;
 
+    qsa('.batch-select-checkbox').forEach((checkbox) => checkbox.addEventListener('change', onBatchSelectionChange));
+    updateSelectionControls();
     qsa('.status-select').forEach((select) => select.addEventListener('change', onStatusChange));
     qsa('.edit-batch-button').forEach((button) => button.addEventListener('click', () => openEditDialog(button.dataset.id)));
     qsa('.delete-batch-button').forEach((button) => button.addEventListener('click', () => deleteBatch(button.dataset.id)));
+}
+
+function onBatchSelectionChange(event) {
+    const id = String(event.target.dataset.id || '');
+    if (!id) return;
+
+    if (event.target.checked) {
+        state.selectedBatchIds.add(id);
+    } else {
+        state.selectedBatchIds.delete(id);
+    }
+    updateSelectionControls();
+}
+
+function toggleSelectAllBatches(event) {
+    const visibleIds = state.filteredBatches.map((batch) => String(batch.id));
+    if (event.target.checked) {
+        visibleIds.forEach((id) => state.selectedBatchIds.add(id));
+    } else {
+        visibleIds.forEach((id) => state.selectedBatchIds.delete(id));
+    }
+    renderRegistry();
 }
 
 function sortRegistryRows() {
@@ -280,7 +409,21 @@ function sortRegistryRows() {
     if (!field) return;
 
     const multiplier = direction === 'desc' ? -1 : 1;
-    state.filteredBatches.sort((left, right) => toDateInputValue(left[field]).localeCompare(toDateInputValue(right[field])) * multiplier);
+    state.filteredBatches.sort((left, right) => {
+        if (field === 'daysLeft') {
+            const leftDays = left.daysLeft ?? daysLeft(left.expiryDate);
+            const rightDays = right.daysLeft ?? daysLeft(right.expiryDate);
+            return (leftDays - rightDays) * multiplier;
+        }
+        if (field === 'article') {
+            return String(left.article || '').localeCompare(String(right.article || ''), 'ru', { numeric: true }) * multiplier;
+        }
+        if (field === 'quantity') {
+            return (Number(left.quantity || 0) - Number(right.quantity || 0)) * multiplier;
+        }
+
+        return toDateInputValue(left[field]).localeCompare(toDateInputValue(right[field])) * multiplier;
+    });
 }
 
 function updateSortButtons() {
@@ -306,7 +449,7 @@ async function onStatusChange(event) {
     if (!batch) return;
 
     try {
-        await api('update', { ...batch, status });
+        await api('update', { ...batch, status, write_off_password: state.writeOffPassword });
         batch.status = status;
         showToast('Статус партии обновлен.');
         await loadBatches();
@@ -339,9 +482,10 @@ function createBatchRow(values = {}) {
     row.innerHTML = `
         <label>Артикул<input class="batch-row-article" required autocomplete="off" value="${escapeHtml(values.article || '')}"></label>
         <label>Количество в партии<input class="batch-row-quantity" required min="0" step="1" type="number" value="${escapeHtml(values.quantity ?? '')}"></label>
-        <label>Срок годности<input class="batch-row-expiry" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric" value="${escapeHtml(values.expiryDate || '')}"></label>
+        <label>Срок годности<input class="batch-row-expiry" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric" maxlength="7" value="${escapeHtml(values.expiryDate || '')}"></label>
         <button class="small-button danger remove-batch-row-button" type="button" aria-label="Удалить строку">🗑️</button>
     `;
+    bindExpiryMonthMask(row.querySelector('.batch-row-expiry'));
     row.querySelector('.remove-batch-row-button').addEventListener('click', () => {
         row.remove();
         updateBatchRowRemoveButtons();
@@ -383,7 +527,7 @@ async function submitAddBatchesForm(event) {
     try {
         const result = await api('bulk_create', { batches });
         if (Number(result.skipped_duplicates || 0) > 0) {
-            alert(formatDuplicateBatches(result.duplicates));
+            showDuplicateNotification(result.added || 0, result.skipped_duplicates || 0, formatDuplicateBatches(result.duplicates));
         }
         closeAddBatchesDialog();
         showToast(`Добавлено партий: ${result.added || 0}`);
@@ -395,6 +539,14 @@ async function submitAddBatchesForm(event) {
 
 function openXlsImportDialog() {
     qs('#xlsImportDialog').showModal();
+}
+
+function openXlsImportFromAddDialog() {
+    // Закрываем окно ручного добавления, чтобы открыть отдельное модальное окно загрузки XLS.
+    if (qs('#addBatchesDialog').open) {
+        closeAddBatchesDialog();
+    }
+    openXlsImportDialog();
 }
 
 function closeXlsImportDialog() {
@@ -410,6 +562,7 @@ async function submitEditForm(event) {
     const form = new FormData(event.target);
     const batch = normalizeBatch(Object.fromEntries(form.entries()));
     batch.id = String(form.get('id'));
+    batch.write_off_password = state.writeOffPassword;
 
     try {
         await api('update', batch);
@@ -424,11 +577,34 @@ async function submitEditForm(event) {
 async function deleteBatch(id) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
-    if (!confirm('Уверены, что хотите удалить партию безвозвратно?')) return;
+    if (!state.writeOffAccessGranted) {
+        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        return;
+    }
+    if (!confirm('Уверены, что хотите списать/удалить партию безвозвратно?')) return;
 
     try {
-        await api('delete', { id });
-        showToast('Партия удалена.');
+        await api('delete', { id, write_off_password: state.writeOffPassword });
+        showToast('Партия списана/удалена.');
+        await Promise.all([loadBatches(), loadHistory()]);
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+async function deleteSelectedBatches() {
+    const ids = [...state.selectedBatchIds];
+    if (!ids.length) return;
+    if (!state.writeOffAccessGranted) {
+        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        return;
+    }
+    if (!confirm(`Удалить выбранные партии (${ids.length}) безвозвратно?`)) return;
+
+    try {
+        const result = await api('bulk_delete', { ids, write_off_password: state.writeOffPassword });
+        state.selectedBatchIds.clear();
+        showToast(`Удалено партий: ${result.deleted || ids.length}`);
         await Promise.all([loadBatches(), loadHistory()]);
     } catch (error) {
         showToast(error.message, true);
@@ -454,9 +630,81 @@ async function loadBatches() {
 }
 
 async function loadSettings() {
-    const result = await api('settings');
+    const result = await api('settings', { settings_password: state.settingsPassword });
     state.settings = result.settings || { emails: [], rules: [] };
     renderSettings();
+}
+
+function switchTab(tabName) {
+    document.body.dataset.activeTab = tabName;
+    qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
+    qs(`[data-tab="${tabName}"]`).classList.add('active');
+    qs(`#tab-${tabName}`).classList.add('active');
+}
+
+function openSettingsPasswordDialog() {
+    qs('#settingsPasswordInput').value = '';
+    qs('#settingsPasswordError').textContent = '';
+    qs('#settingsPasswordDialog').showModal();
+    qs('#settingsPasswordInput').focus();
+}
+
+function closeSettingsPasswordDialog() {
+    qs('#settingsPasswordDialog').close();
+}
+
+function openWriteOffPasswordDialog() {
+    if (state.writeOffAccessGranted) {
+        showToast('Изменение статусов уже разрешено.');
+        return;
+    }
+
+    qs('#writeOffPasswordInput').value = '';
+    qs('#writeOffPasswordError').textContent = '';
+    qs('#writeOffPasswordDialog').showModal();
+    qs('#writeOffPasswordInput').focus();
+}
+
+function closeWriteOffPasswordDialog() {
+    qs('#writeOffPasswordDialog').close();
+}
+
+async function submitWriteOffPassword(event) {
+    event.preventDefault();
+    const input = qs('#writeOffPasswordInput');
+    const error = qs('#writeOffPasswordError');
+
+    try {
+        await api('verify_write_off', { write_off_password: input.value });
+        state.writeOffPassword = input.value;
+        state.writeOffAccessGranted = true;
+        closeWriteOffPasswordDialog();
+        renderRegistry();
+        showToast('Теперь можно выделять, изменять статусы и удалять партии в реестре.');
+    } catch (verifyError) {
+        state.writeOffPassword = '';
+        error.textContent = verifyError.message;
+        input.select();
+    }
+}
+
+async function submitSettingsPassword(event) {
+    event.preventDefault();
+    const input = qs('#settingsPasswordInput');
+    const error = qs('#settingsPasswordError');
+
+    state.settingsPassword = input.value;
+
+    try {
+        await loadSettings();
+        state.settingsAccessGranted = true;
+        closeSettingsPasswordDialog();
+        switchTab('settings');
+    } catch (loadError) {
+        state.settingsPassword = '';
+        error.textContent = loadError.message;
+        input.select();
+    }
 }
 
 function formatHistoryAction(action) {
@@ -475,43 +723,235 @@ function formatHistoryAction(action) {
     return actions[action] || action || '';
 }
 
-function formatHistoryDetails(payload) {
-    if (!payload) return '';
+function parseHistoryPayload(payload) {
+    if (!payload) return {};
     try {
-        const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
-        return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('; ');
+        return typeof payload === 'string' ? JSON.parse(payload) : payload;
     } catch (error) {
-        return String(payload);
+        return { text: String(payload) };
     }
+}
+
+function formatHistoryBatch(batch) {
+    if (!batch) return 'партия не найдена';
+
+    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
+    const expiry = batch.expiry_date || batch.expiryDate
+        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate)}`
+        : 'без указанного срока годности';
+    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
+    const status = batch.status ? `, статус «${batch.status}»` : '';
+
+    return `партия ${article} ${expiry}${quantity}${status}`;
+}
+
+function formatHistoryBatchList(batches) {
+    return (batches || []).map(formatHistoryBatch).join('\n');
+}
+
+function formatChangedFields(before, after) {
+    const changes = [];
+    if (!before || !after) return changes;
+
+    if (before.article && after.article && before.article !== after.article) {
+        changes.push(`артикул изменён с ${before.article} на ${after.article}`);
+    }
+    if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
+        changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date)} на ${formatExpiryMonthRu(after.expiry_date)}`);
+    }
+    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
+        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
+    }
+    if (before.status && after.status && before.status !== after.status) {
+        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
+    }
+
+    return changes;
+}
+
+function formatHistoryDetails(action, payload) {
+    const parsed = parseHistoryPayload(payload);
+
+    if (action === 'create') {
+        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (action === 'bulk_create') {
+        const addedText = parsed.batches && parsed.batches.length
+            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
+            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
+        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
+            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
+            : '';
+
+        return `${addedText}${duplicatesText}`;
+    }
+
+    if (action === 'update') {
+        const before = parsed.before || {};
+        const after = parsed.after || parsed;
+        const changes = formatChangedFields(before, after);
+        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
+        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
+    }
+
+    if (action === 'delete') {
+        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (parsed.text) return parsed.text;
+
+    // Запасной вариант нужен для старых записей истории со служебными полями.
+    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
 async function loadHistory() {
     const result = await api('logs');
     const registryActions = new Set(['create', 'bulk_create', 'update', 'delete']);
-    state.history = (result.logs || []).filter((log) => registryActions.has(log.event || log.action));
+    state.allHistory = (result.logs || []).filter((log) => registryActions.has(log.event || log.action));
+    renderHistory();
+}
+
+function getDateRangeByPreset(preset) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    const end = new Date(today);
+
+    if (preset === 'yesterday') {
+        start.setDate(start.getDate() - 1);
+        end.setDate(end.getDate() - 1);
+    } else if (preset === 'week') {
+        start.setDate(start.getDate() - 6);
+    } else if (preset === 'month') {
+        start.setMonth(start.getMonth() - 1);
+    } else if (preset === 'year') {
+        start.setFullYear(start.getFullYear() - 1);
+    }
+
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+}
+
+function parseHistoryDate(value) {
+    const normalized = String(value || '').replace(' ', 'T');
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getCustomHistoryDateRange() {
+    const fromValue = qs('#historyDateFrom').value;
+    const toValue = qs('#historyDateTo').value;
+    const start = fromValue ? new Date(`${fromValue}T00:00:00`) : null;
+    const end = toValue ? new Date(`${toValue}T23:59:59`) : null;
+    return { start, end };
+}
+
+function renderHistory() {
+    const preset = qs('#historyDatePreset').value;
+    const actionFilter = qs('#historyActionFilter').value;
+    qsa('.history-custom-date').forEach((field) => field.classList.toggle('hidden', preset !== 'custom'));
+    const range = preset === 'custom' ? getCustomHistoryDateRange() : getDateRangeByPreset(preset);
+
+    state.history = state.allHistory.filter((log) => {
+        const action = log.event || log.action;
+        const date = parseHistoryDate(log.createdAt);
+        return (!actionFilter || action === actionFilter)
+            && (!range.start || (date && date >= range.start))
+            && (!range.end || (date && date <= range.end));
+    });
+
     qs('#historyBody').innerHTML = state.history.map((log) => `<tr>
         <td>${escapeHtml(log.createdAt)}</td>
         <td>${escapeHtml(formatHistoryAction(log.event || log.action))}</td>
-        <td>${escapeHtml(formatHistoryDetails(log.details || log.payload))}</td>
+        <td class="history-details">${escapeHtml(formatHistoryDetails(log.event || log.action, log.details || log.payload))}</td>
     </tr>`).join('') || '<tr><td colspan="3">История пока отсутствует.</td></tr>';
 }
 
 function renderSettings() {
-    qs('#emailList').innerHTML = (state.settings.emails || []).map((email) => `<div class="chip">
-        <span>${escapeHtml(email)}</span><button class="small-danger" data-email="${escapeHtml(email)}" type="button">Удалить</button>
-    </div>`).join('') || '<p class="subtitle">Получатели не добавлены.</p>';
+    const settings = state.settings || {};
+    qs('#notify0').checked = Boolean(settings.notify_0_days);
+    qs('#notify180').checked = Boolean(settings.notify_180_days);
+    qs('#notify90').checked = Boolean(settings.notify_90_days);
+    qs('#notify60').checked = Boolean(settings.notify_60_days);
+    qs('#notify30').checked = Boolean(settings.notify_30_days);
+    qs('#notify15').checked = Boolean(settings.notify_15_days);
+    qs('#notify7').checked = Boolean(settings.notify_7_days);
+    qs('#notify1').checked = Boolean(settings.notify_1_day);
+    qs('#notificationEmails').value = (settings.emails || []).join('\n');
+    renderNotificationHistory(settings.notification_history || []);
 
-    qsa('[data-email]').forEach((button) => button.addEventListener('click', async () => {
-        await persistSettings({ emails: state.settings.emails.filter((email) => email !== button.dataset.email) });
-    }));
+    const system = settings.system || {};
+    qs('#systemCheckSchedule').textContent = system.check_schedule || 'ежедневно в 09:00';
+    qs('#systemLastCheck').textContent = system.last_check || 'Не выполнялось';
+    qs('#systemLastSent').textContent = system.last_sent || 'Не выполнялось';
+    qs('#systemSmtpStatus').textContent = system.smtp_status || 'Не выполнялось';
 }
 
-async function persistSettings(partial) {
-    state.settings = { ...state.settings, ...partial };
-    const result = await api('settings', { settings: state.settings });
+function renderNotificationHistory(history) {
+    const container = qs('#notificationHistoryList');
+    if (!history.length) {
+        container.textContent = 'Уведомления пока не отправлялись.';
+        return;
+    }
+
+    container.innerHTML = history.map((item) => `
+        <article class="notification-history-item">
+            <time>${escapeHtml(item.date || 'Дата не указана')}</time>
+            <p>${escapeHtml(item.text || 'Текст уведомления не указан')}</p>
+        </article>
+    `).join('');
+}
+
+function collectSettingsForm() {
+    const emails = qs('#notificationEmails').value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean);
+    return {
+        notify_0_days: qs('#notify0').checked,
+        notify_180_days: qs('#notify180').checked,
+        notify_90_days: qs('#notify90').checked,
+        notify_60_days: qs('#notify60').checked,
+        notify_30_days: qs('#notify30').checked,
+        notify_15_days: qs('#notify15').checked,
+        notify_7_days: qs('#notify7').checked,
+        notify_1_day: qs('#notify1').checked,
+        emails,
+    };
+}
+
+async function persistSettings(partial = null) {
+    state.settings = partial ? { ...state.settings, ...partial } : collectSettingsForm();
+    const result = await api('settings', { settings_password: state.settingsPassword, settings: state.settings });
     state.settings = result.settings;
     renderSettings();
     showToast('Настройки сохранены.');
+}
+
+function toggleSmtpPasswordVisibility() {
+    const input = qs('#smtpPassword');
+    const button = qs('#toggleSmtpPasswordButton');
+    input.type = input.type === 'password' ? 'text' : 'password';
+    button.textContent = input.type === 'password' ? 'Показать' : 'Скрыть';
+}
+
+async function sendTestNotification() {
+    const button = qs('#sendTestNotificationButton');
+    const status = qs('#testNotificationStatus');
+    button.disabled = true;
+    status.textContent = 'Сохраняю настройки и отправляю тестовое уведомление...';
+    showToast('Отправляю тестовое уведомление...');
+
+    try {
+        await persistSettings();
+        const result = await api('test_notification', { settings_password: state.settingsPassword });
+        await loadSettings();
+        status.textContent = result.message || 'Тестовое уведомление отправлено.';
+        showToast(status.textContent);
+    } catch (error) {
+        status.textContent = error.message;
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
 }
 
 function downloadTemplateXlsx() {
@@ -536,21 +976,32 @@ function downloadTemplateXlsx() {
 
 function readXlsx(file) {
     if (!window.XLSX) {
-        showToast('Библиотека XLSX еще не загрузилась. Обновите страницу и повторите импорт.', true);
+        showToast('Библиотека для чтения XLS/XLSX еще не загрузилась. Обновите страницу и повторите импорт.', true);
         return;
     }
 
-    qs('#importPreview').textContent = 'Читаю файл...';
+    const extension = file.name.toLowerCase().split('.').pop();
+    if (!['xls', 'xlsx'].includes(extension)) {
+        qs('#importPreview').textContent = 'Выберите файл в формате XLS или XLSX.';
+        qs('#importButton').disabled = true;
+        showToast('Поддерживаются только файлы .xls и .xlsx.', true);
+        return;
+    }
+
+    qs('#importPreview').textContent = 'Читаю файл XLS/XLSX...';
     qs('#importButton').disabled = true;
 
     const reader = new FileReader();
     reader.onload = (event) => {
         try {
-            const workbook = XLSX.read(new Uint8Array(event.target.result), { type: 'array', cellDates: true });
+            // SheetJS читает и современные .xlsx, и старые бинарные .xls из ArrayBuffer.
+            // codepage помогает старым .xls с кириллицей в Windows-1251.
+            const workbook = XLSX.read(new Uint8Array(event.target.result), { type: 'array', cellDates: true, codepage: 1251 });
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: false });
-            const detectedHeaders = rawRows[0] ? Object.keys(rawRows[0]).join(', ') : 'не найдены';
-            const normalizedRows = rawRows.map(normalizeBatch);
+            const decodedRows = rawRows.map(normalizeSpreadsheetRowEncoding);
+            const detectedHeaders = decodedRows[0] ? Object.keys(decodedRows[0]).join(', ') : 'не найдены';
+            const normalizedRows = decodedRows.map(normalizeBatch);
             state.importRows = normalizedRows.filter((row) => row.article && row.hasQuantity && row.expiryDate);
             const skipped = normalizedRows.length - state.importRows.length;
             const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.quantity} — ${formatExpiryMonthRu(row.expiryDate)}`).join('\n');
@@ -565,7 +1016,7 @@ function readXlsx(file) {
             qs('#importButton').disabled = state.importRows.length === 0;
         } catch (error) {
             state.importRows = [];
-            qs('#importPreview').textContent = 'Не удалось прочитать XLSX-файл.';
+            qs('#importPreview').textContent = 'Не удалось прочитать XLS/XLSX-файл.';
             qs('#importButton').disabled = true;
             showToast(error.message, true);
         }
@@ -593,19 +1044,38 @@ function applyInitialUrlState() {
     if (article) qs('#filterArticle').value = article;
 
     if (params.get('tab') === 'registry') {
-        qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
-        qs('[data-tab="registry"]').classList.add('active');
-        qs('#tab-registry').classList.add('active');
+        switchTab('registry');
     }
 }
 
 function bindEvents() {
-    qsa('.tab').forEach((button) => button.addEventListener('click', () => {
-        qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
-        button.classList.add('active');
-        qs(`#tab-${button.dataset.tab}`).classList.add('active');
+    qsa('.tab').forEach((button) => button.addEventListener('click', async () => {
+        if (button.dataset.tab === 'settings' && !state.settingsAccessGranted) {
+            openSettingsPasswordDialog();
+            return;
+        }
+
+        switchTab(button.dataset.tab);
+        if (button.dataset.tab === 'settings') {
+            await loadSettings();
+        }
     }));
 
+    qs('#closeNotificationDialogButton').addEventListener('click', closeNotificationDialog);
+    qs('#confirmNotificationDialogButton').addEventListener('click', closeNotificationDialog);
+    qs('#notificationDetailsButton').addEventListener('click', showNotificationDetails);
+
+    qs('#settingsPasswordForm').addEventListener('submit', submitSettingsPassword);
+    qs('#cancelSettingsPasswordButton').addEventListener('click', closeSettingsPasswordDialog);
+    qs('#closeSettingsPasswordDialogButton').addEventListener('click', closeSettingsPasswordDialog);
+    qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
+    qs('#bulkDeleteButton').addEventListener('click', deleteSelectedBatches);
+    qs('#selectAllBatches').addEventListener('change', toggleSelectAllBatches);
+    qs('#writeOffPasswordForm').addEventListener('submit', submitWriteOffPassword);
+    qs('#cancelWriteOffPasswordButton').addEventListener('click', closeWriteOffPasswordDialog);
+    qs('#closeWriteOffPasswordDialogButton').addEventListener('click', closeWriteOffPasswordDialog);
+
+    bindExpiryMonthMask(qs('#editExpiryDate'));
     qs('#editBatchForm').addEventListener('submit', submitEditForm);
     qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
     qs('#cancelEditButton').addEventListener('click', closeEditDialog);
@@ -616,7 +1086,7 @@ function bindEvents() {
     qs('#closeAddBatchesDialogButton').addEventListener('click', closeAddBatchesDialog);
     qs('#cancelAddBatchesButton').addEventListener('click', closeAddBatchesDialog);
 
-    qs('#openXlsImportButton').addEventListener('click', openXlsImportDialog);
+    qs('#openXlsImportButton').addEventListener('click', openXlsImportFromAddDialog);
     qs('#closeXlsImportDialogButton').addEventListener('click', closeXlsImportDialog);
     qs('#cancelXlsImportButton').addEventListener('click', closeXlsImportDialog);
 
@@ -626,31 +1096,33 @@ function bindEvents() {
         try {
             const result = await api('bulk_create', { batches: state.importRows });
             if (Number(result.skipped_duplicates || 0) > 0) {
-                alert(formatImportDuplicateBatches(result.duplicates));
+                showDuplicateNotification(result.added || 0, result.skipped_duplicates || 0, formatImportDuplicateBatches(result.duplicates));
                 showToast(`Загружено строк: ${result.added || 0}. Пропущено дублей: ${result.skipped_duplicates}`);
             } else {
                 showToast(`Загружено строк: ${result.added || 0}`);
             }
             closeXlsImportDialog();
-            await loadBatches();
+            await Promise.all([loadBatches(), loadHistory()]);
         } catch (error) {
             showToast(error.message, true);
         }
     });
 
+    ['#historyDatePreset', '#historyDateFrom', '#historyDateTo', '#historyActionFilter'].forEach((selector) => qs(selector).addEventListener('input', renderHistory));
+
     ['#filterArticle', '#filterStatus', '#filterDaysTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
     qsa('[data-sort]').forEach((button) => button.addEventListener('click', () => toggleRegistrySort(button.dataset.sort)));
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
-    qs('#exportAllButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.batches), 'reestr_vse_partii.xlsx', batchExportMapper));
-    qs('#refreshHistoryButton').addEventListener('click', loadHistory);
 
-    qs('#emailForm').addEventListener('submit', async (event) => {
+    qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
+
+    qs('#settingsForm').addEventListener('submit', async (event) => {
         event.preventDefault();
-        const email = qs('#emailInput').value.trim();
-        if (email && !state.settings.emails.includes(email)) {
-            await persistSettings({ emails: [...state.settings.emails, email] });
-            qs('#emailInput').value = '';
+        try {
+            await persistSettings();
+        } catch (error) {
+            showToast(error.message, true);
         }
     });
 
@@ -674,7 +1146,7 @@ function batchExportMapper(batch) {
 
 async function bootstrap() {
     try {
-        await Promise.all([loadBatches(), loadSettings(), loadHistory()]);
+        await Promise.all([loadBatches(), loadHistory()]);
         showToast('Данные обновлены.');
     } catch (error) {
         showToast(error.message, true);
