@@ -3,8 +3,8 @@
  * Ежедневная проверка сроков годности для запуска из cron.
  *
  * Скрипт каждый день в 09:00 по МСК пересчитывает остаток дней, выбирает
- * партии со статусом «В наличии» по фиксированным критериям уведомлений
- * и отправляет одно письмо всем получателям из настроек.
+ * партии со статусом «В наличии» только по включенным в настройках дням
+ * уведомлений и отправляет одно письмо всем получателям из настроек.
  */
 declare(strict_types=1);
 
@@ -34,14 +34,14 @@ try {
     $statement = $pdo->prepare(
         "SELECT article, quantity, expiry_date, days_left
          FROM batches
-         WHERE status = 'В наличии' AND (days_left < 0 OR days_left IN ($placeholders))
+         WHERE status = 'В наличии' AND days_left IN ($placeholders)
          ORDER BY days_left ASC, expiry_date ASC, article ASC"
     );
     $statement->execute($notificationDays);
     $batches = $statement->fetchAll();
 
     if (!$batches) {
-        writeLog($pdo, 'expiry_check_no_matches', ['criteria' => ['expired', ...$notificationDays]]);
+        writeLog($pdo, 'expiry_check_no_matches', ['criteria' => $notificationDays]);
         exit(0);
     }
 
@@ -50,7 +50,7 @@ try {
     $sent = sendNotificationEmail($pdo, $emails, $subject, $body, $settings);
     writeLog($pdo, $sent ? 'expiry_notifications_sent' : 'expiry_notifications_failed', [
         'emails' => $emails,
-        'criteria' => ['expired', ...$notificationDays],
+        'criteria' => $notificationDays,
         'rows' => count($batches),
         'sender' => SENDER_EMAIL,
         'text' => $body,
@@ -114,9 +114,7 @@ function buildBatchNotificationText(array $batch, string $appUrl): string
     if ($daysLeft === 0) {
         $prefix = 'Истек срок годности у партии товаров с артикулом ' . $batch['article'] . '.';
     } else {
-        $prefix = $daysLeft < 0
-            ? 'Срок годности партии истек.'
-            : 'Срок годности партии заканчивается через ' . $daysLeft . ' дней.';
+        $prefix = 'Срок годности партии заканчивается через ' . $daysLeft . ' дней.';
     }
 
     return implode("\n", [
