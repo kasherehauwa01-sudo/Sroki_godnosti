@@ -103,12 +103,14 @@ tr.indicator-gray td { background: var(--gray); color: #4b5563; }
 .checkbox-row input { width: auto; }
 .password-field { display: flex; gap: 8px; }
 .password-field input { flex: 1; }
+.copy-field { display: flex; gap: 8px; align-items: center; }
+.copy-field input { flex: 1; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
 .system-info { display: grid; grid-template-columns: minmax(180px, auto) 1fr; gap: 10px 14px; margin: 0; }
 .system-info dt { font-weight: 700; color: #334155; }
 .system-info dd { margin: 0; color: var(--muted); }
 @media (max-width: 920px) {
     .settings-grid { grid-template-columns: 1fr; }
-    .password-field { flex-direction: column; }
+    .password-field, .copy-field { flex-direction: column; align-items: stretch; }
     .system-info { grid-template-columns: 1fr; }
 }
 .notification-history-list {

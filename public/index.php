@@ -105,6 +105,17 @@ manager@site.ru"></textarea></label>
                         <dt>Статус SMTP:</dt><dd id="systemSmtpStatus">Не выполнялось</dd>
                     </dl>
                 </div>
+
+                <div class="card form settings-command-card">
+                    <h3>Команда обновления</h3>
+                    <label>Команда для сервера
+                        <div class="copy-field">
+                            <input id="deployCommandInput" readonly value="cd /var/www/html/vr/sroki_godnosti && git pull origin main">
+                            <button class="ghost-button" id="copyDeployCommandButton" type="button">Копировать</button>
+                        </div>
+                    </label>
+                    <p class="subtitle">Нажмите «Копировать», чтобы скопировать команду обновления в буфер обмена.</p>
+                </div>
             </form>
         </section>
 
