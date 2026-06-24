@@ -85,7 +85,6 @@ declare(strict_types=1);
 manager@site.ru"></textarea></label>
                     <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
                     <div class="settings-actions">
-                        <button class="primary" type="submit">Сохранить настройки</button>
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
                     </div>
                     <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
@@ -115,6 +114,10 @@ manager@site.ru"></textarea></label>
                         </div>
                     </label>
                     <p class="subtitle">Нажмите «Копировать», чтобы скопировать команду обновления в буфер обмена.</p>
+                </div>
+
+                <div class="settings-save-bar">
+                    <button class="primary" id="saveSettingsButton" type="submit">Сохранить настройки</button>
                 </div>
             </form>
         </section>
@@ -307,6 +310,19 @@ manager@site.ru"></textarea></label>
                 <button class="primary" type="submit">Открыть настройки</button>
             </div>
         </form>
+    </dialog>
+
+    <dialog class="modal" id="settingsUnsavedDialog">
+        <div class="card form modal-card">
+            <div class="modal-heading">
+                <h2>Настройки не сохранены</h2>
+            </div>
+            <p class="subtitle">Настройки не сохранены. Уверены, что хотите покинуть страницу?</p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="returnToSettingsButton" type="button">Вернуться к настройкам</button>
+                <button class="primary" id="leaveSettingsButton" type="button">Покинуть страницу</button>
+            </div>
+        </div>
     </dialog>
 
     <dialog class="modal" id="writeOffPasswordDialog">

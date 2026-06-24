@@ -9,6 +9,8 @@ const state = {
     registrySort: { field: 'expiryDate', direction: 'asc' },
     settingsAccessGranted: false,
     settingsPassword: '',
+    settingsDirty: false,
+    pendingSettingsLeaveTab: '',
     writeOffAccessGranted: false,
     writeOffPassword: '',
     selectedBatchIds: new Set(),
@@ -671,6 +673,32 @@ function closeSettingsPasswordDialog() {
     qs('#settingsPasswordDialog').close();
 }
 
+function markSettingsDirty() {
+    state.settingsDirty = true;
+}
+
+function openSettingsUnsavedDialog(tabName) {
+    state.pendingSettingsLeaveTab = tabName;
+    qs('#settingsUnsavedDialog').showModal();
+}
+
+function closeSettingsUnsavedDialog() {
+    state.pendingSettingsLeaveTab = '';
+    qs('#settingsUnsavedDialog').close();
+}
+
+async function leaveSettingsWithoutSaving() {
+    const tabName = state.pendingSettingsLeaveTab;
+    closeSettingsUnsavedDialog();
+    state.settingsDirty = false;
+    if (!tabName) return;
+
+    switchTab(tabName);
+    if (tabName === 'settings') {
+        await loadSettings();
+    }
+}
+
 function openWriteOffPasswordDialog() {
     if (state.writeOffAccessGranted) {
         showToast('Изменение статусов уже разрешено.');
@@ -748,6 +776,47 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
+    if (before.status && after.status && before.status !== after.status) {
+        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
+    }
+
+    return changes;
+}
+
+function formatHistoryDetails(action, payload) {
+    const parsed = parseHistoryPayload(payload);
+
+    if (action === 'create') {
+        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (action === 'bulk_create') {
+        const addedText = parsed.batches && parsed.batches.length
+            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
+            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
+        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
+            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
+            : '';
+
+        return `${addedText}${duplicatesText}`;
+    }
+
+    if (action === 'update') {
+        const before = parsed.before || {};
+        const after = parsed.after || parsed;
+        const changes = formatChangedFields(before, after);
+        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
+        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
+    }
+
+    if (action === 'delete') {
+        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (parsed.text) return parsed.text;
+
+    // Запасной вариант нужен для старых записей истории со служебными полями.
+    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
 function formatHistoryBatch(batch) {
@@ -904,6 +973,7 @@ function renderSettings() {
     qs('#systemLastCheck').textContent = system.last_check || 'Не выполнялось';
     qs('#systemLastSent').textContent = system.last_sent || 'Не выполнялось';
     qs('#systemSmtpStatus').textContent = system.smtp_status || 'Не выполнялось';
+    state.settingsDirty = false;
 }
 
 function renderNotificationHistory(history) {
@@ -941,6 +1011,7 @@ async function persistSettings(partial = null) {
     const result = await api('settings', { settings_password: state.settingsPassword, settings: state.settings });
     state.settings = result.settings;
     renderSettings();
+    state.settingsDirty = false;
     showToast('Настройки сохранены.');
 }
 
@@ -1068,13 +1139,21 @@ function applyInitialUrlState() {
 
 function bindEvents() {
     qsa('.tab').forEach((button) => button.addEventListener('click', async () => {
-        if (button.dataset.tab === 'settings' && !state.settingsAccessGranted) {
+        const targetTab = button.dataset.tab;
+        const currentTab = document.body.dataset.activeTab;
+        if (currentTab === targetTab) return;
+        if (currentTab === 'settings' && targetTab !== 'settings' && state.settingsDirty) {
+            openSettingsUnsavedDialog(targetTab);
+            return;
+        }
+
+        if (targetTab === 'settings' && !state.settingsAccessGranted) {
             openSettingsPasswordDialog();
             return;
         }
 
-        switchTab(button.dataset.tab);
-        if (button.dataset.tab === 'settings') {
+        switchTab(targetTab);
+        if (targetTab === 'settings') {
             await loadSettings();
         }
     }));
@@ -1086,6 +1165,8 @@ function bindEvents() {
     qs('#settingsPasswordForm').addEventListener('submit', submitSettingsPassword);
     qs('#cancelSettingsPasswordButton').addEventListener('click', closeSettingsPasswordDialog);
     qs('#closeSettingsPasswordDialogButton').addEventListener('click', closeSettingsPasswordDialog);
+    qs('#returnToSettingsButton').addEventListener('click', closeSettingsUnsavedDialog);
+    qs('#leaveSettingsButton').addEventListener('click', leaveSettingsWithoutSaving);
     qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
     qs('#bulkDeleteButton').addEventListener('click', deleteSelectedBatches);
     qs('#selectAllBatches').addEventListener('change', toggleSelectAllBatches);
@@ -1135,6 +1216,12 @@ function bindEvents() {
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
     qs('#copyDeployCommandButton').addEventListener('click', copyDeployCommand);
+    qsa('#settingsForm input, #settingsForm textarea').forEach((field) => {
+        if (field.id !== 'deployCommandInput') {
+            field.addEventListener('input', markSettingsDirty);
+            field.addEventListener('change', markSettingsDirty);
+        }
+    });
 
     qs('#settingsForm').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -1143,6 +1230,12 @@ function bindEvents() {
         } catch (error) {
             showToast(error.message, true);
         }
+    });
+
+    window.addEventListener('beforeunload', (event) => {
+        if (!state.settingsDirty) return;
+        event.preventDefault();
+        event.returnValue = 'Настройки не сохранены. Уверены, что хотите покинуть страницу?';
     });
 
 }

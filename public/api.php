@@ -623,7 +623,7 @@ function saveSettings(PDO $pdo, array $settings): array
     }
 
     foreach ([0, 180, 90, 60, 30, 15, 7, 1] as $days) {
-        $key = 'notify_' . $days . '_days';
+        $key = $days === 1 ? 'notify_1_day' : 'notify_' . $days . '_days';
         $settings[$key] = array_key_exists($key, $settings)
             ? filter_var($settings[$key], FILTER_VALIDATE_BOOLEAN)
             : in_array($days, $enabledDays, true);
