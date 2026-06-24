@@ -286,6 +286,7 @@ export DB_NAME=sroki_godnosti
 export DB_USER=sroki
 export DB_PASSWORD='YOUR_DB_PASSWORD'
 export DB_CHARSET=utf8mb4
+export SETTINGS_PASSWORD='YOUR_SETTINGS_PASSWORD'
 ```
 
 Если переменные окружения недоступны, создайте локальный `app/config.php` на сервере и не добавляйте его в git. Приложение автоматически подключает этот файл при старте. В нём можно задать переменные через `putenv(...)` или вернуть массив с параметрами БД:
