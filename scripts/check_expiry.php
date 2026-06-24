@@ -4,7 +4,7 @@
  *
  * Скрипт каждый день в 09:00 по МСК пересчитывает остаток дней, выбирает
  * партии со статусом «В наличии» только по включенным в настройках дням
- * уведомлений и отправляет одно письмо всем получателям из настроек.
+ * уведомлений и отправляет отдельное письмо по каждому событию срока.
  */
 declare(strict_types=1);
 
@@ -12,9 +12,9 @@ date_default_timezone_set('Europe/Moscow');
 
 require_once __DIR__ . '/../app/database.php';
 require_once __DIR__ . '/../app/mailer.php';
+require_once __DIR__ . '/../app/notification_templates.php';
 
 const SENDER_EMAIL = 'vr-vk@yandex.ru';
-const DEFAULT_APP_URL = 'https://kvasmix.ru/vr/sroki_godnosti/';
 
 try {
     $pdo = getDatabaseConnection();
@@ -45,18 +45,37 @@ try {
         exit(0);
     }
 
-    $body = buildEmailBody($batches, getAppUrl());
-    $subject = 'Сроки годности. Требуется актуализация статусов от ' . date('d.m.Y');
-    $sent = sendNotificationEmail($pdo, $emails, $subject, $body, $settings);
-    writeLog($pdo, $sent ? 'expiry_notifications_sent' : 'expiry_notifications_failed', [
-        'emails' => $emails,
-        'criteria' => $notificationDays,
-        'rows' => count($batches),
-        'sender' => SENDER_EMAIL,
-        'text' => $body,
-    ]);
+    $failedEvents = 0;
+    foreach (groupBatchesByDaysLeft($batches) as $daysLeft => $eventBatches) {
+        $daysLeft = (int)$daysLeft;
+        $subject = expiryNotificationSubject($daysLeft);
+        $body = expiryNotificationBody($eventBatches, $daysLeft);
 
-    exit($sent ? 0 : 1);
+        try {
+            sendNotificationEmail($pdo, $emails, $subject, $body, $settings);
+            writeLog($pdo, 'expiry_notifications_sent', [
+                'emails' => $emails,
+                'criteria' => [$daysLeft],
+                'rows' => count($eventBatches),
+                'sender' => SENDER_EMAIL,
+                'subject' => $subject,
+                'text' => $body,
+            ]);
+        } catch (Throwable $error) {
+            $failedEvents++;
+            writeLog($pdo, 'expiry_notifications_failed', [
+                'emails' => $emails,
+                'criteria' => [$daysLeft],
+                'rows' => count($eventBatches),
+                'sender' => SENDER_EMAIL,
+                'subject' => $subject,
+                'text' => $body,
+                'error' => $error->getMessage(),
+            ]);
+        }
+    }
+
+    exit($failedEvents === 0 ? 0 : 1);
 } catch (Throwable $error) {
     fwrite(STDERR, $error->getMessage() . PHP_EOL);
     exit(1);
@@ -91,54 +110,16 @@ function getEnabledNotificationDays(array $settings): array
     return $days ?: [15, 30, 60];
 }
 
-function buildEmailBody(array $batches, string $appUrl): string
+function groupBatchesByDaysLeft(array $batches): array
 {
-    $lines = [
-        'Здравствуйте!',
-        '',
-        'В реестре партий найдены товары, по которым нужно актуализировать статус.',
-        '',
-    ];
-
+    $groups = [];
     foreach ($batches as $batch) {
-        $lines[] = buildBatchNotificationText($batch, $appUrl);
-        $lines[] = '';
+        $daysLeft = (int)$batch['days_left'];
+        $groups[$daysLeft][] = $batch;
     }
 
-    return implode("\n", $lines);
-}
-
-function buildBatchNotificationText(array $batch, string $appUrl): string
-{
-    $daysLeft = (int)$batch['days_left'];
-    if ($daysLeft === 0) {
-        $prefix = 'Истек срок годности у партии товаров с артикулом ' . $batch['article'] . '.';
-    } else {
-        $prefix = 'Срок годности партии заканчивается через ' . $daysLeft . ' дней.';
-    }
-
-    return implode("\n", [
-        $prefix,
-        'Артикул: ' . $batch['article'] . '.',
-        'Количество: ' . $batch['quantity'] . '.',
-        'Срок годности: ' . date('m.Y', strtotime((string)$batch['expiry_date'])) . '.',
-        'Актуализируйте статус товара в реестре партий.',
-        'Ссылка на реестр: ' . buildRegistryUrl($appUrl, (string)$batch['article']),
-    ]);
-}
-
-function getAppUrl(): string
-{
-    $url = getenv('APP_URL') ?: DEFAULT_APP_URL;
-    return rtrim($url, '/') . '/';
-}
-
-function buildRegistryUrl(string $appUrl, string $article): string
-{
-    return $appUrl . '?' . http_build_query([
-        'tab' => 'registry',
-        'article' => $article,
-    ]);
+    ksort($groups, SORT_NUMERIC);
+    return $groups;
 }
 
 function writeLog(PDO $pdo, string $action, array $payload): void

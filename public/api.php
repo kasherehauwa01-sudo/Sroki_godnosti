@@ -10,6 +10,7 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/../app/database.php';
 require_once __DIR__ . '/../app/mailer.php';
+require_once __DIR__ . '/../app/notification_templates.php';
 
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
@@ -481,14 +482,16 @@ function sendTestNotification(PDO $pdo, array $payload): array
         throw new RuntimeException('В реестре нет партий со статусом «В наличии» и будущим сроком годности.');
     }
 
-    $body = buildTestNotificationBody($batch);
-    $subject = 'Тест уведомления о сроке годности';
+    $daysLeft = (int)($batch['days_left'] ?? 0);
+    $body = expiryNotificationBody([$batch], $daysLeft);
+    $subject = expiryNotificationSubject($daysLeft);
     try {
         sendNotificationEmail($pdo, $emails, $subject, $body, $settings);
         writeLog($pdo, 'test_notification_sent', [
             'emails' => $emails,
             'article' => $batch['article'] ?? '',
-            'days_left' => (int)($batch['days_left'] ?? 0),
+            'days_left' => $daysLeft,
+            'subject' => $subject,
             'text' => $body,
         ]);
     } catch (Throwable $error) {
@@ -507,7 +510,7 @@ function sendTestNotification(PDO $pdo, array $payload): array
 function findNearestExpiringBatch(PDO $pdo): ?array
 {
     $statement = $pdo->query(
-        "SELECT article, days_left
+        "SELECT article, expiry_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND days_left >= 0
          ORDER BY days_left ASC, expiry_date ASC, article ASC
@@ -516,15 +519,6 @@ function findNearestExpiringBatch(PDO $pdo): ?array
     $batch = $statement->fetch();
 
     return $batch ?: null;
-}
-
-function buildTestNotificationBody(array $batch): string
-{
-    return sprintf(
-        'Истекает срок годности через %d дней у партии артикул %s.',
-        (int)$batch['days_left'],
-        (string)$batch['article']
-    );
 }
 
 function verifyWriteOffPassword(array $payload): array
