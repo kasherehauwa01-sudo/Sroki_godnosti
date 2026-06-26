@@ -7,7 +7,7 @@
 declare(strict_types=1);
 
 const AUTO_IMPORT_FROM = 'robot_volgorost@volgorost.ru';
-const AUTO_IMPORT_SUBJECT = 'Сроки годности. Ежедневная выгрузка.';
+const AUTO_IMPORT_SUBJECT = 'Сроки годности. Ежедневная выгрузка';
 const AUTO_IMPORT_MAIL_HOST = 'imap.yandex.ru';
 const AUTO_IMPORT_MAIL_PORT = 993;
 
@@ -110,11 +110,9 @@ function fetchTodayAutoImportMessage(string $username, string $password): ?strin
             $headers = parseMailHeaders($message);
             $from = strtolower((string)($headers['from'] ?? ''));
             $subject = trim((string)($headers['subject'] ?? ''));
-            $date = strtotime((string)($headers['date'] ?? '')) ?: 0;
             if (
                 str_contains($from, strtolower(AUTO_IMPORT_FROM))
-                && $subject === AUTO_IMPORT_SUBJECT
-                && date('Y-m-d', $date) === date('Y-m-d')
+                && autoImportSubjectMatches($subject)
             ) {
                 return $message;
             }
@@ -124,6 +122,24 @@ function fetchTodayAutoImportMessage(string $username, string $password): ?strin
     }
 
     return null;
+}
+
+function autoImportSubjectMatches(string $subject): bool
+{
+    // В реальных письмах тема может прийти с точкой на конце или без неё,
+    // поэтому сравниваем нормализованный текст без завершающей пунктуации.
+    $normalizedSubject = normalizeAutoImportSubject($subject);
+    $expectedSubject = normalizeAutoImportSubject(AUTO_IMPORT_SUBJECT);
+
+    return $normalizedSubject === $expectedSubject;
+}
+
+function normalizeAutoImportSubject(string $subject): string
+{
+    $subject = mb_strtolower(trim($subject));
+    $subject = preg_replace('/\s+/u', ' ', $subject) ?? $subject;
+
+    return rtrim($subject, " \t\n\r\0\x0B.");
 }
 
 function parseMailHeaders(string $message): array
