@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS batches (
     name VARCHAR(255) NOT NULL,
     quantity INT NOT NULL DEFAULT 0,
     expiry_date DATE NOT NULL,
+    expiry_full_date TINYINT(1) NOT NULL DEFAULT 0,
     expiry_invalid TINYINT(1) NOT NULL DEFAULT 0,
     expiry_raw VARCHAR(32) NULL,
     days_left INT NOT NULL DEFAULT 0,

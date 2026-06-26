@@ -25,7 +25,7 @@ function expiryNotificationBody(array $batches, int $daysLeft): string
         $lines[] = sprintf(
             'Артикул %s Срок годности до %s',
             (string)($batch['article'] ?? ''),
-            formatExpiryMonth((string)($batch['expiry_date'] ?? ''))
+            formatExpiryMonth((string)($batch['expiry_date'] ?? ''), (bool)($batch['expiry_full_date'] ?? false))
         );
     }
 
@@ -49,14 +49,14 @@ function expiryNotificationInstruction(int $daysLeft): string
     };
 }
 
-function formatExpiryMonth(string $expiryDate): string
+function formatExpiryMonth(string $expiryDate, bool $forceFull = false): string
 {
     $timestamp = strtotime($expiryDate);
     if (!$timestamp) {
         return $expiryDate;
     }
 
-    return date('d', $timestamp) === '01'
-        ? date('m.Y', $timestamp)
-        : date('d.m.Y', $timestamp);
+    return $forceFull || date('d', $timestamp) !== '01'
+        ? date('d.m.Y', $timestamp)
+        : date('m.Y', $timestamp);
 }

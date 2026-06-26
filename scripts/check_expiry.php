@@ -33,7 +33,7 @@ try {
     $notificationDays = getEnabledNotificationDays($settings);
     $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
     $statement = $pdo->prepare(
-        "SELECT article, quantity, expiry_date, days_left
+        "SELECT article, quantity, expiry_date, expiry_full_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
          ORDER BY days_left ASC, expiry_date ASC, article ASC"
@@ -97,6 +97,7 @@ function getNotificationSettings(PDO $pdo): array
 function ensureExpiryColumns(PDO $pdo): void
 {
     $columns = [
+        'expiry_full_date' => "ALTER TABLE batches ADD COLUMN expiry_full_date TINYINT(1) NOT NULL DEFAULT 0 AFTER expiry_date",
         'expiry_invalid' => "ALTER TABLE batches ADD COLUMN expiry_invalid TINYINT(1) NOT NULL DEFAULT 0 AFTER expiry_date",
         'expiry_raw' => "ALTER TABLE batches ADD COLUMN expiry_raw VARCHAR(32) NULL AFTER expiry_invalid",
     ];
