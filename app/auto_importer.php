@@ -55,8 +55,8 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         throw new RuntimeException('Для автозагрузки заполните SMTP логин и пароль в настройках.');
     }
 
-    $message = fetchTodayAutoImportMessage($username, $password);
-    if (!$message) {
+    $mail = fetchTodayAutoImportMessage($username, $password);
+    if (!$mail) {
         writeLog($pdo, 'auto_import_not_found', [
             'attempt' => $attempt,
             'time' => $time,
@@ -67,7 +67,7 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         return ['ok' => false, 'status' => 'not_found', 'message' => 'Письмо текущей даты не найдено.'];
     }
 
-    $attachments = extractSpreadsheetAttachments($message);
+    $attachments = extractSpreadsheetAttachments($mail['message']);
     if (!$attachments) {
         throw new RuntimeException('В найденном письме нет вложения XLS/XLSX.');
     }
@@ -81,8 +81,10 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
     }
 
     $result = bulkCreateBatches($pdo, $rows);
+    markAutoImportMessageSeen($username, $password, (string)$mail['folder'], (string)$mail['id']);
     writeLog($pdo, 'auto_import_completed', [
         'attempt' => $attempt,
+        'folder' => (string)$mail['folder'],
         'filename' => implode(', ', array_column($attachments, 'filename')),
         'added' => (int)($result['added'] ?? 0),
         'skipped_duplicates' => (int)($result['skipped_duplicates'] ?? 0),
@@ -98,22 +100,29 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
     ];
 }
 
-function fetchTodayAutoImportMessage(string $username, string $password): ?string
+function fetchTodayAutoImportMessage(string $username, string $password): ?array
 {
     $imap = new SimpleImapClient(AUTO_IMPORT_MAIL_HOST, AUTO_IMPORT_MAIL_PORT);
     try {
         $imap->login($username, $password);
-        $imap->selectInbox();
-        $ids = $imap->searchRecentMessages();
-        foreach (array_reverse($ids) as $id) {
-            $message = $imap->fetchMessage($id);
-            $headers = parseMailHeaders($message);
-            $subject = trim((string)($headers['subject'] ?? ''));
-            if (
-                autoImportSenderMatches($headers)
-                && autoImportSubjectMatches($subject)
-            ) {
-                return $message;
+        foreach ($imap->listMailboxes() as $folder) {
+            try {
+                $imap->selectMailbox($folder);
+            } catch (Throwable) {
+                continue;
+            }
+
+            $ids = $imap->searchRecentMessages();
+            foreach (array_reverse($ids) as $id) {
+                $message = $imap->fetchMessage($id);
+                $headers = parseMailHeaders($message);
+                $subject = trim((string)($headers['subject'] ?? ''));
+                if (
+                    autoImportSenderMatches($headers)
+                    && autoImportSubjectMatches($subject)
+                ) {
+                    return ['message' => $message, 'folder' => $folder, 'id' => $id];
+                }
             }
         }
     } finally {
@@ -121,6 +130,18 @@ function fetchTodayAutoImportMessage(string $username, string $password): ?strin
     }
 
     return null;
+}
+
+function markAutoImportMessageSeen(string $username, string $password, string $folder, string $id): void
+{
+    $imap = new SimpleImapClient(AUTO_IMPORT_MAIL_HOST, AUTO_IMPORT_MAIL_PORT);
+    try {
+        $imap->login($username, $password);
+        $imap->selectMailbox($folder);
+        $imap->markSeen($id);
+    } finally {
+        $imap->logout();
+    }
 }
 
 function autoImportSubjectMatches(string $subject): bool
@@ -336,9 +357,25 @@ final class SimpleImapClient
         $this->command('LOGIN "' . addcslashes($username, "\\\"") . '" "' . addcslashes($password, "\\\"") . '"');
     }
 
-    public function selectInbox(): void
+    public function listMailboxes(): array
     {
-        $this->command('SELECT INBOX');
+        $response = $this->command('LIST "" "*"');
+        $folders = ['INBOX'];
+        foreach (preg_split('/\r?\n/', $response) ?: [] as $line) {
+            if (!str_starts_with($line, '* LIST')) {
+                continue;
+            }
+            if (preg_match('/"((?:\\\\.|[^"])*)"\s*$/', $line, $match)) {
+                $folders[] = stripcslashes($match[1]);
+            }
+        }
+
+        return array_values(array_unique(array_filter($folders)));
+    }
+
+    public function selectMailbox(string $folder): void
+    {
+        $this->command('SELECT "' . addcslashes($folder, "\\\"") . '"');
     }
 
     public function searchRecentMessages(): array
@@ -368,6 +405,11 @@ final class SimpleImapClient
         $start = strpos($response, "\r\n");
         $end = strrpos($response, "\r\nA");
         return $start !== false && $end !== false ? substr($response, $start + 2, $end - $start - 2) : $response;
+    }
+
+    public function markSeen(string $id): void
+    {
+        $this->command('STORE ' . (int)$id . ' +FLAGS (\\Seen)');
     }
 
     public function logout(): void
