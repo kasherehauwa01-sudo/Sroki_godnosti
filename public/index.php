@@ -361,7 +361,7 @@ manager@site.ru"></textarea></label>
             <label>Дата внесения<input id="editCreatedAt" name="createdAt" required type="date"></label>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelEditButton" type="button">Отмена</button>
-                <button class="primary" type="submit">Сохранить изменения</button>
+                <button class="primary" type="submit">Ок</button>
             </div>
         </form>
     </dialog>
