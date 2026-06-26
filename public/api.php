@@ -11,6 +11,7 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../app/database.php';
 require_once __DIR__ . '/../app/mailer.php';
 require_once __DIR__ . '/../app/notification_templates.php';
+require_once __DIR__ . '/../app/auto_importer.php';
 
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
@@ -52,6 +53,7 @@ function handleApiRequest(): void
                 'bulk_delete' => deleteBatches($pdo, $payload),
                 'settings' => saveProtectedSettings($pdo, $payload),
                 'test_notification' => sendTestNotification($pdo, $payload),
+                'test_auto_import' => runTestAutoImport($pdo, $payload),
                 'verify_write_off' => verifyWriteOffPassword($payload),
                 default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
             };
@@ -624,6 +626,27 @@ function sendTestNotification(PDO $pdo, array $payload): array
     }
 
     return ['ok' => true, 'message' => 'Тестовое уведомление отправлено.'];
+}
+
+function runTestAutoImport(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    $result = runAutoImport($pdo, true);
+    if (empty($result['ok'])) {
+        throw new RuntimeException((string)($result['message'] ?? 'Автозагрузка не выполнена.'));
+    }
+
+    return [
+        'ok' => true,
+        'message' => sprintf(
+            'Автозагрузка выполнена. Загружено партий: %d. Исключено дублей: %d.',
+            (int)($result['added'] ?? 0),
+            (int)($result['skipped_duplicates'] ?? 0)
+        ),
+        'result' => $result,
+        'settings' => getSettings($pdo),
+    ];
 }
 
 function findNearestExpiringBatch(PDO $pdo): ?array

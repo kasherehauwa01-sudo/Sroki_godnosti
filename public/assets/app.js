@@ -77,7 +77,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'verify_write_off']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'verify_write_off']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -887,6 +887,11 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
+
+    if (parsed.text) return parsed.text;
+
+    // Запасной вариант нужен для старых записей истории со служебными полями.
+    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
 function formatHistoryBatch(batch) {
@@ -1130,6 +1135,33 @@ async function sendTestNotification() {
     }
 }
 
+async function runTestAutoImport() {
+    const button = qs('#testAutoImportButton');
+    const status = qs('#testAutoImportStatus');
+    button.disabled = true;
+    status.textContent = 'Ищу письмо за сегодня и загружаю вложение...';
+    showToast('Запускаю тест автозагрузки...');
+
+    try {
+        await persistSettings();
+        const result = await api('test_auto_import', { settings_password: state.settingsPassword });
+        if (result.settings) {
+            state.settings = result.settings;
+            renderSettings();
+        } else {
+            await loadSettings();
+        }
+        await Promise.all([loadBatches(), loadHistory()]);
+        status.textContent = result.message || 'Автозагрузка выполнена.';
+        showToast(status.textContent);
+    } catch (error) {
+        status.textContent = error.message;
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
 function downloadTemplateXlsx() {
     if (!window.XLSX) {
         showToast('Библиотека XLSX еще не загрузилась. Повторите действие через несколько секунд.', true);
@@ -1302,6 +1334,7 @@ function bindEvents() {
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
+    qs('#testAutoImportButton').addEventListener('click', runTestAutoImport);
     qs('#copyDeployCommandButton').addEventListener('click', copyDeployCommand);
     qsa('#settingsForm input, #settingsForm textarea').forEach((field) => {
         if (field.id !== 'deployCommandInput') {

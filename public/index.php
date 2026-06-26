@@ -100,6 +100,10 @@ manager@site.ru"></textarea></label>
                     <label>Время автозагрузки
                         <input id="autoImportTime" type="time" value="10:00">
                     </label>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="testAutoImportButton" formnovalidate type="button">Тест автозагрузки</button>
+                    </div>
+                    <p class="subtitle" id="testAutoImportStatus" role="status" aria-live="polite"></p>
                     <p class="subtitle">Cron должен запускать <code>scripts/auto_import.php</code>. Если письмо не найдено, скрипт повторяет поиск каждый час в течение 10 часов.</p>
                     <dl class="system-info">
                         <dt>Последняя автозагрузка:</dt><dd id="autoImportLastDate">Не выполнялось</dd>
