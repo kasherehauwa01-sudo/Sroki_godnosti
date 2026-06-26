@@ -159,13 +159,27 @@ function isValidDateParts(day, month, year) {
     return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
 }
 
+function normalizeExpiryYear(yearValue) {
+    const year = Number(yearValue);
+    return String(yearValue).length === 2 ? 2000 + year : year;
+}
+
+function normalizeFullExpiryText(value) {
+    const match = String(value ?? '').trim().match(/^(\d{1,2})[.-](\d{1,2})[.-](\d{2}|\d{4})$/);
+    if (!match) return '';
+
+    const [, dayValue, monthValue, yearValue] = match;
+    return `${dayValue.padStart(2, '0')}.${monthValue.padStart(2, '0')}.${normalizeExpiryYear(yearValue)}`;
+}
+
 function expiryDateInfo(value) {
     if (value instanceof Date || typeof value === 'number') {
         return { invalid: false, placeholder: '', raw: '', full: true };
     }
 
     const raw = String(value ?? '').trim();
-    const russianDate = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    const normalizedFullText = normalizeFullExpiryText(raw);
+    const russianDate = normalizedFullText.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
     if (russianDate) {
         const [, dayValue, monthValue, yearValue] = russianDate;
         const day = Number(dayValue);
@@ -174,7 +188,7 @@ function expiryDateInfo(value) {
         return {
             invalid: !isValidDateParts(day, month, year),
             placeholder: month >= 1 && month <= 12 ? `${year}-${String(month).padStart(2, '0')}-01` : '',
-            raw,
+            raw: normalizedFullText,
             full: true,
         };
     }
@@ -221,9 +235,10 @@ function toExpiryDateValue(value) {
         return `${year}-${month.padStart(2, '0')}-01`;
     }
 
-    const russianDate = text.match(/^\d{1,2}\.(\d{1,2})\.(\d{4})$/);
+    const normalizedFullText = normalizeFullExpiryText(text);
+    const russianDate = normalizedFullText.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
     if (russianDate) {
-        const [day, month, year] = text.split('.');
+        const [day, month, year] = normalizedFullText.split('.');
         return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
     }
 
@@ -260,6 +275,9 @@ function formatExpiryMonthRu(value, forceFull = false) {
 }
 
 function maskExpiryMonthValue(value) {
+    const normalizedFullText = normalizeFullExpiryText(value);
+    if (normalizedFullText) return normalizedFullText;
+
     const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
     if (digits.length > 6) {
         return `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
@@ -866,120 +884,6 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
-    if (before.status && after.status && before.status !== after.status) {
-        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
-    }
-
-    return changes;
-}
-
-function formatHistoryDetails(action, payload) {
-    const parsed = parseHistoryPayload(payload);
-
-    if (action === 'create') {
-        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (action === 'bulk_create') {
-        const addedText = parsed.batches && parsed.batches.length
-            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
-            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
-        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
-            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
-            : '';
-
-        return `${addedText}${duplicatesText}`;
-    }
-
-    if (action === 'update') {
-        const before = parsed.before || {};
-        const after = parsed.after || parsed;
-        const changes = formatChangedFields(before, after);
-        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
-        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
-    }
-
-    if (action === 'delete') {
-        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (parsed.text) return parsed.text;
-
-    // Запасной вариант нужен для старых записей истории со служебными полями.
-    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
-}
-
-function formatHistoryBatch(batch) {
-    if (!batch) return 'партия не найдена';
-
-    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
-    const expiry = batch.expiry_date || batch.expiryDate
-        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate)}`
-        : 'без указанного срока годности';
-    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
-    const status = batch.status ? `, статус «${batch.status}»` : '';
-
-    return `партия ${article} ${expiry}${quantity}${status}`;
-}
-
-function formatHistoryBatchList(batches) {
-    return (batches || []).map(formatHistoryBatch).join('\n');
-}
-
-function formatChangedFields(before, after) {
-    const changes = [];
-    if (!before || !after) return changes;
-
-    if (before.article && after.article && before.article !== after.article) {
-        changes.push(`артикул изменён с ${before.article} на ${after.article}`);
-    }
-    if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
-        changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date)} на ${formatExpiryMonthRu(after.expiry_date)}`);
-    }
-    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
-        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
-    }
-    if (before.status && after.status && before.status !== after.status) {
-        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
-    }
-
-    return changes;
-}
-
-function formatHistoryDetails(action, payload) {
-    const parsed = parseHistoryPayload(payload);
-
-    if (action === 'create') {
-        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (action === 'bulk_create') {
-        const addedText = parsed.batches && parsed.batches.length
-            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
-            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
-        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
-            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
-            : '';
-
-        return `${addedText}${duplicatesText}`;
-    }
-
-    if (action === 'update') {
-        const before = parsed.before || {};
-        const after = parsed.after || parsed;
-        const changes = formatChangedFields(before, after);
-        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
-        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
-    }
-
-    if (action === 'delete') {
-        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (parsed.text) return parsed.text;
-
-    // Запасной вариант нужен для старых записей истории со служебными полями.
-    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
 function formatHistoryBatch(batch) {

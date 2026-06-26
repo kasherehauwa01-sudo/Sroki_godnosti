@@ -521,10 +521,10 @@ function normalizeDateWithInvalidInfo(string $value): array
     if (preg_match('/^(0?[1-9]|1[0-2])\.(\d{4})$/', $value, $matches)) {
         return ['date' => sprintf('%04d-%02d-01', (int)$matches[2], (int)$matches[1]), 'invalid' => false, 'full' => false];
     }
-    if (preg_match('/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/', $value, $matches)) {
+    if (preg_match('/^(\d{1,2})[.-](\d{1,2})[.-](\d{2}|\d{4})$/', $value, $matches)) {
         $day = (int)$matches[1];
         $month = (int)$matches[2];
-        $year = (int)$matches[3];
+        $year = normalizeExpiryYear((string)$matches[3]);
         $fallback = $month >= 1 && $month <= 12 ? sprintf('%04d-%02d-01', $year, $month) : '';
         return checkdate($month, $day, $year)
             ? ['date' => sprintf('%04d-%02d-%02d', $year, $month, $day), 'invalid' => false, 'full' => true]
@@ -545,6 +545,12 @@ function normalizeDateWithInvalidInfo(string $value): array
 
     $timestamp = strtotime($value);
     return ['date' => $timestamp ? date('Y-m-d', $timestamp) : '', 'invalid' => false, 'full' => $timestamp ? date('d', $timestamp) !== '01' : false];
+}
+
+function normalizeExpiryYear(string $year): int
+{
+    $yearNumber = (int)$year;
+    return strlen($year) === 2 ? 2000 + $yearNumber : $yearNumber;
 }
 
 function normalizeBatchRow(array $row): array
