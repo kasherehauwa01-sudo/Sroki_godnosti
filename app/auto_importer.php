@@ -104,7 +104,7 @@ function fetchTodayAutoImportMessage(string $username, string $password): ?strin
     try {
         $imap->login($username, $password);
         $imap->selectInbox();
-        $ids = $imap->searchSinceTodayFrom(AUTO_IMPORT_FROM);
+        $ids = $imap->searchRecentMessages();
         foreach (array_reverse($ids) as $id) {
             $message = $imap->fetchMessage($id);
             $headers = parseMailHeaders($message);
@@ -113,6 +113,7 @@ function fetchTodayAutoImportMessage(string $username, string $password): ?strin
             if (
                 str_contains($from, strtolower(AUTO_IMPORT_FROM))
                 && autoImportSubjectMatches($subject)
+                && autoImportMessageDateMatches($headers)
             ) {
                 return $message;
             }
@@ -132,6 +133,20 @@ function autoImportSubjectMatches(string $subject): bool
     $expectedSubject = normalizeAutoImportSubject(AUTO_IMPORT_SUBJECT);
 
     return $normalizedSubject === $expectedSubject;
+}
+
+function autoImportMessageDateMatches(array $headers): bool
+{
+    $timestamp = strtotime((string)($headers['date'] ?? ''));
+    if (!$timestamp) {
+        // Если Date-заголовок нестандартный, не отбрасываем письмо:
+        // IMAP-поиск уже ограничен недавними письмами, а отправитель и тема совпали.
+        return true;
+    }
+
+    $messageDate = date('Y-m-d', $timestamp);
+
+    return $messageDate === date('Y-m-d') || $messageDate === date('Y-m-d', strtotime('-1 day'));
 }
 
 function normalizeAutoImportSubject(string $subject): string
@@ -330,10 +345,12 @@ final class SimpleImapClient
         $this->command('SELECT INBOX');
     }
 
-    public function searchSinceTodayFrom(string $from): array
+    public function searchRecentMessages(): array
     {
-        $date = date('d-M-Y');
-        $response = $this->command('SEARCH SINCE "' . $date . '" FROM "' . addcslashes($from, "\\\"") . '"');
+        // Ищем без IMAP-фильтра FROM: у разных серверов он может не совпадать
+        // с отображаемым адресом отправителя. Фильтр отправителя выполняется в PHP.
+        $date = date('d-M-Y', strtotime('-1 day'));
+        $response = $this->command('SEARCH SINCE ' . $date);
         preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
         return array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
     }
