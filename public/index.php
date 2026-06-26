@@ -95,6 +95,20 @@ manager@site.ru"></textarea></label>
                     <div class="notification-history-list" id="notificationHistoryList" aria-live="polite">Уведомления пока не отправлялись.</div>
                 </div>
 
+                <div class="card form settings-auto-import-card">
+                    <h3>Автозагрузка</h3>
+                    <label>Время автозагрузки
+                        <input id="autoImportTime" type="time" value="10:00">
+                    </label>
+                    <p class="subtitle">Cron должен запускать <code>scripts/auto_import.php</code>. Если письмо не найдено, скрипт повторяет поиск каждый час в течение 10 часов.</p>
+                    <dl class="system-info">
+                        <dt>Последняя автозагрузка:</dt><dd id="autoImportLastDate">Не выполнялось</dd>
+                        <dt>Количество загруженных партий:</dt><dd id="autoImportLoaded">0</dd>
+                        <dt>Статус:</dt><dd id="autoImportStatus">Не выполнялось</dd>
+                        <dt>Ошибка:</dt><dd id="autoImportError">—</dd>
+                    </dl>
+                </div>
+
                 <div class="card form settings-system-card">
                     <h3>Система</h3>
                     <dl class="system-info">
@@ -243,6 +257,7 @@ manager@site.ru"></textarea></label>
                         <option value="create">Добавление партий</option>
                         <option value="update">Изменение партий</option>
                         <option value="delete">Удаление партий</option>
+                        <option value="auto_import_completed">Автозагрузка</option>
                     </select>
                 </label>
             </div>

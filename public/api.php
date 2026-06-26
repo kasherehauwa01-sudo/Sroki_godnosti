@@ -19,42 +19,49 @@ const SENDER_EMAIL = 'vr-vk@yandex.ru';
 const SETTINGS_PASSWORD_HASH = 'ff10705eafbaa3ff925fb0429d4b3f10379a4dd9dc1725654bbe0a5c9ce1a10f';
 const WRITE_OFF_PASSWORD_HASH = '816e2845d395e7703abac2dcbf9d54e39236fd39133362bf7ad3fce70dd7d78e';
 
-try {
-    $pdo = getDatabaseConnection();
-    ensureBatchesSchema($pdo);
-    ensureSettingsSchema($pdo);
-    $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-    $payload = readPayload();
-    $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
+if (basename((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === 'api.php') {
+    handleApiRequest();
+}
 
-    refreshDaysLeft($pdo);
+function handleApiRequest(): void
+{
+    try {
+        $pdo = getDatabaseConnection();
+        ensureBatchesSchema($pdo);
+        ensureSettingsSchema($pdo);
+        $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+        $payload = readPayload();
+        $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
 
-    if ($method === 'GET') {
-        $result = match ($action) {
-            'list' => ['ok' => true, 'batches' => listBatches($pdo, $_GET)],
-            'report' => ['ok' => true, 'batches' => reportBatches($pdo, $_GET)],
-            'settings' => getProtectedSettings($pdo, $_GET),
-            'logs' => ['ok' => true, 'logs' => getLogs($pdo)],
-            default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
-        };
-    } else {
-        $result = match ($action) {
-            'create' => createBatch($pdo, $payload),
-            'bulk_create' => bulkCreateBatches($pdo, $payload['batches'] ?? []),
-            'update' => updateBatch($pdo, $payload),
-            'delete' => deleteBatch($pdo, $payload),
-            'bulk_delete' => deleteBatches($pdo, $payload),
-            'settings' => saveProtectedSettings($pdo, $payload),
-            'test_notification' => sendTestNotification($pdo, $payload),
-            'verify_write_off' => verifyWriteOffPassword($payload),
-            default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
-        };
+        refreshDaysLeft($pdo);
+
+        if ($method === 'GET') {
+            $result = match ($action) {
+                'list' => ['ok' => true, 'batches' => listBatches($pdo, $_GET)],
+                'report' => ['ok' => true, 'batches' => reportBatches($pdo, $_GET)],
+                'settings' => getProtectedSettings($pdo, $_GET),
+                'logs' => ['ok' => true, 'logs' => getLogs($pdo)],
+                default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
+            };
+        } else {
+            $result = match ($action) {
+                'create' => createBatch($pdo, $payload),
+                'bulk_create' => bulkCreateBatches($pdo, $payload['batches'] ?? []),
+                'update' => updateBatch($pdo, $payload),
+                'delete' => deleteBatch($pdo, $payload),
+                'bulk_delete' => deleteBatches($pdo, $payload),
+                'settings' => saveProtectedSettings($pdo, $payload),
+                'test_notification' => sendTestNotification($pdo, $payload),
+                'verify_write_off' => verifyWriteOffPassword($payload),
+                default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
+            };
+        }
+
+        echo json_encode($result, JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $error) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => $error->getMessage()], JSON_UNESCAPED_UNICODE);
     }
-
-    echo json_encode($result, JSON_UNESCAPED_UNICODE);
-} catch (Throwable $error) {
-    http_response_code(500);
-    echo json_encode(['ok' => false, 'error' => $error->getMessage()], JSON_UNESCAPED_UNICODE);
 }
 
 function readPayload(): array
@@ -89,6 +96,7 @@ function ensureSettingsSchema(PDO $pdo): void
         'smtp_from_email' => "ALTER TABLE settings ADD COLUMN smtp_from_email VARCHAR(255) NULL AFTER smtp_password",
         'smtp_from_name' => "ALTER TABLE settings ADD COLUMN smtp_from_name VARCHAR(255) NULL AFTER smtp_from_email",
         'notification_time' => "ALTER TABLE settings ADD COLUMN notification_time CHAR(5) NOT NULL DEFAULT '09:00' AFTER smtp_from_name",
+        'auto_import_time' => "ALTER TABLE settings ADD COLUMN auto_import_time CHAR(5) NOT NULL DEFAULT '10:00' AFTER notification_time",
     ];
 
     foreach ($columns as $column => $sql) {
@@ -246,6 +254,7 @@ function bulkCreateBatches(PDO $pdo, array $batches): array
             'ok' => true,
             'added' => $added,
             'skipped_duplicates' => $skippedDuplicates,
+            'batches' => $createdBatches,
             'duplicates' => $duplicates,
             'message' => $skippedDuplicates > 0 ? DUPLICATE_BATCH_MESSAGE : '',
         ];
@@ -713,6 +722,8 @@ function normalizeSettings(array $settings): array
         'smtp_from_email' => (string)($settings['smtp_from_email'] ?? SENDER_EMAIL),
         'smtp_from_name' => (string)($settings['smtp_from_name'] ?? 'Сроки годности'),
         'notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
+        'auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? '10:00'), '10:00'),
+        'auto_import' => getAutoImportInfo($GLOBALS['pdo_for_settings_info'] ?? null),
         'notification_history' => getNotificationHistory($GLOBALS['pdo_for_settings_info'] ?? null),
         'system' => getSystemSettingsInfo($GLOBALS['pdo_for_settings_info'] ?? null),
     ];
@@ -761,6 +772,7 @@ function saveSettings(PDO $pdo, array $settings): array
         ':smtp_from_email' => trim((string)($settings['smtp_from_email'] ?? $current['smtp_from_email'] ?? SENDER_EMAIL)),
         ':smtp_from_name' => trim((string)($settings['smtp_from_name'] ?? $current['smtp_from_name'] ?? 'Сроки годности')),
         ':notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? $current['notification_time'] ?? '09:00')),
+        ':auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? $current['auto_import_time'] ?? '10:00'), '10:00'),
     ];
 
     $statement = $pdo->prepare(
@@ -780,7 +792,8 @@ function saveSettings(PDO $pdo, array $settings): array
              smtp_password = :smtp_password,
              smtp_from_email = :smtp_from_email,
              smtp_from_name = :smtp_from_name,
-             notification_time = :notification_time
+             notification_time = :notification_time,
+             auto_import_time = :auto_import_time
          WHERE id = 1'
     );
     $statement->execute($params);
@@ -795,9 +808,49 @@ function getRawSettings(PDO $pdo): array
     return $statement->fetch() ?: [];
 }
 
-function normalizeNotificationTime(string $time): string
+function normalizeNotificationTime(string $time, string $default = '09:00'): string
 {
-    return preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time) ? $time : '09:00';
+    return preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time) ? $time : $default;
+}
+
+function getAutoImportInfo(?PDO $pdo): array
+{
+    if (!$pdo) {
+        return [
+            'last_date' => 'Не выполнялось',
+            'loaded' => 0,
+            'status' => 'Не выполнялось',
+            'error' => '',
+        ];
+    }
+
+    $statement = $pdo->prepare(
+        "SELECT action, payload, created_at
+         FROM logs
+         WHERE action IN ('auto_import_completed', 'auto_import_failed', 'auto_import_not_found')
+         ORDER BY id DESC
+         LIMIT 1"
+    );
+    $statement->execute();
+    $row = $statement->fetch();
+    if (!$row) {
+        return [
+            'last_date' => 'Не выполнялось',
+            'loaded' => 0,
+            'status' => 'Не выполнялось',
+            'error' => '',
+        ];
+    }
+
+    $payload = json_decode((string)($row['payload'] ?? ''), true);
+    $payload = is_array($payload) ? $payload : [];
+
+    return [
+        'last_date' => (string)$row['created_at'],
+        'loaded' => (int)($payload['added'] ?? $payload['loaded'] ?? 0),
+        'status' => $row['action'] === 'auto_import_completed' ? 'Выполнено' : 'Ошибка',
+        'error' => (string)($payload['error'] ?? $payload['message'] ?? ''),
+    ];
 }
 
 function getNotificationHistory(?PDO $pdo): array

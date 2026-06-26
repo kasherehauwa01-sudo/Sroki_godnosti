@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS settings (
     smtp_from_email VARCHAR(255) NULL,
     smtp_from_name VARCHAR(255) NULL,
     notification_time CHAR(5) NOT NULL DEFAULT '09:00',
+    auto_import_time CHAR(5) NOT NULL DEFAULT '10:00',
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -73,6 +74,7 @@ INSERT INTO settings (
     smtp_password,
     smtp_from_email,
     smtp_from_name,
-    notification_time
-) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00')
+    notification_time,
+    auto_import_time
+) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00', '10:00')
 ON DUPLICATE KEY UPDATE id = id;

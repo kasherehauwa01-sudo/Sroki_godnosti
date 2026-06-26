@@ -870,6 +870,9 @@ function formatHistoryAction(action) {
         settings: 'Изменение настроек',
         expiry_notifications_sent: 'Отправка уведомлений',
         expiry_notifications_failed: 'Ошибка уведомлений',
+        auto_import_completed: 'Автозагрузка',
+        auto_import_failed: 'Ошибка автозагрузки',
+        auto_import_not_found: 'Автозагрузка',
         expiry_check_no_matches: 'Проверка сроков без совпадений',
         expiry_check_skipped: 'Проверка сроков пропущена',
     };
@@ -941,6 +944,15 @@ function formatHistoryDetails(action, payload) {
         return `${addedText}${duplicatesText}`;
     }
 
+    if (action === 'auto_import_completed') {
+        const batches = parsed.batches && parsed.batches.length ? `\nЗагруженные партии:\n${formatHistoryBatchList(parsed.batches)}` : '';
+        return `Автозагрузка выполнена. Загружено партий: ${Number(parsed.added || 0)}. Исключено дублей: ${Number(parsed.skipped_duplicates || 0)}.${batches}`;
+    }
+
+    if (action === 'auto_import_failed' || action === 'auto_import_not_found') {
+        return `Автозагрузка не выполнена. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
+
     if (action === 'update') {
         const before = parsed.before || {};
         const after = parsed.after || parsed;
@@ -961,7 +973,7 @@ function formatHistoryDetails(action, payload) {
 
 async function loadHistory() {
     const result = await api('logs');
-    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete']);
+    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found']);
     state.allHistory = (result.logs || []).filter((log) => registryActions.has(log.event || log.action));
     renderHistory();
 }
@@ -1033,7 +1045,14 @@ function renderSettings() {
     qs('#notify7').checked = Boolean(settings.notify_7_days);
     qs('#notify1').checked = Boolean(settings.notify_1_day);
     qs('#notificationEmails').value = (settings.emails || []).join('\n');
+    qs('#autoImportTime').value = settings.auto_import_time || '10:00';
     renderNotificationHistory(settings.notification_history || []);
+
+    const autoImport = settings.auto_import || {};
+    qs('#autoImportLastDate').textContent = autoImport.last_date || 'Не выполнялось';
+    qs('#autoImportLoaded').textContent = String(autoImport.loaded ?? 0);
+    qs('#autoImportStatus').textContent = autoImport.status || 'Не выполнялось';
+    qs('#autoImportError').textContent = autoImport.error || '—';
 
     const system = settings.system || {};
     qs('#systemCheckSchedule').textContent = system.check_schedule || 'ежедневно в 09:00';
@@ -1069,6 +1088,7 @@ function collectSettingsForm() {
         notify_15_days: qs('#notify15').checked,
         notify_7_days: qs('#notify7').checked,
         notify_1_day: qs('#notify1').checked,
+        auto_import_time: qs('#autoImportTime').value || '10:00',
         emails,
     };
 }
