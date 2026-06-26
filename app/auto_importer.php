@@ -108,12 +108,10 @@ function fetchTodayAutoImportMessage(string $username, string $password): ?strin
         foreach (array_reverse($ids) as $id) {
             $message = $imap->fetchMessage($id);
             $headers = parseMailHeaders($message);
-            $from = strtolower((string)($headers['from'] ?? ''));
             $subject = trim((string)($headers['subject'] ?? ''));
             if (
-                str_contains($from, strtolower(AUTO_IMPORT_FROM))
+                autoImportSenderMatches($headers)
                 && autoImportSubjectMatches($subject)
-                && autoImportMessageDateMatches($headers)
             ) {
                 return $message;
             }
@@ -132,21 +130,19 @@ function autoImportSubjectMatches(string $subject): bool
     $normalizedSubject = normalizeAutoImportSubject($subject);
     $expectedSubject = normalizeAutoImportSubject(AUTO_IMPORT_SUBJECT);
 
-    return $normalizedSubject === $expectedSubject;
+    return $normalizedSubject === $expectedSubject || str_contains($normalizedSubject, $expectedSubject);
 }
 
-function autoImportMessageDateMatches(array $headers): bool
+function autoImportSenderMatches(array $headers): bool
 {
-    $timestamp = strtotime((string)($headers['date'] ?? ''));
-    if (!$timestamp) {
-        // Если Date-заголовок нестандартный, не отбрасываем письмо:
-        // IMAP-поиск уже ограничен недавними письмами, а отправитель и тема совпали.
-        return true;
+    foreach (['from', 'sender', 'reply-to', 'return-path'] as $headerName) {
+        $value = strtolower((string)($headers[$headerName] ?? ''));
+        if (str_contains($value, strtolower(AUTO_IMPORT_FROM))) {
+            return true;
+        }
     }
 
-    $messageDate = date('Y-m-d', $timestamp);
-
-    return $messageDate === date('Y-m-d') || $messageDate === date('Y-m-d', strtotime('-1 day'));
+    return false;
 }
 
 function normalizeAutoImportSubject(string $subject): string
@@ -352,7 +348,18 @@ final class SimpleImapClient
         $date = date('d-M-Y', strtotime('-1 day'));
         $response = $this->command('SEARCH SINCE ' . $date);
         preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
-        return array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
+        $ids = array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
+        if ($ids) {
+            return $ids;
+        }
+
+        // Запасной вариант нужен для серверов, где SEARCH SINCE работает
+        // нестандартно: берём последние письма и фильтруем их в PHP.
+        $response = $this->command('SEARCH ALL');
+        preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
+        $allIds = array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
+
+        return array_slice($allIds, -100);
     }
 
     public function fetchMessage(string $id): string
