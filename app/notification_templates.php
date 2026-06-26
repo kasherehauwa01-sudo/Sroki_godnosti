@@ -52,5 +52,11 @@ function expiryNotificationInstruction(int $daysLeft): string
 function formatExpiryMonth(string $expiryDate): string
 {
     $timestamp = strtotime($expiryDate);
-    return $timestamp ? date('m.Y', $timestamp) : $expiryDate;
+    if (!$timestamp) {
+        return $expiryDate;
+    }
+
+    return date('d', $timestamp) === '01'
+        ? date('m.Y', $timestamp)
+        : date('d.m.Y', $timestamp);
 }

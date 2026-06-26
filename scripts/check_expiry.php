@@ -20,7 +20,8 @@ try {
     $pdo = getDatabaseConnection();
     // Важно считать «сегодня» по Москве, так как отправка запланирована на 09:00 МСК.
     $pdo->exec("SET time_zone = '+03:00'");
-    $pdo->exec('UPDATE batches SET days_left = DATEDIFF(expiry_date, CURDATE())');
+    ensureExpiryColumns($pdo);
+    $pdo->exec('UPDATE batches SET days_left = IF(expiry_invalid = 1, 0, DATEDIFF(expiry_date, CURDATE()))');
 
     $settings = getNotificationSettings($pdo);
     $emails = splitEmails((string)$settings['notification_email']);
@@ -34,7 +35,7 @@ try {
     $statement = $pdo->prepare(
         "SELECT article, quantity, expiry_date, days_left
          FROM batches
-         WHERE status = 'В наличии' AND days_left IN ($placeholders)
+         WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
          ORDER BY days_left ASC, expiry_date ASC, article ASC"
     );
     $statement->execute($notificationDays);
@@ -91,6 +92,24 @@ function getNotificationSettings(PDO $pdo): array
     }
 
     return $settings;
+}
+
+function ensureExpiryColumns(PDO $pdo): void
+{
+    $columns = [
+        'expiry_invalid' => "ALTER TABLE batches ADD COLUMN expiry_invalid TINYINT(1) NOT NULL DEFAULT 0 AFTER expiry_date",
+        'expiry_raw' => "ALTER TABLE batches ADD COLUMN expiry_raw VARCHAR(32) NULL AFTER expiry_invalid",
+    ];
+
+    foreach ($columns as $column => $sql) {
+        $statement = $pdo->prepare(
+            'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+        );
+        $statement->execute([':table' => 'batches', ':column' => $column]);
+        if ((int)$statement->fetchColumn() === 0) {
+            $pdo->exec($sql);
+        }
+    }
 }
 
 function splitEmails(string $emails): array

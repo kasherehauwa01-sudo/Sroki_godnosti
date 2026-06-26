@@ -158,7 +158,7 @@ manager@site.ru"></textarea></label>
                 <ol>
                     <li>Нажмите <code>Добавить партию</code>.</li>
                     <li>Заполните поля <code>Артикул</code>, <code>Количество в партии</code> и <code>Срок годности</code>.</li>
-                    <li>Срок годности вводится в формате <code>мм.гггг</code>, например <code>08.2026</code>.</li>
+                    <li>Срок годности вводится в формате <code>мм.гггг</code> или <code>дд.мм.гггг</code>, например <code>08.2026</code> или <code>15.08.2026</code>.</li>
                     <li>Если нужно добавить сразу несколько партий, нажмите <code>Добавить строку</code>.</li>
                     <li>Нажмите <code>Добавить партии в реестр</code>.</li>
                 </ol>
@@ -178,7 +178,7 @@ manager@site.ru"></textarea></label>
                     <li><code>Количество</code> или <code>Количество в партии</code>;</li>
                     <li><code>Срок годности до</code>, <code>Срок годности</code> или похожий заголовок.</li>
                 </ul>
-                <p>Срок годности можно указывать как <code>мм.гггг</code> или полноценной датой <code>дд.мм.гггг</code>; сервис возьмет месяц и год. Старые <code>.xls</code> файлы с русскими заголовками в Windows-1251 также поддерживаются.</p>
+                <p>Срок годности можно указывать как <code>мм.гггг</code> или полной датой <code>дд.мм.гггг</code>; для <code>мм.гггг</code> срок считается первым числом месяца, а для <code>дд.мм.гггг</code> сохраняется конкретный день. Старые <code>.xls</code> файлы с русскими заголовками в Windows-1251 также поддерживаются.</p>
                 <h3>6. Редактирование партии</h3>
                 <ol>
                     <li>В строке нужной партии нажмите кнопку с карандашом <code>✏️</code>.</li>
@@ -350,7 +350,7 @@ manager@site.ru"></textarea></label>
             <input id="editBatchId" name="id" type="hidden">
             <label>Артикул<input id="editArticle" name="article" required autocomplete="off"></label>
             <label>Количество в партии<input id="editQuantity" name="quantity" required min="0" step="1" type="number"></label>
-            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric" maxlength="7"></label>
+            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10"></label>
             <label>Статус
                 <select id="editStatus" name="status" required>
                     <option>В наличии</option>

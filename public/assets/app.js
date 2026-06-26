@@ -131,6 +131,7 @@ function escapeHtml(value) {
 }
 
 function indicatorClass(days) {
+    if (days === null) return '';
     if (days < 0) return 'indicator-gray';
     if (days <= 15) return 'indicator-red';
     if (days <= 30) return 'indicator-orange';
@@ -153,16 +154,61 @@ function formatDateRu(value) {
     return `${day}.${month}.${year}`;
 }
 
+function isValidDateParts(day, month, year) {
+    const date = new Date(year, month - 1, day);
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+function expiryDateInfo(value) {
+    const raw = String(value ?? '').trim();
+    const russianDate = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (russianDate) {
+        const [, dayValue, monthValue, yearValue] = russianDate;
+        const day = Number(dayValue);
+        const month = Number(monthValue);
+        const year = Number(yearValue);
+        return {
+            invalid: !isValidDateParts(day, month, year),
+            placeholder: month >= 1 && month <= 12 ? `${year}-${String(month).padStart(2, '0')}-01` : '',
+            raw,
+        };
+    }
+
+    const isoDate = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (isoDate) {
+        const [, yearValue, monthValue, dayValue] = isoDate;
+        const day = Number(dayValue);
+        const month = Number(monthValue);
+        const year = Number(yearValue);
+        return {
+            invalid: !isValidDateParts(day, month, year),
+            placeholder: month >= 1 && month <= 12 ? `${year}-${String(month).padStart(2, '0')}-01` : '',
+            raw,
+        };
+    }
+
+    return { invalid: false, placeholder: '', raw };
+}
+
 function toExpiryDateValue(value) {
     if (!value) return '';
     if (value instanceof Date && !Number.isNaN(value.getTime())) {
-        return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-01`;
+        return [
+            value.getFullYear(),
+            String(value.getMonth() + 1).padStart(2, '0'),
+            String(value.getDate()).padStart(2, '0'),
+        ].join('-');
     }
     if (typeof value === 'number') {
         return toExpiryDateValue(excelSerialDateToInputValue(value));
     }
 
     const text = String(value).trim();
+    const dateInfo = expiryDateInfo(text);
+    if (dateInfo.invalid && dateInfo.placeholder) {
+        return dateInfo.placeholder;
+    }
+
     const monthYear = text.match(/^(0?[1-9]|1[0-2])\.(\d{4})$/);
     if (monthYear) {
         const [, month, year] = monthYear;
@@ -171,11 +217,17 @@ function toExpiryDateValue(value) {
 
     const russianDate = text.match(/^\d{1,2}\.(\d{1,2})\.(\d{4})$/);
     if (russianDate) {
-        const [, month, year] = russianDate;
-        return `${year}-${month.padStart(2, '0')}-01`;
+        const [day, month, year] = text.split('.');
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
     }
 
-    const isoMonth = text.match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?/);
+    const isoDate = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoDate) {
+        const [, year, month, day] = isoDate;
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
+
+    const isoMonth = text.match(/^(\d{4})-(\d{1,2})$/);
     if (isoMonth) {
         const [, year, month] = isoMonth;
         return `${year}-${month.padStart(2, '0')}-01`;
@@ -183,18 +235,38 @@ function toExpiryDateValue(value) {
 
     const parsed = new Date(text);
     if (!Number.isNaN(parsed.getTime())) {
-        return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-01`;
+        return [
+            parsed.getFullYear(),
+            String(parsed.getMonth() + 1).padStart(2, '0'),
+            String(parsed.getDate()).padStart(2, '0'),
+        ].join('-');
     }
     return text;
 }
 
 function formatExpiryMonthRu(value) {
     const dateValue = toExpiryDateValue(value);
-    const match = dateValue.match(/^(\d{4})-(\d{2})-\d{2}$/);
+    const match = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!match) return value || '';
 
-    const [, year, month] = match;
-    return `${month}.${year}`;
+    const [, year, month, day] = match;
+    return day === '01' ? `${month}.${year}` : `${day}.${month}.${year}`;
+}
+
+function maskExpiryMonthValue(value) {
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
+    if (digits.length > 6) {
+        return `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
+    }
+    return digits.length > 2 ? `${digits.slice(0, 2)}.${digits.slice(2)}` : digits;
+}
+
+function bindExpiryMonthMask(input) {
+    input.value = maskExpiryMonthValue(input.value);
+    // Маска поддерживает частичный формат мм.гггг и полный формат дд.мм.гггг.
+    input.addEventListener('input', () => {
+        input.value = maskExpiryMonthValue(input.value);
+    });
 }
 
 function maskExpiryMonthValue(value) {
@@ -309,6 +381,10 @@ function normalizeSpreadsheetRowEncoding(row) {
 
 function normalizeBatch(row) {
     const quantityRaw = getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']);
+    const expiryRawValue = getRowValue(row, ['expiryRaw', 'expiry_raw', 'expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности до.', 'Срок годности', 'Годен до', 'Срокгодностидо']);
+    const expiryInfo = expiryDateInfo(expiryRawValue);
+    const serverInvalid = row.expiryInvalid ?? row.expiry_invalid;
+    const expiryInvalid = serverInvalid === undefined ? expiryInfo.invalid : Boolean(serverInvalid);
 
     return {
         id: String(getRowValue(row, ['id', 'ID']) || crypto.randomUUID()),
@@ -316,8 +392,10 @@ function normalizeBatch(row) {
         article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара', 'Артикул.'])).trim(),
         quantity: Number(quantityRaw || 0),
         hasQuantity: String(quantityRaw).trim() !== '',
-        expiryDate: toExpiryDateValue(getRowValue(row, ['expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности до.', 'Срок годности', 'Годен до', 'Срокгодностидо'])),
-        daysLeft: Number.isFinite(Number(row.daysLeft ?? row.days_left)) ? Number(row.daysLeft ?? row.days_left) : null,
+        expiryDate: toExpiryDateValue(expiryRawValue),
+        expiryRaw: String(getRowValue(row, ['expiryRaw', 'expiry_raw']) || (expiryInvalid ? expiryInfo.raw : '') || '').trim(),
+        expiryInvalid,
+        daysLeft: expiryInvalid ? null : (Number.isFinite(Number(row.daysLeft ?? row.days_left)) ? Number(row.daysLeft ?? row.days_left) : null),
         status: getRowValue(row, ['status', 'Статус партии']) || 'В наличии',
     };
 }
@@ -362,6 +440,7 @@ function renderRegistry() {
         const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
         return (!filters.article || batch.article.toLowerCase().includes(filters.article.toLowerCase()))
             && (!filters.status || batch.status === filters.status)
+            && (!batch.expiryInvalid || !filters.days_to)
             && (!filters.days_to || (filters.days_to === 'expired' ? days < 0 : days >= 0 && days <= Number(filters.days_to)));
     });
     sortRegistryRows();
@@ -373,23 +452,27 @@ function renderRegistry() {
     updateSortButtons();
 
     qs('#registryBody').innerHTML = state.filteredBatches.map((batch) => {
-        const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
+        const days = batch.expiryInvalid ? null : (batch.daysLeft ?? daysLeft(batch.expiryDate));
         const options = statusOptions.map((option) => `<option ${option === batch.status ? 'selected' : ''}>${option}</option>`).join('');
         const selectionCell = state.writeOffAccessGranted
             ? `<td class="selection-column"><input class="batch-select-checkbox" data-id="${escapeHtml(batch.id)}" type="checkbox" ${state.selectedBatchIds.has(String(batch.id)) ? 'checked' : ''}></td>`
             : '';
-        return `<tr class="${indicatorClass(days)}">
+        const invalidDateActions = batch.expiryInvalid
+            ? `<span class="invalid-date-label">некорректная дата</span><button class="small-button fix-expiry-button" data-id="${escapeHtml(batch.id)}" type="button">Исправить</button>`
+            : '';
+        return `<tr class="${batch.expiryInvalid ? 'indicator-purple invalid-expiry-row' : indicatorClass(days)}">
             ${selectionCell}
             <td>${escapeHtml(batch.article)}</td>
             <td>${escapeHtml(batch.quantity)}</td>
-            <td>${escapeHtml(formatExpiryMonthRu(batch.expiryDate))}</td>
-            <td>${formatDays(days)}</td>
+            <td>${escapeHtml(batch.expiryInvalid ? (batch.expiryRaw || formatExpiryMonthRu(batch.expiryDate)) : formatExpiryMonthRu(batch.expiryDate))}</td>
+            <td>${batch.expiryInvalid ? '—' : formatDays(days)}</td>
             <td><select class="status-select" data-id="${escapeHtml(batch.id)}" ${state.writeOffAccessGranted ? '' : 'disabled'}>${options}</select></td>
             <td>${escapeHtml(formatDateRu(batch.createdAt))}</td>
             <td>
                 <div class="row-actions">
                     <button class="small-button icon-action edit-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Редактировать" aria-label="Редактировать партию">✏️</button>
                     <button class="small-button icon-action danger delete-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Удалить" aria-label="Удалить партию" ${state.writeOffAccessGranted ? '' : 'disabled'}>🗑️</button>
+                    ${invalidDateActions}
                 </div>
             </td>
         </tr>`;
@@ -399,6 +482,7 @@ function renderRegistry() {
     updateSelectionControls();
     qsa('.status-select').forEach((select) => select.addEventListener('change', onStatusChange));
     qsa('.edit-batch-button').forEach((button) => button.addEventListener('click', () => openEditDialog(button.dataset.id)));
+    qsa('.fix-expiry-button').forEach((button) => button.addEventListener('click', () => openEditDialog(button.dataset.id)));
     qsa('.delete-batch-button').forEach((button) => button.addEventListener('click', () => deleteBatch(button.dataset.id)));
 }
 
@@ -431,8 +515,8 @@ function sortRegistryRows() {
     const multiplier = direction === 'desc' ? -1 : 1;
     state.filteredBatches.sort((left, right) => {
         if (field === 'daysLeft') {
-            const leftDays = left.daysLeft ?? daysLeft(left.expiryDate);
-            const rightDays = right.daysLeft ?? daysLeft(right.expiryDate);
+            const leftDays = left.expiryInvalid ? Number.POSITIVE_INFINITY : (left.daysLeft ?? daysLeft(left.expiryDate));
+            const rightDays = right.expiryInvalid ? Number.POSITIVE_INFINITY : (right.daysLeft ?? daysLeft(right.expiryDate));
             return (leftDays - rightDays) * multiplier;
         }
         if (field === 'article') {
@@ -485,7 +569,7 @@ function openEditDialog(id) {
     qs('#editBatchId').value = batch.id;
     qs('#editArticle').value = batch.article;
     qs('#editQuantity').value = batch.quantity;
-    qs('#editExpiryDate').value = formatExpiryMonthRu(batch.expiryDate);
+    qs('#editExpiryDate').value = batch.expiryInvalid ? (batch.expiryRaw || formatExpiryMonthRu(batch.expiryDate)) : formatExpiryMonthRu(batch.expiryDate);
     qs('#editStatus').value = batch.status;
     qs('#editCreatedAt').value = batch.createdAt;
     qs('#editBatchDialog').showModal();
@@ -502,7 +586,7 @@ function createBatchRow(values = {}) {
     row.innerHTML = `
         <label>Артикул<input class="batch-row-article" required autocomplete="off" value="${escapeHtml(values.article || '')}"></label>
         <label>Количество в партии<input class="batch-row-quantity" required min="0" step="1" type="number" value="${escapeHtml(values.quantity ?? '')}"></label>
-        <label>Срок годности<input class="batch-row-expiry" required pattern="^(0[1-9]|1[0-2])[.][0-9]{4}$" placeholder="мм.гггг" inputmode="numeric" maxlength="7" value="${escapeHtml(values.expiryDate || '')}"></label>
+        <label>Срок годности<input class="batch-row-expiry" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10" value="${escapeHtml(values.expiryDate || '')}"></label>
         <button class="small-button danger remove-batch-row-button" type="button" aria-label="Удалить строку">🗑️</button>
     `;
     bindExpiryMonthMask(row.querySelector('.batch-row-expiry'));
@@ -585,7 +669,17 @@ async function submitEditForm(event) {
     batch.write_off_password = state.writeOffPassword;
 
     try {
-        await api('update', batch);
+        const result = await api('update', batch);
+        if (result.duplicate) {
+            closeEditDialog();
+            const shouldDelete = confirm('Такая партия уже занесена в реестр. Удалить текущую строку с некорректной датой?');
+            if (shouldDelete) {
+                await api('delete', { id: batch.id, invalid_duplicate_cleanup: true });
+                showToast('Некорректная строка удалена.');
+                await Promise.all([loadBatches(), loadHistory()]);
+            }
+            return;
+        }
         closeEditDialog();
         showToast('Партия обновлена.');
         await Promise.all([loadBatches(), loadHistory()]);
@@ -776,47 +870,6 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
-    if (before.status && after.status && before.status !== after.status) {
-        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
-    }
-
-    return changes;
-}
-
-function formatHistoryDetails(action, payload) {
-    const parsed = parseHistoryPayload(payload);
-
-    if (action === 'create') {
-        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (action === 'bulk_create') {
-        const addedText = parsed.batches && parsed.batches.length
-            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
-            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
-        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
-            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
-            : '';
-
-        return `${addedText}${duplicatesText}`;
-    }
-
-    if (action === 'update') {
-        const before = parsed.before || {};
-        const after = parsed.after || parsed;
-        const changes = formatChangedFields(before, after);
-        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
-        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
-    }
-
-    if (action === 'delete') {
-        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (parsed.text) return parsed.text;
-
-    // Запасной вариант нужен для старых записей истории со служебными полями.
-    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
 function formatHistoryBatch(batch) {
@@ -1093,7 +1146,7 @@ function readXlsx(file) {
             const normalizedRows = decodedRows.map(normalizeBatch);
             state.importRows = normalizedRows.filter((row) => row.article && row.hasQuantity && row.expiryDate);
             const skipped = normalizedRows.length - state.importRows.length;
-            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.quantity} — ${formatExpiryMonthRu(row.expiryDate)}`).join('\n');
+            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.quantity} — ${row.expiryInvalid ? `${row.expiryRaw} (некорректная дата)` : formatExpiryMonthRu(row.expiryDate)}`).join('\n');
             qs('#importPreview').textContent = [
                 `Файл: ${file.name}`,
                 `Найдено строк: ${rawRows.length}`,
