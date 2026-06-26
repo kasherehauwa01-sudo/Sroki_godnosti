@@ -269,6 +269,19 @@ function bindExpiryMonthMask(input) {
     });
 }
 
+function maskExpiryMonthValue(value) {
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 6);
+    return digits.length > 2 ? `${digits.slice(0, 2)}.${digits.slice(2)}` : digits;
+}
+
+function bindExpiryMonthMask(input) {
+    input.value = maskExpiryMonthValue(input.value);
+    // Маска оставляет только цифры и автоматически добавляет точку после месяца.
+    input.addEventListener('input', () => {
+        input.value = maskExpiryMonthValue(input.value);
+    });
+}
+
 function formatDuplicateBatches(duplicates, intro = 'В реестре уже есть эта партия товара') {
     const rows = (duplicates || [])
         .filter(Boolean)
