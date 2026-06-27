@@ -102,6 +102,7 @@ manager@site.ru"></textarea></label>
                     </label>
                     <div class="settings-actions">
                         <button class="ghost-button" id="testAutoImportButton" formnovalidate type="button">Тест автозагрузки</button>
+                        <button class="ghost-button" id="showAutoImportLogsButton" formnovalidate type="button">Логи автозагрузки</button>
                     </div>
                     <p class="subtitle" id="testAutoImportStatus" role="status" aria-live="polite"></p>
                     <p class="subtitle">Cron должен запускать <code>scripts/auto_import.php</code>. Если письмо не найдено, скрипт повторяет поиск каждый час в течение 10 часов.</p>
@@ -395,6 +396,19 @@ manager@site.ru"></textarea></label>
             <div class="modal-actions">
                 <button class="ghost-button hidden" id="notificationDetailsButton" type="button">Подробнее</button>
                 <button class="primary" id="confirmNotificationDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal" id="autoImportLogsDialog">
+        <div class="card form modal-card notification-modal-card">
+            <div class="modal-heading">
+                <h2>Логи автозагрузки</h2>
+                <button class="icon-button" id="closeAutoImportLogsDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="notification-dialog-body" id="autoImportLogsBody"></div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmAutoImportLogsDialogButton" type="button">Закрыть</button>
             </div>
         </div>
     </dialog>

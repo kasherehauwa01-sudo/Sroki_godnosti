@@ -750,6 +750,7 @@ function normalizeSettings(array $settings): array
         'notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
         'auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? '10:00'), '10:00'),
         'auto_import' => getAutoImportInfo($GLOBALS['pdo_for_settings_info'] ?? null),
+        'auto_import_logs' => getAutoImportLogs($GLOBALS['pdo_for_settings_info'] ?? null),
         'notification_history' => getNotificationHistory($GLOBALS['pdo_for_settings_info'] ?? null),
         'system' => getSystemSettingsInfo($GLOBALS['pdo_for_settings_info'] ?? null),
     ];
@@ -877,6 +878,61 @@ function getAutoImportInfo(?PDO $pdo): array
         'status' => $row['action'] === 'auto_import_completed' ? 'Выполнено' : 'Ошибка',
         'error' => (string)($payload['error'] ?? $payload['message'] ?? ''),
     ];
+}
+
+function getAutoImportLogs(?PDO $pdo): array
+{
+    if (!$pdo) {
+        return [];
+    }
+
+    $statement = $pdo->prepare(
+        "SELECT action, payload, created_at
+         FROM logs
+         WHERE action IN ('auto_import_started', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found')
+         ORDER BY id DESC
+         LIMIT 50"
+    );
+    $statement->execute();
+
+    return array_map(static function (array $row): array {
+        $payload = json_decode((string)($row['payload'] ?? ''), true);
+        $payload = is_array($payload) ? $payload : [];
+
+        return [
+            'date' => (string)$row['created_at'],
+            'action' => (string)$row['action'],
+            'status' => autoImportLogStatus((string)$row['action']),
+            'text' => autoImportLogText((string)$row['action'], $payload),
+        ];
+    }, $statement->fetchAll());
+}
+
+function autoImportLogStatus(string $action): string
+{
+    return match ($action) {
+        'auto_import_started' => 'Запущено',
+        'auto_import_completed' => 'Выполнено',
+        default => 'Ошибка',
+    };
+}
+
+function autoImportLogText(string $action, array $payload): string
+{
+    if ($action === 'auto_import_started') {
+        return 'Ручной тест автозагрузки запущен.';
+    }
+    if ($action === 'auto_import_completed') {
+        return sprintf(
+            'Папка: %s. Файл: %s. Загружено партий: %d. Исключено дублей: %d.',
+            (string)($payload['folder'] ?? 'не указана'),
+            (string)($payload['filename'] ?? 'не указан'),
+            (int)($payload['added'] ?? 0),
+            (int)($payload['skipped_duplicates'] ?? 0)
+        );
+    }
+
+    return (string)($payload['error'] ?? $payload['message'] ?? 'Причина ошибки не указана.');
 }
 
 function getNotificationHistory(?PDO $pdo): array

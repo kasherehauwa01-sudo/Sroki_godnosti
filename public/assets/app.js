@@ -887,6 +887,59 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
+    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
+        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
+    }
+    if (before.status && after.status && before.status !== after.status) {
+        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
+    }
+
+    return changes;
+}
+
+function formatHistoryDetails(action, payload) {
+    const parsed = parseHistoryPayload(payload);
+
+    if (action === 'create') {
+        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (action === 'bulk_create') {
+        const addedText = parsed.batches && parsed.batches.length
+            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
+            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
+        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
+            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
+            : '';
+
+        return `${addedText}${duplicatesText}`;
+    }
+
+    if (action === 'auto_import_completed') {
+        const batches = parsed.batches && parsed.batches.length ? `\nЗагруженные партии:\n${formatHistoryBatchList(parsed.batches)}` : '';
+        return `Автозагрузка выполнена. Загружено партий: ${Number(parsed.added || 0)}. Исключено дублей: ${Number(parsed.skipped_duplicates || 0)}.${batches}`;
+    }
+
+    if (action === 'auto_import_failed' || action === 'auto_import_not_found') {
+        return `Автозагрузка не выполнена. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
+
+    if (action === 'update') {
+        const before = parsed.before || {};
+        const after = parsed.after || parsed;
+        const changes = formatChangedFields(before, after);
+        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
+        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
+    }
+
+    if (action === 'delete') {
+        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (parsed.text) return parsed.text;
+
+    // Запасной вариант нужен для старых записей истории со служебными полями.
+    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
 function formatHistoryBatch(batch) {
@@ -1164,6 +1217,27 @@ async function runTestAutoImport() {
     }
 }
 
+function showAutoImportLogs() {
+    const logs = state.settings?.auto_import_logs || [];
+    const body = qs('#autoImportLogsBody');
+    if (!logs.length) {
+        body.textContent = 'Логи автозагрузки пока отсутствуют.';
+    } else {
+        body.innerHTML = logs.map((log) => `
+            <article class="notification-history-item">
+                <time>${escapeHtml(log.date || 'Дата не указана')}</time>
+                <p><strong>${escapeHtml(log.status || 'Статус не указан')}</strong></p>
+                <p>${escapeHtml(log.text || 'Описание отсутствует')}</p>
+            </article>
+        `).join('');
+    }
+    qs('#autoImportLogsDialog').showModal();
+}
+
+function closeAutoImportLogs() {
+    qs('#autoImportLogsDialog').close();
+}
+
 function downloadTemplateXlsx() {
     if (!window.XLSX) {
         showToast('Библиотека XLSX еще не загрузилась. Повторите действие через несколько секунд.', true);
@@ -1337,6 +1411,9 @@ function bindEvents() {
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
     qs('#testAutoImportButton').addEventListener('click', runTestAutoImport);
+    qs('#showAutoImportLogsButton').addEventListener('click', showAutoImportLogs);
+    qs('#closeAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
+    qs('#confirmAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
     qs('#copyDeployCommandButton').addEventListener('click', copyDeployCommand);
     qsa('#settingsForm input, #settingsForm textarea').forEach((field) => {
         if (field.id !== 'deployCommandInput') {
