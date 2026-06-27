@@ -294,16 +294,16 @@ function rowsToBatchPayloads(array $rows): array
     if (count($rows) < 2) {
         return [];
     }
-    $headers = array_map('normalizeAutoImportHeader', $rows[0]);
-    $articleIndex = findAutoImportColumn($headers, ['артикул']);
-    $quantityIndex = findAutoImportColumn($headers, ['количество', 'количествовпартии']);
-    $expiryIndex = findAutoImportColumn($headers, ['срокгодностидо', 'срокгодности', 'годендо']);
-    if ($articleIndex === null || $quantityIndex === null || $expiryIndex === null) {
+
+    $headerInfo = findAutoImportHeaderRow($rows);
+    if (!$headerInfo) {
         throw new RuntimeException('Во вложении не найдены обязательные колонки: Артикул, Количество, Срок годности.');
     }
 
+    ['row' => $headerRow, 'article' => $articleIndex, 'quantity' => $quantityIndex, 'expiry' => $expiryIndex] = $headerInfo;
+
     $payloads = [];
-    foreach (array_slice($rows, 1) as $row) {
+    foreach (array_slice($rows, $headerRow + 1) as $row) {
         $article = trim((string)($row[$articleIndex] ?? ''));
         $quantity = trim((string)($row[$quantityIndex] ?? ''));
         $expiry = trim((string)($row[$expiryIndex] ?? ''));
@@ -321,9 +321,33 @@ function rowsToBatchPayloads(array $rows): array
     return $payloads;
 }
 
+function findAutoImportHeaderRow(array $rows): ?array
+{
+    foreach (array_slice($rows, 0, 30, true) as $rowIndex => $row) {
+        $headers = array_map('normalizeAutoImportHeader', $row);
+        $articleIndex = findAutoImportColumn($headers, ['артикул', 'кодтовара', 'номенклатураартикул']);
+        $quantityIndex = findAutoImportColumn($headers, ['количество', 'количествовпартии', 'остаток', 'колво']);
+        $expiryIndex = findAutoImportColumn($headers, ['срокгодностидо', 'срокгодности', 'годендо', 'срок']);
+
+        if ($articleIndex !== null && $quantityIndex !== null && $expiryIndex !== null) {
+            return [
+                'row' => (int)$rowIndex,
+                'article' => $articleIndex,
+                'quantity' => $quantityIndex,
+                'expiry' => $expiryIndex,
+            ];
+        }
+    }
+
+    return null;
+}
+
 function normalizeAutoImportHeader(mixed $header): string
 {
-    return preg_replace('/[^a-zа-я0-9]+/u', '', mb_strtolower(trim((string)$header))) ?? '';
+    $header = trim((string)$header);
+    $header = str_replace(["\xEF\xBB\xBF", "\r", "\n"], ' ', $header);
+
+    return preg_replace('/[^a-zа-я0-9]+/u', '', mb_strtolower($header)) ?? '';
 }
 
 function findAutoImportColumn(array $headers, array $variants): ?int
