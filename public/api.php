@@ -632,19 +632,22 @@ function runTestAutoImport(PDO $pdo, array $payload): array
 {
     assertSettingsPassword($payload);
 
-    $result = runAutoImport($pdo, true);
-    if (empty($result['ok'])) {
-        throw new RuntimeException((string)($result['message'] ?? 'Автозагрузка не выполнена.'));
+    if (!function_exists('exec')) {
+        throw new RuntimeException('На сервере отключён запуск фоновых команд PHP.');
     }
+
+    $script = realpath(__DIR__ . '/../scripts/auto_import.php');
+    if ($script === false) {
+        throw new RuntimeException('Не найден скрипт автозагрузки scripts/auto_import.php.');
+    }
+
+    $command = sprintf('%s %s --once > /dev/null 2>&1 &', escapeshellarg(PHP_BINARY), escapeshellarg($script));
+    exec($command);
+    writeLog($pdo, 'auto_import_started', ['mode' => 'manual_test']);
 
     return [
         'ok' => true,
-        'message' => sprintf(
-            'Автозагрузка выполнена. Загружено партий: %d. Исключено дублей: %d.',
-            (int)($result['added'] ?? 0),
-            (int)($result['skipped_duplicates'] ?? 0)
-        ),
-        'result' => $result,
+        'message' => 'Тест автозагрузки запущен. Результат появится в логах автозагрузки после обработки письма.',
         'settings' => getSettings($pdo),
     ];
 }
