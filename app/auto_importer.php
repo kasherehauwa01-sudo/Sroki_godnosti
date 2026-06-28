@@ -260,7 +260,7 @@ function spreadsheetAttachmentToBatches(string $content, string $filename): arra
 
 function readSpreadsheetRows(string $content, string $filename): array
 {
-    if (!class_exists(IOFactory::class)) {
+    if (!class_exists(\PhpOffice\PhpSpreadsheet\Reader\Xls::class)) {
         throw new RuntimeException('Для чтения XLS/XLSX установите phpoffice/phpspreadsheet через Composer.');
     }
 
@@ -271,9 +271,27 @@ function readSpreadsheetRows(string $content, string $filename): array
     file_put_contents($path, $content);
 
     try {
-        $spreadsheet = IOFactory::load($path);
+        echo "LOAD 1\n";
+
+        $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xls();
+
+        echo "LOAD 2\n";
+
+        $reader->setReadDataOnly(true);
+
+        echo "LOAD 3\n";
+
+        $spreadsheet = $reader->load($path);
+
+        echo "LOAD 4\n";
+
         $sheet = $spreadsheet->getActiveSheet();
+
+        echo "LOAD 5\n";
+
         $rows = $sheet->toArray(null, true, true, false);
+
+        echo "LOAD 6 rows=" . count($rows) . "\n";
 
         return array_map(static function (array $row): array {
             return array_map(static function (mixed $value): string {
