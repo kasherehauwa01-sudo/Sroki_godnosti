@@ -20,64 +20,21 @@ const AUTO_IMPORT_MAIL_PORT = 993;
 
 function runAutoImport(PDO $pdo, bool $once = false): array
 {
-    echo "RUN 1\n";
-    flush();
-
     ensureBatchesSchema($pdo);
-
-    echo "RUN 2\n";
-    flush();
-
     ensureSettingsSchema($pdo);
-
-    echo "RUN 3\n";
-    flush();
-
     $settings = getRawSettings($pdo);
-
-    echo "RUN 4\n";
-    flush();
-
     $time = normalizeNotificationTime((string)($settings['auto_import_time'] ?? '10:00'), '10:00');
-
-    echo "RUN 5\n";
-    flush();
-
     $attempts = $once ? 1 : 10;
-
-    echo "RUN 6\n";
-    flush();
-
     $lastError = '';
 
     for ($attempt = 1; $attempt <= $attempts; $attempt++) {
-        echo "RUN attempt {$attempt}\n";
-        flush();
-
         try {
-            echo "RUN before runAutoImportAttempt\n";
-            flush();
-
             $result = runAutoImportAttempt($pdo, $settings, $attempt, $time);
-
-            echo "RUN after runAutoImportAttempt\n";
-            flush();
-
             if (($result['status'] ?? '') === 'completed') {
-                echo "RUN completed\n";
-                flush();
-
                 return $result;
             }
-
-            echo "RUN status=" . ($result['status'] ?? '') . "\n";
-            flush();
-
             $lastError = (string)($result['message'] ?? '');
         } catch (Throwable $error) {
-            echo "RUN exception: " . $error->getMessage() . "\n";
-            flush();
-
             $lastError = $error->getMessage();
             writeLog($pdo, 'auto_import_failed', [
                 'attempt' => $attempt,
@@ -86,15 +43,9 @@ function runAutoImport(PDO $pdo, bool $once = false): array
         }
 
         if ($attempt < $attempts) {
-            echo "RUN sleep\n";
-            flush();
-
             sleep(3600);
         }
     }
-
-    echo "RUN end\n";
-    flush();
 
     return [
         'ok' => false,
@@ -137,11 +88,7 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         throw new RuntimeException('Во вложении не найдены строки для загрузки.');
     }
 
-    echo "POINT 1\n";
-
     $result = bulkCreateBatches($pdo, $rows);
-
-    echo "POINT 2\n";
 
     markAutoImportMessageSeen(
         $username,
@@ -149,8 +96,6 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         (string)$mail['folder'],
         (string)$mail['id']
     );
-
-    echo "POINT 3\n";
 
     writeLog($pdo, 'auto_import_completed', [
         'attempt' => $attempt,
@@ -161,8 +106,6 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         'batches' => $result['batches'] ?? [],
         'duplicates' => $result['duplicates'] ?? [],
     ]);
-
-    echo "POINT 4\n";
 
     return [
         'ok' => true,
@@ -255,26 +198,9 @@ function parseMailHeaders(string $message): array
 
 function extractSpreadsheetAttachments(string $message): array
 {
-    $attachments = array_values(array_filter(extractMimeParts($message), static function (array $part): bool {
+    return array_values(array_filter(extractMimeParts($message), static function (array $part): bool {
         return preg_match('/\.(xls|xlsx)$/i', $part['filename'] ?? '') === 1;
     }));
-
-    foreach ($attachments as $attachment) {
-        $filename = (string)($attachment['filename'] ?? '');
-        $content = (string)($attachment['content'] ?? '');
-
-        echo "ATTACHMENT\n";
-        echo "filename=" . $filename . PHP_EOL;
-        echo "size=" . strlen($content) . PHP_EOL;
-        echo "md5=" . md5($content) . PHP_EOL;
-
-        $temp = sys_get_temp_dir() . "/debug_attachment.xls";
-        file_put_contents($temp, $content);
-
-        echo "saved=" . $temp . PHP_EOL;
-    }
-
-    return $attachments;
 }
 
 function extractMimeParts(string $message): array
@@ -342,11 +268,6 @@ function readSpreadsheetRows(string $content, string $filename): array
         return array_map(static function (array $row, int $rowIndex): array {
             return array_map(static function (mixed $value) use ($rowIndex): string {
                 $value = trim((string)($value ?? ''));
-
-                if ($rowIndex === 0) {
-                    var_dump($value);
-                    var_dump(mb_detect_encoding($value, ['UTF-8', 'Windows-1251', 'ISO-8859-1'], true));
-                }
 
                 return normalizeSpreadsheetCellEncoding($value);
             }, $row);
@@ -423,17 +344,6 @@ function readXlsxRows(string $content): array
 
 function rowsToBatchPayloads(array $rows): array
 {
-    echo PHP_EOL;
-    echo "===== rowsToBatchPayloads INPUT =====" . PHP_EOL;
-    echo "COUNT=" . count($rows) . PHP_EOL;
-
-    foreach (array_slice($rows, 0, 5, true) as $i => $row) {
-        echo "ROW $i" . PHP_EOL;
-        var_dump($row);
-    }
-
-    echo "===== END INPUT =====" . PHP_EOL;
-
     if (count($rows) < 2) {
         return [];
     }
@@ -468,23 +378,6 @@ function findAutoImportHeaderRow(array $rows): ?array
 {
     foreach (array_slice($rows, 0, 30, true) as $rowIndex => $row) {
         $headers = array_map('normalizeAutoImportHeader', $row);
-
-        echo PHP_EOL;
-        echo "==== HEADER ROW {$rowIndex} ====" . PHP_EOL;
-
-        foreach ($row as $i => $cell) {
-            $normalized = normalizeAutoImportHeader($cell);
-
-            echo "[{$i}]" . PHP_EOL;
-            echo "RAW: ";
-            var_dump($cell);
-
-            echo "NORMALIZED: ";
-            var_dump($normalized);
-        }
-
-        echo "==========================" . PHP_EOL;
-
         $articleIndex = findAutoImportColumn($headers, ['артикул', 'кодтовара', 'номенклатураартикул']);
         $quantityIndex = findAutoImportColumn($headers, ['количество', 'количествовпартии', 'остаток', 'колво']);
         $expiryIndex = findAutoImportColumn($headers, ['срокгодностидо', 'срокгодности', 'годендо', 'срок']);
