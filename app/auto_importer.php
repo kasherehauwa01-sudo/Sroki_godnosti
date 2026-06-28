@@ -79,34 +79,17 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         throw new RuntimeException('В найденном письме нет вложения XLS/XLSX.');
     }
 
-    echo "STEP A\n";
-
     $rows = [];
-
     foreach ($attachments as $attachment) {
-        echo "STEP B\n";
-
-        $tmp = spreadsheetAttachmentToBatches($attachment['content'], $attachment['filename']);
-
-        echo "STEP C: " . count($tmp) . "\n";
-
-        $rows = array_merge($rows, $tmp);
-
-        echo "STEP D\n";
+        $rows = array_merge($rows, spreadsheetAttachmentToBatches($attachment['content'], $attachment['filename']));
     }
-
-    echo "STEP E: " . count($rows) . "\n";
 
     if (!$rows) {
         throw new RuntimeException('Во вложении не найдены строки для загрузки.');
     }
 
-    echo "STEP F\n";
     $result = bulkCreateBatches($pdo, $rows);
-    echo "STEP G\n";
-    echo "STEP H\n";
     markAutoImportMessageSeen($username, $password, (string)$mail['folder'], (string)$mail['id']);
-    echo "STEP I\n";
     writeLog($pdo, 'auto_import_completed', [
         'attempt' => $attempt,
         'folder' => (string)$mail['folder'],
@@ -253,87 +236,36 @@ function extractMimeParts(string $message): array
 
 function spreadsheetAttachmentToBatches(string $content, string $filename): array
 {
-    echo "LOAD 7\n";
+    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $rows = $extension === 'xls'
+        ? readLegacySpreadsheetRowsOld($content)
+        : readSpreadsheetRows($content, $filename);
 
-    $rows = str_ends_with(strtolower($filename), '.xlsx')
-        ? readXlsxRows($content)
-        : readLegacySpreadsheetRows($content);
-
-    echo "LOAD 8 rows=" . count($rows) . "\n";
-    echo "AFTER SPREADSHEETATTACHMENTTOBATCHES READ\n";
-    print_r(array_slice($rows, 0, 2));
-
-    $result = rowsToBatchPayloads($rows);
-
-    echo "LOAD 9 payloads=" . count($result) . "\n";
-
-    return $result;
+    return rowsToBatchPayloads($rows);
 }
 
 function readSpreadsheetRows(string $content, string $filename): array
 {
-    if (!class_exists(\PhpOffice\PhpSpreadsheet\Reader\Xls::class)) {
+    if (!class_exists(IOFactory::class)) {
         throw new RuntimeException('Для чтения XLS/XLSX установите phpoffice/phpspreadsheet через Composer.');
     }
 
-    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION) ?: 'xls');
+    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION) ?: 'xlsx');
     $tmp = tempnam(sys_get_temp_dir(), 'auto-spreadsheet-');
     $path = $tmp . '.' . preg_replace('/[^a-z0-9]+/', '', $extension);
     rename($tmp, $path);
     file_put_contents($path, $content);
 
     try {
-        echo "LOAD 1\n";
-
-        $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xls();
-
-        echo "LOAD 2\n";
-
-        $reader->setReadDataOnly(true);
-
-        echo "LOAD 3\n";
-
-        $spreadsheet = $reader->load($path);
-
-        echo "LOAD 4\n";
-
+        $spreadsheet = IOFactory::load($path);
         $sheet = $spreadsheet->getActiveSheet();
-
-        echo "LOAD 5\n";
-
         $rows = $sheet->toArray(null, true, true, false);
 
-        echo "\n===== RAW FROM PHPSPREADSHEET =====\n";
-        print_r(array_slice($rows, 0, 2));
-        echo "===== END RAW =====\n\n";
-
-        echo "RAW FROM PHPSPREADSHEET\n";
-        print_r(array_slice($rows, 0, 2));
-
-        echo "LOAD 6 rows=" . count($rows) . "\n";
-
-        $normalizedRows = array_map(static function (array $row): array {
+        return array_map(static function (array $row): array {
             return array_map(static function (mixed $value): string {
-
-                $value = trim((string)($value ?? ''));
-
-                if ($value !== '' && preg_match('/[À-ÿ]/', $value)) {
-                    $converted = @iconv('Windows-1252', 'Windows-1251//IGNORE', $value);
-
-                    if ($converted !== false) {
-                        $value = mb_convert_encoding($converted, 'UTF-8', 'Windows-1251');
-                    }
-                }
-
-                return $value;
-
+                return trim((string)($value ?? ''));
             }, $row);
         }, $rows);
-
-        echo "AFTER READSPREADSHEETROWS NORMALIZE\n";
-        print_r(array_slice($normalizedRows, 0, 2));
-
-        return $normalizedRows;
     } finally {
         @unlink($path);
     }
@@ -381,36 +313,31 @@ function readXlsxRows(string $content): array
 
 function readLegacySpreadsheetRows(string $content): array
 {
-    $rows = readSpreadsheetRows($content, 'attachment.xls');
-    echo "AFTER READLEGACYSPREADSHEETROWS\n";
-    print_r(array_slice($rows, 0, 2));
+    return readLegacySpreadsheetRowsOld($content);
+}
 
-    return $rows;
+function readLegacySpreadsheetRowsOld(string $content): array
+{
+    if (preg_match_all('/<tr[^>]*>(.*?)<\/tr>/is', $content, $rowMatches)) {
+        return array_map(static function (string $row): array {
+            preg_match_all('/<t[dh][^>]*>(.*?)<\/t[dh]>/is', $row, $cellMatches);
+            return array_map(static fn(string $cell): string => trim(html_entity_decode(strip_tags($cell), ENT_QUOTES | ENT_HTML5, 'UTF-8')), $cellMatches[1]);
+        }, $rowMatches[1]);
+    }
+
+    $text = mb_convert_encoding($content, 'UTF-8', 'UTF-8, Windows-1251, CP1251');
+    $lines = array_values(array_filter(preg_split('/\R/u', $text) ?: [], static fn(string $line): bool => trim($line) !== ''));
+
+    return array_map(static fn(string $line): array => str_getcsv($line, str_contains($line, ';') ? ';' : "\t"), $lines);
 }
 
 function rowsToBatchPayloads(array $rows): array
 {
-    echo "ROWS TO BATCH INPUT\n";
-    print_r(array_slice($rows, 0, 2));
-
     if (count($rows) < 2) {
-        echo "P1 rows=" . count($rows) . PHP_EOL;
         return [];
     }
 
-    echo "P2 before header search" . PHP_EOL;
     $headerInfo = findAutoImportHeaderRow($rows);
-    echo "P3 header search done" . PHP_EOL;
-    var_dump($headerInfo);
-    echo PHP_EOL;
-    echo "===== ROWS =====" . PHP_EOL;
-
-    foreach ($rows as $i => $row) {
-        echo "ROW {$i}: ";
-        print_r($row);
-    }
-
-    echo "===== END ROWS =====" . PHP_EOL;
     if (!$headerInfo) {
         throw new RuntimeException('Во вложении не найдены обязательные колонки: Артикул, Количество, Срок годности.');
     }
@@ -418,12 +345,7 @@ function rowsToBatchPayloads(array $rows): array
     ['row' => $headerRow, 'article' => $articleIndex, 'quantity' => $quantityIndex, 'expiry' => $expiryIndex] = $headerInfo;
 
     $payloads = [];
-    echo "P4 start rows loop" . PHP_EOL;
-    $i = 0;
-
     foreach (array_slice($rows, $headerRow + 1) as $row) {
-        echo "ROW " . (++$i) . PHP_EOL;
-
         $article = trim((string)($row[$articleIndex] ?? ''));
         $quantity = trim((string)($row[$quantityIndex] ?? ''));
         $expiry = trim((string)($row[$expiryIndex] ?? ''));
@@ -438,22 +360,13 @@ function rowsToBatchPayloads(array $rows): array
         ];
     }
 
-    echo "P5 payloads=" . count($payloads) . PHP_EOL;
-
     return $payloads;
 }
 
 function findAutoImportHeaderRow(array $rows): ?array
 {
-    echo "FIND HEADER INPUT\n";
-    print_r(array_slice($rows, 0, 2));
-
     foreach (array_slice($rows, 0, 30, true) as $rowIndex => $row) {
         $headers = array_map('normalizeAutoImportHeader', $row);
-        echo "HEADER CANDIDATE {$rowIndex}\n";
-        print_r($row);
-        echo "HEADER NORMALIZED {$rowIndex}\n";
-        print_r($headers);
         $articleIndex = findAutoImportColumn($headers, ['артикул', 'кодтовара', 'номенклатураартикул']);
         $quantityIndex = findAutoImportColumn($headers, ['количество', 'количествовпартии', 'остаток', 'колво']);
         $expiryIndex = findAutoImportColumn($headers, ['срокгодностидо', 'срокгодности', 'годендо', 'срок']);
@@ -473,16 +386,10 @@ function findAutoImportHeaderRow(array $rows): ?array
 
 function normalizeAutoImportHeader(mixed $header): string
 {
-    echo "NORMALIZE HEADER IN: ";
-    var_dump($header);
     $header = trim((string)$header);
     $header = str_replace(["\xEF\xBB\xBF", "\r", "\n"], ' ', $header);
 
-    $normalized = preg_replace('/[^a-zа-я0-9]+/u', '', mb_strtolower($header)) ?? '';
-    echo "NORMALIZE HEADER OUT: ";
-    var_dump($normalized);
-
-    return $normalized;
+    return preg_replace('/[^a-zа-я0-9]+/u', '', mb_strtolower($header)) ?? '';
 }
 
 function findAutoImportColumn(array $headers, array $variants): ?int
