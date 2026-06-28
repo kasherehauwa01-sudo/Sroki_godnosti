@@ -6,6 +6,13 @@
  */
 declare(strict_types=1);
 
+use PhpOffice\PhpSpreadsheet\IOFactory;
+
+$autoImportComposerAutoload = __DIR__ . '/../vendor/autoload.php';
+if (is_file($autoImportComposerAutoload)) {
+    require_once $autoImportComposerAutoload;
+}
+
 const AUTO_IMPORT_FROM = 'robot_volgorost@volgorost.ru';
 const AUTO_IMPORT_SUBJECT = 'Сроки годности. Ежедневная выгрузка';
 const AUTO_IMPORT_MAIL_HOST = 'imap.yandex.ru';
@@ -228,11 +235,36 @@ function extractMimeParts(string $message): array
 
 function spreadsheetAttachmentToBatches(string $content, string $filename): array
 {
-    $rows = str_ends_with(strtolower($filename), '.xlsx')
-        ? readXlsxRows($content)
-        : readLegacySpreadsheetRows($content);
+    $rows = readSpreadsheetRows($content, $filename);
 
     return rowsToBatchPayloads($rows);
+}
+
+function readSpreadsheetRows(string $content, string $filename): array
+{
+    if (!class_exists(IOFactory::class)) {
+        throw new RuntimeException('Для чтения XLS/XLSX установите phpoffice/phpspreadsheet через Composer.');
+    }
+
+    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION) ?: 'xls');
+    $tmp = tempnam(sys_get_temp_dir(), 'auto-spreadsheet-');
+    $path = $tmp . '.' . preg_replace('/[^a-z0-9]+/', '', $extension);
+    rename($tmp, $path);
+    file_put_contents($path, $content);
+
+    try {
+        $spreadsheet = IOFactory::load($path);
+        $sheet = $spreadsheet->getActiveSheet();
+        $rows = $sheet->toArray(null, true, true, false);
+
+        return array_map(static function (array $row): array {
+            return array_map(static function (mixed $value): string {
+                return trim((string)($value ?? ''));
+            }, $row);
+        }, $rows);
+    } finally {
+        @unlink($path);
+    }
 }
 
 function readXlsxRows(string $content): array
@@ -277,16 +309,7 @@ function readXlsxRows(string $content): array
 
 function readLegacySpreadsheetRows(string $content): array
 {
-    if (preg_match_all('/<tr[^>]*>(.*?)<\/tr>/is', $content, $rowMatches)) {
-        return array_map(static function (string $row): array {
-            preg_match_all('/<t[dh][^>]*>(.*?)<\/t[dh]>/is', $row, $cellMatches);
-            return array_map(static fn(string $cell): string => trim(html_entity_decode(strip_tags($cell), ENT_QUOTES | ENT_HTML5, 'UTF-8')), $cellMatches[1]);
-        }, $rowMatches[1]);
-    }
-
-    $text = mb_convert_encoding($content, 'UTF-8', 'UTF-8, Windows-1251, CP1251');
-    $lines = array_values(array_filter(preg_split('/\R/u', $text) ?: [], static fn(string $line): bool => trim($line) !== ''));
-    return array_map(static fn(string $line): array => str_getcsv($line, str_contains($line, ';') ? ';' : "\t"), $lines);
+    return readSpreadsheetRows($content, 'attachment.xls');
 }
 
 function rowsToBatchPayloads(array $rows): array
