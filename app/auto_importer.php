@@ -260,6 +260,8 @@ function spreadsheetAttachmentToBatches(string $content, string $filename): arra
         : readLegacySpreadsheetRows($content);
 
     echo "LOAD 8 rows=" . count($rows) . "\n";
+    echo "AFTER SPREADSHEETATTACHMENTTOBATCHES READ\n";
+    print_r(array_slice($rows, 0, 2));
 
     $result = rowsToBatchPayloads($rows);
 
@@ -301,9 +303,12 @@ function readSpreadsheetRows(string $content, string $filename): array
 
         $rows = $sheet->toArray(null, true, true, false);
 
+        echo "RAW FROM PHPSPREADSHEET\n";
+        print_r(array_slice($rows, 0, 2));
+
         echo "LOAD 6 rows=" . count($rows) . "\n";
 
-        return array_map(static function (array $row): array {
+        $normalizedRows = array_map(static function (array $row): array {
             return array_map(static function (mixed $value): string {
 
                 $value = trim((string)($value ?? ''));
@@ -320,6 +325,11 @@ function readSpreadsheetRows(string $content, string $filename): array
 
             }, $row);
         }, $rows);
+
+        echo "AFTER READSPREADSHEETROWS NORMALIZE\n";
+        print_r(array_slice($normalizedRows, 0, 2));
+
+        return $normalizedRows;
     } finally {
         @unlink($path);
     }
@@ -367,11 +377,18 @@ function readXlsxRows(string $content): array
 
 function readLegacySpreadsheetRows(string $content): array
 {
-    return readSpreadsheetRows($content, 'attachment.xls');
+    $rows = readSpreadsheetRows($content, 'attachment.xls');
+    echo "AFTER READLEGACYSPREADSHEETROWS\n";
+    print_r(array_slice($rows, 0, 2));
+
+    return $rows;
 }
 
 function rowsToBatchPayloads(array $rows): array
 {
+    echo "ROWS TO BATCH INPUT\n";
+    print_r(array_slice($rows, 0, 2));
+
     if (count($rows) < 2) {
         echo "P1 rows=" . count($rows) . PHP_EOL;
         return [];
@@ -424,8 +441,15 @@ function rowsToBatchPayloads(array $rows): array
 
 function findAutoImportHeaderRow(array $rows): ?array
 {
+    echo "FIND HEADER INPUT\n";
+    print_r(array_slice($rows, 0, 2));
+
     foreach (array_slice($rows, 0, 30, true) as $rowIndex => $row) {
         $headers = array_map('normalizeAutoImportHeader', $row);
+        echo "HEADER CANDIDATE {$rowIndex}\n";
+        print_r($row);
+        echo "HEADER NORMALIZED {$rowIndex}\n";
+        print_r($headers);
         $articleIndex = findAutoImportColumn($headers, ['артикул', 'кодтовара', 'номенклатураартикул']);
         $quantityIndex = findAutoImportColumn($headers, ['количество', 'количествовпартии', 'остаток', 'колво']);
         $expiryIndex = findAutoImportColumn($headers, ['срокгодностидо', 'срокгодности', 'годендо', 'срок']);
@@ -445,10 +469,16 @@ function findAutoImportHeaderRow(array $rows): ?array
 
 function normalizeAutoImportHeader(mixed $header): string
 {
+    echo "NORMALIZE HEADER IN: ";
+    var_dump($header);
     $header = trim((string)$header);
     $header = str_replace(["\xEF\xBB\xBF", "\r", "\n"], ' ', $header);
 
-    return preg_replace('/[^a-zа-я0-9]+/u', '', mb_strtolower($header)) ?? '';
+    $normalized = preg_replace('/[^a-zа-я0-9]+/u', '', mb_strtolower($header)) ?? '';
+    echo "NORMALIZE HEADER OUT: ";
+    var_dump($normalized);
+
+    return $normalized;
 }
 
 function findAutoImportColumn(array $headers, array $variants): ?int
