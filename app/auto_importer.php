@@ -369,6 +369,15 @@ function rowsToBatchPayloads(array $rows): array
     $headerInfo = findAutoImportHeaderRow($rows);
     echo "P3 header search done" . PHP_EOL;
     var_dump($headerInfo);
+    echo PHP_EOL;
+    echo "===== ROWS =====" . PHP_EOL;
+
+    foreach ($rows as $i => $row) {
+        echo "ROW {$i}: ";
+        print_r($row);
+    }
+
+    echo "===== END ROWS =====" . PHP_EOL;
     if (!$headerInfo) {
         throw new RuntimeException('Во вложении не найдены обязательные колонки: Артикул, Количество, Срок годности.');
     }
