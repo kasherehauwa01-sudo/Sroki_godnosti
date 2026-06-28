@@ -887,6 +887,7 @@ function parseHistoryPayload(payload) {
     } catch (error) {
         return { text: String(payload) };
     }
+}
 
 function formatHistoryBatch(batch) {
     if (!batch) return 'партия не найдена';
@@ -1044,7 +1045,10 @@ function renderSettings() {
     qs('#notify7').checked = Boolean(settings.notify_7_days);
     qs('#notify1').checked = Boolean(settings.notify_1_day);
     qs('#notificationEmails').value = (settings.emails || []).join('\n');
-    qs('#notificationTime').value = settings.notification_time || '09:00';
+    const notificationTimeInput = qs('#notificationTime');
+    if (notificationTimeInput) {
+        notificationTimeInput.value = settings.notification_time || '09:00';
+    }
     qs('#autoImportTime').value = settings.auto_import_time || '10:00';
     renderNotificationHistory(settings.notification_history || []);
 
@@ -1088,7 +1092,7 @@ function collectSettingsForm() {
         notify_15_days: qs('#notify15').checked,
         notify_7_days: qs('#notify7').checked,
         notify_1_day: qs('#notify1').checked,
-        notification_time: qs('#notificationTime').value || '09:00',
+        notification_time: qs('#notificationTime')?.value || state.settings?.notification_time || '09:00',
         auto_import_time: qs('#autoImportTime').value || '10:00',
         emails,
     };
@@ -1418,6 +1422,14 @@ async function bootstrap() {
     }
 }
 
-bindEvents();
-applyInitialUrlState();
-bootstrap();
+function startApp() {
+    bindEvents();
+    applyInitialUrlState();
+    bootstrap();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startApp);
+} else {
+    startApp();
+}
