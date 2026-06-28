@@ -305,7 +305,19 @@ function readSpreadsheetRows(string $content, string $filename): array
 
         return array_map(static function (array $row): array {
             return array_map(static function (mixed $value): string {
-                return trim((string)($value ?? ''));
+
+                $value = trim((string)($value ?? ''));
+
+                if ($value !== '' && preg_match('/[À-ÿ]/', $value)) {
+                    $converted = @iconv('Windows-1252', 'Windows-1251//IGNORE', $value);
+
+                    if ($converted !== false) {
+                        $value = mb_convert_encoding($converted, 'UTF-8', 'Windows-1251');
+                    }
+                }
+
+                return $value;
+
             }, $row);
         }, $rows);
     } finally {
