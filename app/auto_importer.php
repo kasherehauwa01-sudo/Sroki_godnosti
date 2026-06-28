@@ -414,6 +414,17 @@ function readLegacySpreadsheetRowsOld(string $content): array
 
 function rowsToBatchPayloads(array $rows): array
 {
+    echo PHP_EOL;
+    echo "===== rowsToBatchPayloads INPUT =====" . PHP_EOL;
+    echo "COUNT=" . count($rows) . PHP_EOL;
+
+    foreach (array_slice($rows, 0, 5, true) as $i => $row) {
+        echo "ROW $i" . PHP_EOL;
+        var_dump($row);
+    }
+
+    echo "===== END INPUT =====" . PHP_EOL;
+
     if (count($rows) < 2) {
         return [];
     }
