@@ -253,9 +253,19 @@ function extractMimeParts(string $message): array
 
 function spreadsheetAttachmentToBatches(string $content, string $filename): array
 {
-    $rows = readSpreadsheetRows($content, $filename);
+    echo "LOAD 7\n";
 
-    return rowsToBatchPayloads($rows);
+    $rows = str_ends_with(strtolower($filename), '.xlsx')
+        ? readXlsxRows($content)
+        : readLegacySpreadsheetRows($content);
+
+    echo "LOAD 8 rows=" . count($rows) . "\n";
+
+    $result = rowsToBatchPayloads($rows);
+
+    echo "LOAD 9 payloads=" . count($result) . "\n";
+
+    return $result;
 }
 
 function readSpreadsheetRows(string $content, string $filename): array

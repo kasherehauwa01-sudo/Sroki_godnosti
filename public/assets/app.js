@@ -1270,6 +1270,88 @@ function formatHistoryDetails(action, payload) {
     return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
+function formatHistoryBatch(batch) {
+    if (!batch) return 'партия не найдена';
+
+    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
+    const expiry = batch.expiry_date || batch.expiryDate
+        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate, batch.expiry_full_date || batch.expiryFullDate)}`
+        : 'без указанного срока годности';
+    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
+    const status = batch.status ? `, статус «${batch.status}»` : '';
+
+    return `партия ${article} ${expiry}${quantity}${status}`;
+}
+
+function formatHistoryBatchList(batches) {
+    return (batches || []).map(formatHistoryBatch).join('\n');
+}
+
+function formatChangedFields(before, after) {
+    const changes = [];
+    if (!before || !after) return changes;
+
+    if (before.article && after.article && before.article !== after.article) {
+        changes.push(`артикул изменён с ${before.article} на ${after.article}`);
+    }
+    if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
+        changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date, before.expiry_full_date)} на ${formatExpiryMonthRu(after.expiry_date, after.expiry_full_date)}`);
+    }
+    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
+        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
+    }
+    if (before.status && after.status && before.status !== after.status) {
+        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
+    }
+
+    return changes;
+}
+
+function formatHistoryDetails(action, payload) {
+    const parsed = parseHistoryPayload(payload);
+
+    if (action === 'create') {
+        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (action === 'bulk_create') {
+        const addedText = parsed.batches && parsed.batches.length
+            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
+            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
+        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
+            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
+            : '';
+
+        return `${addedText}${duplicatesText}`;
+    }
+
+    if (action === 'auto_import_completed') {
+        const batches = parsed.batches && parsed.batches.length ? `\nЗагруженные партии:\n${formatHistoryBatchList(parsed.batches)}` : '';
+        return `Автозагрузка выполнена. Загружено партий: ${Number(parsed.added || 0)}. Исключено дублей: ${Number(parsed.skipped_duplicates || 0)}.${batches}`;
+    }
+
+    if (action === 'auto_import_failed' || action === 'auto_import_not_found') {
+        return `Автозагрузка не выполнена. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
+
+    if (action === 'update') {
+        const before = parsed.before || {};
+        const after = parsed.after || parsed;
+        const changes = formatChangedFields(before, after);
+        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
+        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
+    }
+
+    if (action === 'delete') {
+        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
+    }
+
+    if (parsed.text) return parsed.text;
+
+    // Запасной вариант нужен для старых записей истории со служебными полями.
+    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
+}
+
 async function loadHistory() {
     const result = await api('logs');
     const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found']);
