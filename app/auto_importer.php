@@ -79,16 +79,34 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         throw new RuntimeException('В найденном письме нет вложения XLS/XLSX.');
     }
 
+    echo "STEP A\n";
+
     $rows = [];
+
     foreach ($attachments as $attachment) {
-        $rows = array_merge($rows, spreadsheetAttachmentToBatches($attachment['content'], $attachment['filename']));
+        echo "STEP B\n";
+
+        $tmp = spreadsheetAttachmentToBatches($attachment['content'], $attachment['filename']);
+
+        echo "STEP C: " . count($tmp) . "\n";
+
+        $rows = array_merge($rows, $tmp);
+
+        echo "STEP D\n";
     }
+
+    echo "STEP E: " . count($rows) . "\n";
+
     if (!$rows) {
         throw new RuntimeException('Во вложении не найдены строки для загрузки.');
     }
 
+    echo "STEP F\n";
     $result = bulkCreateBatches($pdo, $rows);
+    echo "STEP G\n";
+    echo "STEP H\n";
     markAutoImportMessageSeen($username, $password, (string)$mail['folder'], (string)$mail['id']);
+    echo "STEP I\n";
     writeLog($pdo, 'auto_import_completed', [
         'attempt' => $attempt,
         'folder' => (string)$mail['folder'],
