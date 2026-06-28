@@ -339,14 +339,46 @@ function readSpreadsheetRows(string $content, string $filename): array
         $sheet = $spreadsheet->getActiveSheet();
         $rows = $sheet->toArray(null, true, true, false);
 
-        return array_map(static function (array $row): array {
-            return array_map(static function (mixed $value): string {
-                return trim((string)($value ?? ''));
+        return array_map(static function (array $row, int $rowIndex): array {
+            return array_map(static function (mixed $value) use ($rowIndex): string {
+                $value = trim((string)($value ?? ''));
+
+                if ($rowIndex === 0) {
+                    var_dump($value);
+                    var_dump(mb_detect_encoding($value, ['UTF-8', 'Windows-1251', 'ISO-8859-1'], true));
+                }
+
+                return normalizeSpreadsheetCellEncoding($value);
             }, $row);
-        }, $rows);
+        }, $rows, array_keys($rows));
     } finally {
         @unlink($path);
     }
+}
+
+function normalizeSpreadsheetCellEncoding(string $value): string
+{
+    if ($value === '') {
+        return $value;
+    }
+
+    if (!preg_match('//u', $value)) {
+        $converted = mb_convert_encoding($value, 'UTF-8', 'Windows-1251');
+
+        return preg_match('//u', $converted) ? $converted : $value;
+    }
+
+    if (preg_match('/[À-ÿ]/u', $value) === 1 && preg_match('/[А-Яа-яЁё]/u', $value) !== 1) {
+        $singleByte = @iconv('UTF-8', 'Windows-1252//IGNORE', $value);
+        if ($singleByte !== false) {
+            $converted = @iconv('Windows-1251', 'UTF-8//IGNORE', $singleByte);
+            if ($converted !== false && preg_match('//u', $converted) && preg_match('/[А-Яа-яЁё]/u', $converted) === 1) {
+                return $converted;
+            }
+        }
+    }
+
+    return $value;
 }
 
 function readXlsxRows(string $content): array
