@@ -1196,19 +1196,14 @@ function downloadTemplateXlsx() {
         return;
     }
 
-    const worksheet = XLSX.utils.aoa_to_sheet([
-        ['Артикул', 'Количество', 'Срок годности до'],
-    ]);
-    worksheet['!cols'] = [
-        { wch: 18 },
-        { wch: 14 },
-        { wch: 18 },
-    ];
+    if (action === 'auto_import_completed') {
+        const batches = parsed.batches && parsed.batches.length ? `\nЗагруженные партии:\n${formatHistoryBatchList(parsed.batches)}` : '';
+        return `Автозагрузка выполнена. Загружено партий: ${Number(parsed.added || 0)}. Исключено дублей: ${Number(parsed.skipped_duplicates || 0)}.${batches}`;
+    }
 
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Шаблон');
-    XLSX.writeFile(workbook, 'shablon_sroki_godnosti.xlsx');
-}
+    if (action === 'auto_import_failed' || action === 'auto_import_not_found') {
+        return `Автозагрузка не выполнена. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
 
 function readXlsx(file) {
     if (!window.XLSX) {
@@ -1266,22 +1261,31 @@ function readXlsx(file) {
     reader.readAsArrayBuffer(file);
 }
 
-function resetRegistryFilters() {
-    ['#filterArticle', '#filterDaysTo'].forEach((selector) => {
-        qs(selector).value = '';
-    });
-    qs('#filterStatus').value = '';
-    renderRegistry();
+function formatHistoryBatch(batch) {
+    if (!batch) return 'партия не найдена';
+
+    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
+    const expiry = batch.expiry_date || batch.expiryDate
+        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate, batch.expiry_full_date || batch.expiryFullDate)}`
+        : 'без указанного срока годности';
+    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
+    const status = batch.status ? `, статус «${batch.status}»` : '';
+
+    return `партия ${article} ${expiry}${quantity}${status}`;
 }
 
-function applyInitialUrlState() {
-    const params = new URLSearchParams(window.location.search);
-    const article = params.get('article');
-    if (article) qs('#filterArticle').value = article;
+function formatHistoryBatchList(batches) {
+    return (batches || []).map(formatHistoryBatch).join('\n');
+}
 
     if (params.get('tab') === 'registry') {
         switchTab('registry');
     }
+    if (before.status && after.status && before.status !== after.status) {
+        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
+    }
+
+    return changes;
 }
 
 function bindEvents() {
@@ -1326,11 +1330,13 @@ function bindEvents() {
     qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
     qs('#cancelEditButton').addEventListener('click', closeEditDialog);
 
-    qs('#openAddBatchesButton').addEventListener('click', openAddBatchesDialog);
-    qs('#addBatchesForm').addEventListener('submit', submitAddBatchesForm);
-    qs('#addBatchRowButton').addEventListener('click', () => createBatchRow());
-    qs('#closeAddBatchesDialogButton').addEventListener('click', closeAddBatchesDialog);
-    qs('#cancelAddBatchesButton').addEventListener('click', closeAddBatchesDialog);
+    if (action === 'bulk_create') {
+        const addedText = parsed.batches && parsed.batches.length
+            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
+            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
+        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
+            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
+            : '';
 
     qs('#openXlsImportButton').addEventListener('click', openXlsImportFromAddDialog);
     qs('#closeXlsImportDialogButton').addEventListener('click', closeXlsImportDialog);
