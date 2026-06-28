@@ -361,10 +361,14 @@ function readLegacySpreadsheetRows(string $content): array
 function rowsToBatchPayloads(array $rows): array
 {
     if (count($rows) < 2) {
+        echo "P1 rows=" . count($rows) . PHP_EOL;
         return [];
     }
 
+    echo "P2 before header search" . PHP_EOL;
     $headerInfo = findAutoImportHeaderRow($rows);
+    echo "P3 header search done" . PHP_EOL;
+    var_dump($headerInfo);
     if (!$headerInfo) {
         throw new RuntimeException('Во вложении не найдены обязательные колонки: Артикул, Количество, Срок годности.');
     }
@@ -372,7 +376,12 @@ function rowsToBatchPayloads(array $rows): array
     ['row' => $headerRow, 'article' => $articleIndex, 'quantity' => $quantityIndex, 'expiry' => $expiryIndex] = $headerInfo;
 
     $payloads = [];
+    echo "P4 start rows loop" . PHP_EOL;
+    $i = 0;
+
     foreach (array_slice($rows, $headerRow + 1) as $row) {
+        echo "ROW " . (++$i) . PHP_EOL;
+
         $article = trim((string)($row[$articleIndex] ?? ''));
         $quantity = trim((string)($row[$quantityIndex] ?? ''));
         $expiry = trim((string)($row[$expiryIndex] ?? ''));
@@ -386,6 +395,8 @@ function rowsToBatchPayloads(array $rows): array
             'expiry_raw' => $expiry,
         ];
     }
+
+    echo "P5 payloads=" . count($payloads) . PHP_EOL;
 
     return $payloads;
 }
