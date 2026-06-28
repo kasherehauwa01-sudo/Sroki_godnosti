@@ -1083,6 +1083,8 @@ function renderNotificationHistory(history) {
 
 function collectSettingsForm() {
     const emails = qs('#notificationEmails').value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean);
+    const notificationTimeInput = qs('#notificationTime');
+
     return {
         notify_0_days: qs('#notify0').checked,
         notify_180_days: qs('#notify180').checked,
@@ -1092,7 +1094,7 @@ function collectSettingsForm() {
         notify_15_days: qs('#notify15').checked,
         notify_7_days: qs('#notify7').checked,
         notify_1_day: qs('#notify1').checked,
-        notification_time: qs('#notificationTime')?.value || state.settings?.notification_time || '09:00',
+        notification_time: notificationTimeInput ? (notificationTimeInput.value || '09:00') : (state.settings && state.settings.notification_time ? state.settings.notification_time : '09:00'),
         auto_import_time: qs('#autoImportTime').value || '10:00',
         emails,
     };
