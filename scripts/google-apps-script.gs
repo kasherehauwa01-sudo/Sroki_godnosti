@@ -14,7 +14,6 @@ const LOG_HEADERS = ['Дата', 'Уровень', 'Событие', 'Детал
 const DEFAULT_SETTINGS = {
   emails: ['vr-vk@yandex.ru'],
   rules: [
-    { id: 'expired', days: -1, title: 'Срок годности истек' },
     { id: '15days', days: 15, title: 'Истекает через 15 дней' },
     { id: '30days', days: 30, title: 'Истекает через 30 дней' },
   ],
