@@ -20,21 +20,64 @@ const AUTO_IMPORT_MAIL_PORT = 993;
 
 function runAutoImport(PDO $pdo, bool $once = false): array
 {
+    echo "RUN 1\n";
+    flush();
+
     ensureBatchesSchema($pdo);
+
+    echo "RUN 2\n";
+    flush();
+
     ensureSettingsSchema($pdo);
+
+    echo "RUN 3\n";
+    flush();
+
     $settings = getRawSettings($pdo);
+
+    echo "RUN 4\n";
+    flush();
+
     $time = normalizeNotificationTime((string)($settings['auto_import_time'] ?? '10:00'), '10:00');
+
+    echo "RUN 5\n";
+    flush();
+
     $attempts = $once ? 1 : 10;
+
+    echo "RUN 6\n";
+    flush();
+
     $lastError = '';
 
     for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+        echo "RUN attempt {$attempt}\n";
+        flush();
+
         try {
+            echo "RUN before runAutoImportAttempt\n";
+            flush();
+
             $result = runAutoImportAttempt($pdo, $settings, $attempt, $time);
+
+            echo "RUN after runAutoImportAttempt\n";
+            flush();
+
             if (($result['status'] ?? '') === 'completed') {
+                echo "RUN completed\n";
+                flush();
+
                 return $result;
             }
+
+            echo "RUN status=" . ($result['status'] ?? '') . "\n";
+            flush();
+
             $lastError = (string)($result['message'] ?? '');
         } catch (Throwable $error) {
+            echo "RUN exception: " . $error->getMessage() . "\n";
+            flush();
+
             $lastError = $error->getMessage();
             writeLog($pdo, 'auto_import_failed', [
                 'attempt' => $attempt,
@@ -43,9 +86,15 @@ function runAutoImport(PDO $pdo, bool $once = false): array
         }
 
         if ($attempt < $attempts) {
+            echo "RUN sleep\n";
+            flush();
+
             sleep(3600);
         }
     }
+
+    echo "RUN end\n";
+    flush();
 
     return [
         'ok' => false,
