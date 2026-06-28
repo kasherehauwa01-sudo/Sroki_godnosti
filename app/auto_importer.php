@@ -255,9 +255,26 @@ function parseMailHeaders(string $message): array
 
 function extractSpreadsheetAttachments(string $message): array
 {
-    return array_values(array_filter(extractMimeParts($message), static function (array $part): bool {
+    $attachments = array_values(array_filter(extractMimeParts($message), static function (array $part): bool {
         return preg_match('/\.(xls|xlsx)$/i', $part['filename'] ?? '') === 1;
     }));
+
+    foreach ($attachments as $attachment) {
+        $filename = (string)($attachment['filename'] ?? '');
+        $content = (string)($attachment['content'] ?? '');
+
+        echo "ATTACHMENT\n";
+        echo "filename=" . $filename . PHP_EOL;
+        echo "size=" . strlen($content) . PHP_EOL;
+        echo "md5=" . md5($content) . PHP_EOL;
+
+        $temp = sys_get_temp_dir() . "/debug_attachment.xls";
+        file_put_contents($temp, $content);
+
+        echo "saved=" . $temp . PHP_EOL;
+    }
+
+    return $attachments;
 }
 
 function extractMimeParts(string $message): array
