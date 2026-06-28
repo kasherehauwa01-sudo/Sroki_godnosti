@@ -303,6 +303,10 @@ function readSpreadsheetRows(string $content, string $filename): array
 
         $rows = $sheet->toArray(null, true, true, false);
 
+        echo "\n===== RAW FROM PHPSPREADSHEET =====\n";
+        print_r(array_slice($rows, 0, 2));
+        echo "===== END RAW =====\n\n";
+
         echo "RAW FROM PHPSPREADSHEET\n";
         print_r(array_slice($rows, 0, 2));
 
