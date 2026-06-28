@@ -88,8 +88,21 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         throw new RuntimeException('Во вложении не найдены строки для загрузки.');
     }
 
+    echo "POINT 1\n";
+
     $result = bulkCreateBatches($pdo, $rows);
-    markAutoImportMessageSeen($username, $password, (string)$mail['folder'], (string)$mail['id']);
+
+    echo "POINT 2\n";
+
+    markAutoImportMessageSeen(
+        $username,
+        $password,
+        (string)$mail['folder'],
+        (string)$mail['id']
+    );
+
+    echo "POINT 3\n";
+
     writeLog($pdo, 'auto_import_completed', [
         'attempt' => $attempt,
         'folder' => (string)$mail['folder'],
@@ -99,6 +112,8 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         'batches' => $result['batches'] ?? [],
         'duplicates' => $result['duplicates'] ?? [],
     ]);
+
+    echo "POINT 4\n";
 
     return [
         'ok' => true,
