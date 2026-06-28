@@ -431,6 +431,23 @@ function findAutoImportHeaderRow(array $rows): ?array
 {
     foreach (array_slice($rows, 0, 30, true) as $rowIndex => $row) {
         $headers = array_map('normalizeAutoImportHeader', $row);
+
+        echo PHP_EOL;
+        echo "==== HEADER ROW {$rowIndex} ====" . PHP_EOL;
+
+        foreach ($row as $i => $cell) {
+            $normalized = normalizeAutoImportHeader($cell);
+
+            echo "[{$i}]" . PHP_EOL;
+            echo "RAW: ";
+            var_dump($cell);
+
+            echo "NORMALIZED: ";
+            var_dump($normalized);
+        }
+
+        echo "==========================" . PHP_EOL;
+
         $articleIndex = findAutoImportColumn($headers, ['артикул', 'кодтовара', 'номенклатураартикул']);
         $quantityIndex = findAutoImportColumn($headers, ['количество', 'количествовпартии', 'остаток', 'колво']);
         $expiryIndex = findAutoImportColumn($headers, ['срокгодностидо', 'срокгодности', 'годендо', 'срок']);
