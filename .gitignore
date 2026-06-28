@@ -3,3 +3,8 @@ app/config.php
 *.log
 *.sql.gz
 *.dump
+.env
+.env.*
+.env.cron
+
+!.env.example
