@@ -17,6 +17,9 @@ const AUTO_IMPORT_FROM = 'robot_volgorost@volgorost.ru';
 const AUTO_IMPORT_SUBJECT = 'Сроки годности. Ежедневная выгрузка';
 const AUTO_IMPORT_MAIL_HOST = 'imap.yandex.ru';
 const AUTO_IMPORT_MAIL_PORT = 993;
+const AUTO_IMPORT_TIMEZONE = 'Europe/Moscow';
+
+date_default_timezone_set(AUTO_IMPORT_TIMEZONE);
 
 function runAutoImport(PDO $pdo, bool $once = false): array
 {
@@ -83,12 +86,20 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
     foreach ($attachments as $attachment) {
         $rows = array_merge($rows, spreadsheetAttachmentToBatches($attachment['content'], $attachment['filename']));
     }
+
     if (!$rows) {
         throw new RuntimeException('Во вложении не найдены строки для загрузки.');
     }
 
     $result = bulkCreateBatches($pdo, $rows);
-    markAutoImportMessageSeen($username, $password, (string)$mail['folder'], (string)$mail['id']);
+
+    markAutoImportMessageSeen(
+        $username,
+        $password,
+        (string)$mail['folder'],
+        (string)$mail['id']
+    );
+
     writeLog($pdo, 'auto_import_completed', [
         'attempt' => $attempt,
         'folder' => (string)$mail['folder'],
@@ -246,7 +257,7 @@ function readSpreadsheetRows(string $content, string $filename): array
         throw new RuntimeException('Для чтения XLS/XLSX установите phpoffice/phpspreadsheet через Composer.');
     }
 
-    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION) ?: 'xls');
+    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION) ?: 'xlsx');
     $tmp = tempnam(sys_get_temp_dir(), 'auto-spreadsheet-');
     $path = $tmp . '.' . preg_replace('/[^a-z0-9]+/', '', $extension);
     rename($tmp, $path);
@@ -257,14 +268,41 @@ function readSpreadsheetRows(string $content, string $filename): array
         $sheet = $spreadsheet->getActiveSheet();
         $rows = $sheet->toArray(null, true, true, false);
 
-        return array_map(static function (array $row): array {
-            return array_map(static function (mixed $value): string {
-                return trim((string)($value ?? ''));
+        return array_map(static function (array $row, int $rowIndex): array {
+            return array_map(static function (mixed $value) use ($rowIndex): string {
+                $value = trim((string)($value ?? ''));
+
+                return normalizeSpreadsheetCellEncoding($value);
             }, $row);
-        }, $rows);
+        }, $rows, array_keys($rows));
     } finally {
         @unlink($path);
     }
+}
+
+function normalizeSpreadsheetCellEncoding(string $value): string
+{
+    if ($value === '') {
+        return $value;
+    }
+
+    if (!preg_match('//u', $value)) {
+        $converted = mb_convert_encoding($value, 'UTF-8', 'Windows-1251');
+
+        return preg_match('//u', $converted) ? $converted : $value;
+    }
+
+    if (preg_match('/[À-ÿ]/u', $value) === 1 && preg_match('/[А-Яа-яЁё]/u', $value) !== 1) {
+        $singleByte = @iconv('UTF-8', 'Windows-1252//IGNORE', $value);
+        if ($singleByte !== false) {
+            $converted = @iconv('Windows-1251', 'UTF-8//IGNORE', $singleByte);
+            if ($converted !== false && preg_match('//u', $converted) && preg_match('/[А-Яа-яЁё]/u', $converted) === 1) {
+                return $converted;
+            }
+        }
+    }
+
+    return $value;
 }
 
 function readXlsxRows(string $content): array
@@ -305,11 +343,6 @@ function readXlsxRows(string $content): array
         $rows[] = $values;
     }
     return $rows;
-}
-
-function readLegacySpreadsheetRows(string $content): array
-{
-    return readSpreadsheetRows($content, 'attachment.xls');
 }
 
 function rowsToBatchPayloads(array $rows): array
@@ -429,7 +462,9 @@ final class SimpleImapClient
     {
         // Ищем без IMAP-фильтра FROM: у разных серверов он может не совпадать
         // с отображаемым адресом отправителя. Фильтр отправителя выполняется в PHP.
-        $date = date('d-M-Y', strtotime('-1 day'));
+        $date = (new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE)))
+            ->modify('-1 day')
+            ->format('d-M-Y');
         $response = $this->command('SEARCH SINCE ' . $date);
         preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
         $ids = array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));

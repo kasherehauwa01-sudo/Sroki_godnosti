@@ -7,6 +7,8 @@
  */
 declare(strict_types=1);
 
+date_default_timezone_set('Europe/Moscow');
+
 require_once __DIR__ . '/../public/api.php';
 require_once __DIR__ . '/../app/auto_importer.php';
 
