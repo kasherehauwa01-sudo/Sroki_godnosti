@@ -17,6 +17,9 @@ const AUTO_IMPORT_FROM = 'robot_volgorost@volgorost.ru';
 const AUTO_IMPORT_SUBJECT = 'Сроки годности. Ежедневная выгрузка';
 const AUTO_IMPORT_MAIL_HOST = 'imap.yandex.ru';
 const AUTO_IMPORT_MAIL_PORT = 993;
+const AUTO_IMPORT_TIMEZONE = 'Europe/Moscow';
+
+date_default_timezone_set(AUTO_IMPORT_TIMEZONE);
 
 function runAutoImport(PDO $pdo, bool $once = false): array
 {
@@ -459,7 +462,9 @@ final class SimpleImapClient
     {
         // Ищем без IMAP-фильтра FROM: у разных серверов он может не совпадать
         // с отображаемым адресом отправителя. Фильтр отправителя выполняется в PHP.
-        $date = date('d-M-Y', strtotime('-1 day'));
+        $date = (new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE)))
+            ->modify('-1 day')
+            ->format('d-M-Y');
         $response = $this->command('SEARCH SINCE ' . $date);
         preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
         $ids = array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
