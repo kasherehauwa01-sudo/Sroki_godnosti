@@ -636,25 +636,9 @@ function sendTestNotification(PDO $pdo, array $payload): array
 function runTestAutoImport(PDO $pdo, array $payload): array
 {
     assertSettingsPassword($payload);
-
-    if (!function_exists('exec')) {
-        throw new RuntimeException('На сервере отключён запуск фоновых команд PHP.');
-    }
-
-    $script = realpath(__DIR__ . '/../scripts/auto_import.php');
-    if ($script === false) {
-        throw new RuntimeException('Не найден скрипт автозагрузки scripts/auto_import.php.');
-    }
-
-    $command = sprintf('%s %s --once > /dev/null 2>&1 &', escapeshellarg(PHP_BINARY), escapeshellarg($script));
-    exec($command);
     writeLog($pdo, 'auto_import_started', ['mode' => 'manual_test']);
 
-    return [
-        'ok' => true,
-        'message' => 'Тест автозагрузки запущен. Результат появится в логах автозагрузки после обработки письма.',
-        'settings' => getSettings($pdo),
-    ];
+    return runAutoImport($pdo, true);
 }
 
 function findNearestExpiringBatch(PDO $pdo): ?array
