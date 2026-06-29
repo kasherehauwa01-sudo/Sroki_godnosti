@@ -100,9 +100,7 @@ manager@site.ru"></textarea></label>
 
                 <div class="card form settings-auto-import-card">
                     <h3>Автозагрузка</h3>
-                    <label>Время автозагрузки
-                        <input id="autoImportTime" type="time" value="10:00">
-                    </label>
+                    <p class="subtitle">Автозагрузка запускается в 10:00 по московскому времени.</p>
                     <div class="settings-actions">
                         <button class="ghost-button" id="testAutoImportButton" formnovalidate type="button">Тест автозагрузки</button>
                         <button class="ghost-button" id="showAutoImportLogsButton" formnovalidate type="button">Логи автозагрузки</button>
