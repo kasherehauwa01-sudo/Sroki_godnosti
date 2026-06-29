@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js"></script>
+    <script defer src="assets/app.js?v=20260628-3"></script>
 </head>
 <body>
     <header class="topbar">
@@ -77,6 +77,9 @@ declare(strict_types=1);
                     <label class="checkbox-row"><input id="notify15" name="notify_15_days" type="checkbox"> За 15 дней</label>
                     <label class="checkbox-row"><input id="notify7" name="notify_7_days" type="checkbox"> За 7 дней</label>
                     <label class="checkbox-row"><input id="notify1" name="notify_1_day" type="checkbox"> За 1 день</label>
+                    <label>Время отправки уведомлений
+                        <input id="notificationTime" name="notification_time" type="time" value="09:00">
+                    </label>
                 </div>
 
                 <div class="card form">
@@ -238,6 +241,8 @@ manager@site.ru"></textarea></label>
                 <p>В выгрузку попадают только партии со статусом <code>В наличии</code>.</p>
             </div>
         </section>
+
+
 
         <section class="panel" id="tab-history">
             <div class="card filters history-filters">

@@ -6,6 +6,11 @@
  */
 declare(strict_types=1);
 
+const APP_TIMEZONE = 'Europe/Moscow';
+const DATABASE_TIMEZONE = 'UTC';
+
+date_default_timezone_set(APP_TIMEZONE);
+
 header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/../app/database.php';
@@ -631,25 +636,9 @@ function sendTestNotification(PDO $pdo, array $payload): array
 function runTestAutoImport(PDO $pdo, array $payload): array
 {
     assertSettingsPassword($payload);
-
-    if (!function_exists('exec')) {
-        throw new RuntimeException('На сервере отключён запуск фоновых команд PHP.');
-    }
-
-    $script = realpath(__DIR__ . '/../scripts/auto_import.php');
-    if ($script === false) {
-        throw new RuntimeException('Не найден скрипт автозагрузки scripts/auto_import.php.');
-    }
-
-    $command = sprintf('%s %s --once > /dev/null 2>&1 &', escapeshellarg(PHP_BINARY), escapeshellarg($script));
-    exec($command);
     writeLog($pdo, 'auto_import_started', ['mode' => 'manual_test']);
 
-    return [
-        'ok' => true,
-        'message' => 'Тест автозагрузки запущен. Результат появится в логах автозагрузки после обработки письма.',
-        'settings' => getSettings($pdo),
-    ];
+    return runAutoImport($pdo, true);
 }
 
 function findNearestExpiringBatch(PDO $pdo): ?array
@@ -873,7 +862,7 @@ function getAutoImportInfo(?PDO $pdo): array
     $payload = is_array($payload) ? $payload : [];
 
     return [
-        'last_date' => (string)$row['created_at'],
+        'last_date' => formatMoscowDateTime((string)$row['created_at']),
         'loaded' => (int)($payload['added'] ?? $payload['loaded'] ?? 0),
         'status' => $row['action'] === 'auto_import_completed' ? 'Выполнено' : 'Ошибка',
         'error' => (string)($payload['error'] ?? $payload['message'] ?? ''),
@@ -900,7 +889,7 @@ function getAutoImportLogs(?PDO $pdo): array
         $payload = is_array($payload) ? $payload : [];
 
         return [
-            'date' => (string)$row['created_at'],
+            'date' => formatMoscowDateTime((string)$row['created_at']),
             'action' => (string)$row['action'],
             'status' => autoImportLogStatus((string)$row['action']),
             'text' => autoImportLogText((string)$row['action'], $payload),
@@ -954,7 +943,7 @@ function getNotificationHistory(?PDO $pdo): array
         $payload = is_array($payload) ? $payload : [];
 
         return [
-            'date' => (string)$row['created_at'],
+            'date' => formatMoscowDateTime((string)$row['created_at']),
             'text' => notificationHistoryText((string)$row['action'], $payload),
         ];
     }, $statement->fetchAll());
@@ -1009,7 +998,24 @@ function findLastLogDate(PDO $pdo, array $actions): string
     $statement = $pdo->prepare("SELECT created_at FROM logs WHERE action IN ($placeholders) ORDER BY id DESC LIMIT 1");
     $statement->execute($actions);
 
-    return (string)($statement->fetchColumn() ?: '');
+    $createdAt = (string)($statement->fetchColumn() ?: '');
+
+    return $createdAt !== '' ? formatMoscowDateTime($createdAt) : '';
+}
+
+function formatMoscowDateTime(string $dateTime): string
+{
+    if (trim($dateTime) === '') {
+        return '';
+    }
+
+    try {
+        return (new DateTimeImmutable($dateTime, new DateTimeZone(DATABASE_TIMEZONE)))
+            ->setTimezone(new DateTimeZone(APP_TIMEZONE))
+            ->format('Y-m-d H:i:s');
+    } catch (Throwable) {
+        return $dateTime;
+    }
 }
 
 function splitEmails(string $emails): array
@@ -1023,7 +1029,7 @@ function getLogs(PDO $pdo): array
     return array_map(static function (array $row): array {
         return [
             'id' => (int)$row['id'],
-            'createdAt' => $row['created_at'],
+            'createdAt' => formatMoscowDateTime((string)$row['created_at']),
             'level' => 'INFO',
             'event' => $row['action'],
             'details' => $row['payload'] ?? '',
