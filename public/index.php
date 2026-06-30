@@ -63,6 +63,7 @@ declare(strict_types=1);
                         <option value="60">60 дней</option>
                         <option value="30">30 дней</option>
                         <option value="15">15 дней</option>
+                        <option value="0">Сегодня</option>
                         <option value="1">1 день</option>
                         <option value="custom">Выбрать значение</option>
                     </select>

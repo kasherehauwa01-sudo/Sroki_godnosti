@@ -200,6 +200,11 @@ function buildBatchFilters(array $filters): array
         }
     }
 
+    if (isset($filters['event_days']) && $filters['event_days'] !== '') {
+        $conditions[] = 'expiry_invalid = 0 AND days_left = :event_days';
+        $params[':event_days'] = (int)$filters['event_days'];
+    }
+
     if (!empty($filters['date_from'])) {
         $conditions[] = 'expiry_date >= :date_from';
         $params[':date_from'] = (string)$filters['date_from'];
