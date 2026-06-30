@@ -28,6 +28,20 @@ const setCheckedIfPresent = (selector, checked) => {
     const field = qs(selector);
     if (field) field.checked = checked;
 };
+// Защитные DOM-хелперы не дают модальному окну настроек упасть,
+// если часть необязательных элементов отсутствует в текущей разметке.
+const setTextIfPresent = (selector, value) => {
+    const field = qs(selector);
+    if (field) field.textContent = value;
+};
+const focusIfPresent = (selector) => {
+    const field = qs(selector);
+    if (field) field.focus();
+};
+const selectIfPresent = (selector) => {
+    const field = qs(selector);
+    if (field) field.select();
+};
 
 function showToast(message, isError = false) {
     const toast = qs('#toast');
@@ -436,6 +450,25 @@ function getFilterParams() {
     };
 }
 
+function getBatchDaysLeft(batch) {
+    if (batch.expiryInvalid) return null;
+
+    const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
+    const numericDays = Number(days);
+    return Number.isFinite(numericDays) ? numericDays : null;
+}
+
+function matchesEventDaysFilter(batch, eventDays) {
+    if (!eventDays) return true;
+
+    const numericEventDays = Number(eventDays);
+    const numericDays = getBatchDaysLeft(batch);
+
+    // Фильтр «Событие» должен искать точное совпадение с числом,
+    // которое отображается в колонке «Остаток дней».
+    return numericDays !== null && Number.isFinite(numericEventDays) && numericDays === numericEventDays;
+}
+
 function updateSelectionControls() {
     const visibleIds = state.filteredBatches.map((batch) => String(batch.id));
     const selectedVisibleCount = visibleIds.filter((id) => state.selectedBatchIds.has(id)).length;
@@ -465,10 +498,10 @@ function pruneSelectedBatchesToFilteredRows() {
 function renderRegistry() {
     const filters = getFilterParams();
     state.filteredBatches = state.batches.filter((batch) => {
-        const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
-        const numericDays = Number(days);
-        const matchesDaysTo = !filters.days_to || (filters.days_to === 'expired' ? numericDays < 0 : numericDays >= 0 && numericDays <= Number(filters.days_to));
-        const matchesEvent = !filters.event_days || (!batch.expiryInvalid && Number.isFinite(numericDays) && numericDays === Number(filters.event_days));
+        const numericDays = getBatchDaysLeft(batch);
+        const matchesDaysTo = !filters.days_to
+            || (numericDays !== null && (filters.days_to === 'expired' ? numericDays < 0 : numericDays >= 0 && numericDays <= Number(filters.days_to)));
+        const matchesEvent = matchesEventDaysFilter(batch, filters.event_days);
 
         return (!filters.article || batch.article.toLowerCase().includes(filters.article.toLowerCase()))
             && (!filters.status || batch.status === filters.status)
@@ -790,10 +823,10 @@ function switchTab(tabName) {
 }
 
 function openSettingsPasswordDialog() {
-    qs('#settingsPasswordInput').value = '';
-    qs('#settingsPasswordError').textContent = '';
+    setValueIfPresent('#settingsPasswordInput', '');
+    setTextIfPresent('#settingsPasswordError', '');
     qs('#settingsPasswordDialog').showModal();
-    qs('#settingsPasswordInput').focus();
+    focusIfPresent('#settingsPasswordInput');
 }
 
 function closeSettingsPasswordDialog() {
@@ -864,7 +897,10 @@ async function submitWriteOffPassword(event) {
 async function submitSettingsPassword(event) {
     event.preventDefault();
     const input = qs('#settingsPasswordInput');
-    const error = qs('#settingsPasswordError');
+    if (!input) {
+        setTextIfPresent('#settingsPasswordError', 'Поле пароля не найдено. Обновите страницу и попробуйте ещё раз.');
+        return;
+    }
 
     state.settingsPassword = input.value;
 
@@ -875,8 +911,8 @@ async function submitSettingsPassword(event) {
         switchTab('settings');
     } catch (loadError) {
         state.settingsPassword = '';
-        error.textContent = loadError.message;
-        input.select();
+        setTextIfPresent('#settingsPasswordError', loadError.message);
+        selectIfPresent('#settingsPasswordInput');
     }
 }
 
@@ -1068,16 +1104,16 @@ function renderSettings() {
     renderNotificationHistory(settings.notification_history || []);
 
     const autoImport = settings.auto_import || {};
-    qs('#autoImportLastDate').textContent = autoImport.last_date || 'Не выполнялось';
-    qs('#autoImportLoaded').textContent = String(autoImport.loaded ?? 0);
-    qs('#autoImportStatus').textContent = autoImport.status || 'Не выполнялось';
-    qs('#autoImportError').textContent = autoImport.error || '—';
+    setTextIfPresent('#autoImportLastDate', autoImport.last_date || 'Не выполнялось');
+    setTextIfPresent('#autoImportLoaded', String(autoImport.loaded ?? 0));
+    setTextIfPresent('#autoImportStatus', autoImport.status || 'Не выполнялось');
+    setTextIfPresent('#autoImportError', autoImport.error || '—');
 
     const system = settings.system || {};
-    qs('#systemCheckSchedule').textContent = system.check_schedule || 'ежедневно в 09:00';
-    qs('#systemLastCheck').textContent = system.last_check || 'Не выполнялось';
-    qs('#systemLastSent').textContent = system.last_sent || 'Не выполнялось';
-    qs('#systemSmtpStatus').textContent = system.smtp_status || 'Не выполнялось';
+    setTextIfPresent('#systemCheckSchedule', system.check_schedule || 'ежедневно в 09:00');
+    setTextIfPresent('#systemLastCheck', system.last_check || 'Не выполнялось');
+    setTextIfPresent('#systemLastSent', system.last_sent || 'Не выполнялось');
+    setTextIfPresent('#systemSmtpStatus', system.smtp_status || 'Не выполнялось');
     state.settingsDirty = false;
 }
 
@@ -1213,14 +1249,17 @@ function downloadTemplateXlsx() {
         return;
     }
 
-    if (action === 'auto_import_completed') {
-        const batches = parsed.batches && parsed.batches.length ? `\nЗагруженные партии:\n${formatHistoryBatchList(parsed.batches)}` : '';
-        return `Автозагрузка выполнена. Загружено партий: ${Number(parsed.added || 0)}. Исключено дублей: ${Number(parsed.skipped_duplicates || 0)}.${batches}`;
-    }
-
-    if (action === 'auto_import_failed' || action === 'auto_import_not_found') {
-        return `Автозагрузка не выполнена. ${parsed.error || parsed.message || 'Причина не указана.'}`;
-    }
+    const worksheet = XLSX.utils.json_to_sheet([
+        {
+            Артикул: '12345',
+            Количество: 10,
+            'Срок годности до': '31.12.2026',
+        },
+    ]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Партии');
+    XLSX.writeFile(workbook, 'shablon_partiy.xlsx');
+}
 
 function readXlsx(file) {
     if (!window.XLSX) {
@@ -1292,6 +1331,8 @@ function formatHistoryBatchList(batches) {
     return (batches || []).map(formatHistoryBatch).join('\n');
 }
 
+function applyInitialUrlState() {
+    const params = new URLSearchParams(window.location.search);
     if (params.get('tab') === 'registry') {
         switchTab('registry');
     }
@@ -1305,7 +1346,7 @@ function handleCustomFilterSelect(select, label) {
 
     const enteredValue = prompt(`Введите значение фильтра «${label}» в днях`, select.dataset.customValue || '');
     const normalizedValue = Number.parseInt(String(enteredValue || '').trim(), 10);
-    if (!Number.isFinite(normalizedValue) || normalizedValue < 0) {
+    if (!Number.isFinite(normalizedValue) || (select.id !== 'filterEventDays' && normalizedValue < 0)) {
         select.value = '';
         delete select.dataset.customValue;
         showToast('Введите целое число дней для фильтра.', true);
@@ -1356,14 +1397,6 @@ function bindEvents() {
     qs('#editBatchForm').addEventListener('submit', submitEditForm);
     qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
     qs('#cancelEditButton').addEventListener('click', closeEditDialog);
-
-    if (action === 'bulk_create') {
-        const addedText = parsed.batches && parsed.batches.length
-            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
-            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
-        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
-            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
-            : '';
 
     qs('#openXlsImportButton').addEventListener('click', openXlsImportFromAddDialog);
     qs('#closeXlsImportDialogButton').addEventListener('click', closeXlsImportDialog);
