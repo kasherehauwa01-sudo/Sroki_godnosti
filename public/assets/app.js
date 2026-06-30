@@ -28,6 +28,20 @@ const setCheckedIfPresent = (selector, checked) => {
     const field = qs(selector);
     if (field) field.checked = checked;
 };
+// Защитные DOM-хелперы не дают модальному окну настроек упасть,
+// если часть необязательных элементов отсутствует в текущей разметке.
+const setTextIfPresent = (selector, value) => {
+    const field = qs(selector);
+    if (field) field.textContent = value;
+};
+const focusIfPresent = (selector) => {
+    const field = qs(selector);
+    if (field) field.focus();
+};
+const selectIfPresent = (selector) => {
+    const field = qs(selector);
+    if (field) field.select();
+};
 
 function showToast(message, isError = false) {
     const toast = qs('#toast');
@@ -809,10 +823,10 @@ function switchTab(tabName) {
 }
 
 function openSettingsPasswordDialog() {
-    qs('#settingsPasswordInput').value = '';
-    qs('#settingsPasswordError').textContent = '';
+    setValueIfPresent('#settingsPasswordInput', '');
+    setTextIfPresent('#settingsPasswordError', '');
     qs('#settingsPasswordDialog').showModal();
-    qs('#settingsPasswordInput').focus();
+    focusIfPresent('#settingsPasswordInput');
 }
 
 function closeSettingsPasswordDialog() {
@@ -883,7 +897,10 @@ async function submitWriteOffPassword(event) {
 async function submitSettingsPassword(event) {
     event.preventDefault();
     const input = qs('#settingsPasswordInput');
-    const error = qs('#settingsPasswordError');
+    if (!input) {
+        setTextIfPresent('#settingsPasswordError', 'Поле пароля не найдено. Обновите страницу и попробуйте ещё раз.');
+        return;
+    }
 
     state.settingsPassword = input.value;
 
@@ -894,8 +911,8 @@ async function submitSettingsPassword(event) {
         switchTab('settings');
     } catch (loadError) {
         state.settingsPassword = '';
-        error.textContent = loadError.message;
-        input.select();
+        setTextIfPresent('#settingsPasswordError', loadError.message);
+        selectIfPresent('#settingsPasswordInput');
     }
 }
 
@@ -1087,16 +1104,16 @@ function renderSettings() {
     renderNotificationHistory(settings.notification_history || []);
 
     const autoImport = settings.auto_import || {};
-    qs('#autoImportLastDate').textContent = autoImport.last_date || 'Не выполнялось';
-    qs('#autoImportLoaded').textContent = String(autoImport.loaded ?? 0);
-    qs('#autoImportStatus').textContent = autoImport.status || 'Не выполнялось';
-    qs('#autoImportError').textContent = autoImport.error || '—';
+    setTextIfPresent('#autoImportLastDate', autoImport.last_date || 'Не выполнялось');
+    setTextIfPresent('#autoImportLoaded', String(autoImport.loaded ?? 0));
+    setTextIfPresent('#autoImportStatus', autoImport.status || 'Не выполнялось');
+    setTextIfPresent('#autoImportError', autoImport.error || '—');
 
     const system = settings.system || {};
-    qs('#systemCheckSchedule').textContent = system.check_schedule || 'ежедневно в 09:00';
-    qs('#systemLastCheck').textContent = system.last_check || 'Не выполнялось';
-    qs('#systemLastSent').textContent = system.last_sent || 'Не выполнялось';
-    qs('#systemSmtpStatus').textContent = system.smtp_status || 'Не выполнялось';
+    setTextIfPresent('#systemCheckSchedule', system.check_schedule || 'ежедневно в 09:00');
+    setTextIfPresent('#systemLastCheck', system.last_check || 'Не выполнялось');
+    setTextIfPresent('#systemLastSent', system.last_sent || 'Не выполнялось');
+    setTextIfPresent('#systemSmtpStatus', system.smtp_status || 'Не выполнялось');
     state.settingsDirty = false;
 }
 
