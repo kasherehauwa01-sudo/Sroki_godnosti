@@ -414,11 +414,17 @@ function normalizeBatch(row) {
     };
 }
 
+function getFilterSelectValue(selector) {
+    const select = qs(selector);
+    return select.value === 'custom' ? (select.dataset.customValue || '') : select.value;
+}
+
 function getFilterParams() {
     return {
         article: qs('#filterArticle').value.trim(),
         status: qs('#filterStatus').value,
-        days_to: qs('#filterDaysTo').value,
+        days_to: getFilterSelectValue('#filterDaysTo'),
+        event_days: getFilterSelectValue('#filterEventDays'),
     };
 }
 
@@ -452,10 +458,14 @@ function renderRegistry() {
     const filters = getFilterParams();
     state.filteredBatches = state.batches.filter((batch) => {
         const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
+        const matchesDaysTo = !filters.days_to || (filters.days_to === 'expired' ? days < 0 : days >= 0 && days <= Number(filters.days_to));
+        const matchesEvent = !filters.event_days || (!batch.expiryInvalid && days === Number(filters.event_days));
+
         return (!filters.article || batch.article.toLowerCase().includes(filters.article.toLowerCase()))
             && (!filters.status || batch.status === filters.status)
             && (!batch.expiryInvalid || !filters.days_to)
-            && (!filters.days_to || (filters.days_to === 'expired' ? days < 0 : days >= 0 && days <= Number(filters.days_to)));
+            && matchesDaysTo
+            && matchesEvent;
     });
     sortRegistryRows();
     if (!state.writeOffAccessGranted) {
@@ -971,170 +981,6 @@ function formatHistoryDetails(action, payload) {
     return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
 }
 
-function formatHistoryBatch(batch) {
-    if (!batch) return 'партия не найдена';
-
-    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
-    const expiry = batch.expiry_date || batch.expiryDate
-        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate, batch.expiry_full_date || batch.expiryFullDate)}`
-        : 'без указанного срока годности';
-    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
-    const status = batch.status ? `, статус «${batch.status}»` : '';
-
-    return `партия ${article} ${expiry}${quantity}${status}`;
-}
-
-function formatHistoryBatchList(batches) {
-    return (batches || []).map(formatHistoryBatch).join('\n');
-}
-
-function formatChangedFields(before, after) {
-    const changes = [];
-    if (!before || !after) return changes;
-
-    if (before.article && after.article && before.article !== after.article) {
-        changes.push(`артикул изменён с ${before.article} на ${after.article}`);
-    }
-    if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
-        changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date, before.expiry_full_date)} на ${formatExpiryMonthRu(after.expiry_date, after.expiry_full_date)}`);
-    }
-    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
-        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
-    }
-    if (before.status && after.status && before.status !== after.status) {
-        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
-    }
-
-    return changes;
-}
-
-function formatHistoryDetails(action, payload) {
-    const parsed = parseHistoryPayload(payload);
-
-    if (action === 'create') {
-        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (action === 'bulk_create') {
-        const addedText = parsed.batches && parsed.batches.length
-            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
-            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
-        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
-            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
-            : '';
-
-        return `${addedText}${duplicatesText}`;
-    }
-
-    if (action === 'auto_import_completed') {
-        const batches = parsed.batches && parsed.batches.length ? `\nЗагруженные партии:\n${formatHistoryBatchList(parsed.batches)}` : '';
-        return `Автозагрузка выполнена. Загружено партий: ${Number(parsed.added || 0)}. Исключено дублей: ${Number(parsed.skipped_duplicates || 0)}.${batches}`;
-    }
-
-    if (action === 'auto_import_failed' || action === 'auto_import_not_found') {
-        return `Автозагрузка не выполнена. ${parsed.error || parsed.message || 'Причина не указана.'}`;
-    }
-
-    if (action === 'update') {
-        const before = parsed.before || {};
-        const after = parsed.after || parsed;
-        const changes = formatChangedFields(before, after);
-        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
-        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
-    }
-
-    if (action === 'delete') {
-        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (parsed.text) return parsed.text;
-
-    // Запасной вариант нужен для старых записей истории со служебными полями.
-    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
-}
-
-function formatHistoryBatch(batch) {
-    if (!batch) return 'партия не найдена';
-
-    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
-    const expiry = batch.expiry_date || batch.expiryDate
-        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate, batch.expiry_full_date || batch.expiryFullDate)}`
-        : 'без указанного срока годности';
-    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
-    const status = batch.status ? `, статус «${batch.status}»` : '';
-
-    return `партия ${article} ${expiry}${quantity}${status}`;
-}
-
-function formatHistoryBatchList(batches) {
-    return (batches || []).map(formatHistoryBatch).join('\n');
-}
-
-function formatChangedFields(before, after) {
-    const changes = [];
-    if (!before || !after) return changes;
-
-    if (before.article && after.article && before.article !== after.article) {
-        changes.push(`артикул изменён с ${before.article} на ${after.article}`);
-    }
-    if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
-        changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date, before.expiry_full_date)} на ${formatExpiryMonthRu(after.expiry_date, after.expiry_full_date)}`);
-    }
-    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
-        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
-    }
-    if (before.status && after.status && before.status !== after.status) {
-        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
-    }
-
-    return changes;
-}
-
-function formatHistoryDetails(action, payload) {
-    const parsed = parseHistoryPayload(payload);
-
-    if (action === 'create') {
-        return `Добавлена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (action === 'bulk_create') {
-        const addedText = parsed.batches && parsed.batches.length
-            ? `Добавлены партии:\n${formatHistoryBatchList(parsed.batches)}.`
-            : `Добавлено партий: ${Number(parsed.added || 0)}.`;
-        const duplicatesText = Number(parsed.skipped_duplicates || 0) > 0
-            ? `\nДубликаты не загружены${parsed.duplicates ? `:\n${formatHistoryBatchList(parsed.duplicates)}` : `: ${parsed.skipped_duplicates}`}.`
-            : '';
-
-        return `${addedText}${duplicatesText}`;
-    }
-
-    if (action === 'auto_import_completed') {
-        const batches = parsed.batches && parsed.batches.length ? `\nЗагруженные партии:\n${formatHistoryBatchList(parsed.batches)}` : '';
-        return `Автозагрузка выполнена. Загружено партий: ${Number(parsed.added || 0)}. Исключено дублей: ${Number(parsed.skipped_duplicates || 0)}.${batches}`;
-    }
-
-    if (action === 'auto_import_failed' || action === 'auto_import_not_found') {
-        return `Автозагрузка не выполнена. ${parsed.error || parsed.message || 'Причина не указана.'}`;
-    }
-
-    if (action === 'update') {
-        const before = parsed.before || {};
-        const after = parsed.after || parsed;
-        const changes = formatChangedFields(before, after);
-        const changesText = changes.length ? `\n${changes.join('\n')}.` : '';
-        return `Изменена ${formatHistoryBatch(after)}.${changesText}`;
-    }
-
-    if (action === 'delete') {
-        return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
-    }
-
-    if (parsed.text) return parsed.text;
-
-    // Запасной вариант нужен для старых записей истории со служебными полями.
-    return Object.entries(parsed).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('\n');
-}
-
 async function loadHistory() {
     const result = await api('logs');
     const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found']);
@@ -1426,17 +1272,14 @@ function readXlsx(file) {
     reader.readAsArrayBuffer(file);
 }
 
-function formatHistoryBatch(batch) {
-    if (!batch) return 'партия не найдена';
-
-    const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
-    const expiry = batch.expiry_date || batch.expiryDate
-        ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate, batch.expiry_full_date || batch.expiryFullDate)}`
-        : 'без указанного срока годности';
-    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
-    const status = batch.status ? `, статус «${batch.status}»` : '';
-
-    return `партия ${article} ${expiry}${quantity}${status}`;
+function resetRegistryFilters() {
+    ['#filterArticle', '#filterDaysTo', '#filterEventDays'].forEach((selector) => {
+        const field = qs(selector);
+        field.value = '';
+        delete field.dataset.customValue;
+    });
+    qs('#filterStatus').value = '';
+    renderRegistry();
 }
 
 function formatHistoryBatchList(batches) {
@@ -1446,11 +1289,24 @@ function formatHistoryBatchList(batches) {
     if (params.get('tab') === 'registry') {
         switchTab('registry');
     }
-    if (before.status && after.status && before.status !== after.status) {
-        changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
+}
+
+function handleCustomFilterSelect(select, label) {
+    if (select.value !== 'custom') {
+        delete select.dataset.customValue;
+        return;
     }
 
-    return changes;
+    const enteredValue = prompt(`Введите значение фильтра «${label}» в днях`, select.dataset.customValue || '');
+    const normalizedValue = Number.parseInt(String(enteredValue || '').trim(), 10);
+    if (!Number.isFinite(normalizedValue) || normalizedValue < 0) {
+        select.value = '';
+        delete select.dataset.customValue;
+        showToast('Введите целое число дней для фильтра.', true);
+        return;
+    }
+
+    select.dataset.customValue = String(normalizedValue);
 }
 
 function bindEvents() {
@@ -1527,7 +1383,16 @@ function bindEvents() {
 
     ['#historyDatePreset', '#historyDateFrom', '#historyDateTo', '#historyActionFilter'].forEach((selector) => qs(selector).addEventListener('input', renderHistory));
 
-    ['#filterArticle', '#filterStatus', '#filterDaysTo'].forEach((selector) => qs(selector).addEventListener('input', renderRegistry));
+    qs('#filterArticle').addEventListener('input', renderRegistry);
+    qs('#filterStatus').addEventListener('change', renderRegistry);
+    qs('#filterDaysTo').addEventListener('change', (event) => {
+        handleCustomFilterSelect(event.target, 'Остаток дней до');
+        renderRegistry();
+    });
+    qs('#filterEventDays').addEventListener('change', (event) => {
+        handleCustomFilterSelect(event.target, 'Событие');
+        renderRegistry();
+    });
     qsa('[data-sort]').forEach((button) => button.addEventListener('click', () => toggleRegistrySort(button.dataset.sort)));
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
