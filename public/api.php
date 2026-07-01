@@ -1089,40 +1089,59 @@ function getNotificationHistory(?PDO $pdo): array
     $statement = $pdo->prepare(
         "SELECT action, payload, created_at
          FROM logs
-         WHERE action IN ('expiry_notifications_sent', 'test_notification_sent')
-         ORDER BY id DESC"
+         WHERE action IN ('expiry_notifications_sent', 'expiry_notifications_failed', 'test_notification_sent', 'test_notification_failed')
+         ORDER BY id DESC
+         LIMIT 100"
     );
     $statement->execute();
 
     return array_map(static function (array $row): array {
+        $action = (string)$row['action'];
         $payload = json_decode((string)($row['payload'] ?? ''), true);
         $payload = is_array($payload) ? $payload : [];
 
         return [
             'date' => formatMoscowDateTime((string)$row['created_at']),
-            'text' => notificationHistoryText((string)$row['action'], $payload),
+            'status' => notificationHistoryStatus($action),
+            'text' => notificationHistoryText($action, $payload),
         ];
     }, $statement->fetchAll());
 }
 
+function notificationHistoryStatus(string $action): string
+{
+    return str_ends_with($action, '_sent') ? 'Отправлено' : 'Ошибка';
+}
+
 function notificationHistoryText(string $action, array $payload): string
 {
+    if (str_ends_with($action, '_failed')) {
+        return (string)($payload['error'] ?? $payload['reason'] ?? 'Причина ошибки не указана.');
+    }
+
+    if ($action === 'expiry_notifications_sent' && isset($payload['events']) && is_array($payload['events'])) {
+        return implode("\n", array_map(static function (array $event): string {
+            return sprintf(
+                '%s Количество партий: %d.',
+                (string)($event['subject'] ?? 'Уведомление о сроке годности.'),
+                (int)($event['count'] ?? 0)
+            );
+        }, $payload['events']));
+    }
+
     if (isset($payload['text']) && trim((string)$payload['text']) !== '') {
         return (string)$payload['text'];
     }
 
     if ($action === 'test_notification_sent' && isset($payload['article'], $payload['days_left'])) {
         return sprintf(
-            'Истекает срок годности через %d дней у партии артикул %s.',
+            'Тестовое уведомление: истекает срок годности через %d дней у партии артикул %s.',
             (int)$payload['days_left'],
             (string)$payload['article']
         );
     }
 
-    $rows = isset($payload['rows']) ? (int)$payload['rows'] : 0;
-    return $rows > 0
-        ? 'Отправлено уведомление по партиям: ' . $rows . '.'
-        : 'Уведомление отправлено.';
+    return 'Уведомление отправлено.';
 }
 
 function getSystemSettingsInfo(?PDO $pdo): array

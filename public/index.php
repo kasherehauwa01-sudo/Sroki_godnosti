@@ -104,6 +104,7 @@ manager@site.ru"></textarea></label>
                     <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
                     <div class="settings-actions">
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                        <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">Логи уведомлений</button>
                     </div>
                     <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
                 </div>
@@ -412,6 +413,19 @@ manager@site.ru"></textarea></label>
             <div class="modal-actions">
                 <button class="ghost-button hidden" id="notificationDetailsButton" type="button">Подробнее</button>
                 <button class="primary" id="confirmNotificationDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal" id="notificationLogsDialog">
+        <div class="card form modal-card notification-modal-card">
+            <div class="modal-heading">
+                <h2>Логи уведомлений</h2>
+                <button class="icon-button" id="closeNotificationLogsDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="notification-dialog-body" id="notificationLogsBody"></div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmNotificationLogsDialogButton" type="button">Закрыть</button>
             </div>
         </div>
     </dialog>

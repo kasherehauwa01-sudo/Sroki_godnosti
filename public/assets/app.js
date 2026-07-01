@@ -1129,6 +1129,7 @@ function renderNotificationHistory(history) {
     container.innerHTML = history.map((item) => `
         <article class="notification-history-item">
             <time>${escapeHtml(item.date || 'Дата не указана')}</time>
+            <p><strong>${escapeHtml(item.status || 'Статус не указан')}</strong></p>
             <p>${escapeHtml(item.text || 'Текст уведомления не указан')}</p>
         </article>
     `).join('');
@@ -1222,6 +1223,27 @@ async function runTestAutoImport() {
     } finally {
         button.disabled = false;
     }
+}
+
+function showNotificationLogs() {
+    const logs = state.settings?.notification_history || [];
+    const body = qs('#notificationLogsBody');
+    if (!logs.length) {
+        body.textContent = 'Логи уведомлений пока отсутствуют.';
+    } else {
+        body.innerHTML = logs.map((log) => `
+            <article class="notification-history-item">
+                <time>${escapeHtml(log.date || 'Дата не указана')}</time>
+                <p><strong>${escapeHtml(log.status || 'Статус не указан')}</strong></p>
+                <p>${escapeHtml(log.text || 'Описание отсутствует')}</p>
+            </article>
+        `).join('');
+    }
+    qs('#notificationLogsDialog').showModal();
+}
+
+function closeNotificationLogs() {
+    qs('#notificationLogsDialog').close();
 }
 
 function showAutoImportLogs() {
@@ -1447,6 +1469,9 @@ function bindEvents() {
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
+    qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
+    qs('#closeNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
+    qs('#confirmNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
     qs('#testAutoImportButton').addEventListener('click', runTestAutoImport);
     qs('#showAutoImportLogsButton').addEventListener('click', showAutoImportLogs);
     qs('#closeAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
