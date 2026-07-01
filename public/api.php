@@ -64,6 +64,7 @@ function handleApiRequest(): void
                 'update' => updateBatch($pdo, $payload),
                 'delete' => deleteBatch($pdo, $payload),
                 'bulk_delete' => deleteBatches($pdo, $payload),
+                'delete_by_articles' => deleteBatchesByArticles($pdo, $payload),
                 'settings' => saveProtectedSettings($pdo, $payload),
                 'test_notification' => sendTestNotification($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
@@ -475,6 +476,48 @@ function deleteBatches(PDO $pdo, array $payload): array
     }
 
     return ['ok' => true, 'deleted' => $deleted];
+}
+
+function deleteBatchesByArticles(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    $articles = array_values(array_unique(array_filter(array_map(
+        static fn (string $article): string => trim($article),
+        preg_split('/\R+/', (string)($payload['articles'] ?? '')) ?: []
+    ), static fn (string $article): bool => $article !== '')));
+
+    if (!$articles) {
+        throw new InvalidArgumentException('Введите хотя бы один артикул для удаления.');
+    }
+
+    $placeholders = implode(',', array_fill(0, count($articles), '?'));
+    $select = $pdo->prepare("SELECT id, article, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE article IN ($placeholders) ORDER BY article ASC, id ASC");
+    $select->execute($articles);
+    $batches = $select->fetchAll();
+
+    if (!$batches) {
+        writeLog($pdo, 'delete_by_articles_no_matches', ['articles' => $articles]);
+        return ['ok' => true, 'deleted' => 0, 'articles' => $articles];
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $delete = $pdo->prepare("DELETE FROM batches WHERE article IN ($placeholders)");
+        $delete->execute($articles);
+        $deleted = $delete->rowCount();
+        writeLog($pdo, 'delete_by_articles', [
+            'articles' => $articles,
+            'deleted' => $deleted,
+            'batches' => $batches,
+        ]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        $pdo->rollBack();
+        throw $error;
+    }
+
+    return ['ok' => true, 'deleted' => $deleted, 'articles' => $articles];
 }
 
 function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): array

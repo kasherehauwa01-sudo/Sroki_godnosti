@@ -141,6 +141,12 @@ manager@site.ru"></textarea></label>
                     </dl>
                 </div>
 
+                <div class="card form settings-delete-articles-card">
+                    <h3>Удаление артикулов</h3>
+                    <p class="subtitle">Удаляет из реестра все партии с точным совпадением в колонке «Артикул».</p>
+                    <button class="ghost-button danger" id="openDeleteArticlesDialogButton" formnovalidate type="button">Удаление артикулов</button>
+                </div>
+
                 <div class="card form settings-command-card">
                     <h3>Команда обновления</h3>
                     <label>Команда для сервера
@@ -415,6 +421,22 @@ manager@site.ru"></textarea></label>
                 <button class="primary" id="confirmNotificationDialogButton" type="button">Закрыть</button>
             </div>
         </div>
+    </dialog>
+
+    <dialog class="modal" id="deleteArticlesDialog">
+        <form class="card form modal-card" id="deleteArticlesForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Удаление артикулов</h2>
+                <button class="icon-button" id="closeDeleteArticlesDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Введите артикулы, которые нужно удалить из реестра и SQL-таблицы. Каждый артикул — с новой строки.</p>
+            <label>Артикулы<textarea id="deleteArticlesInput" rows="10" placeholder="12345&#10;ABC-77"></textarea></label>
+            <p class="field-error" id="deleteArticlesError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelDeleteArticlesButton" type="button">Отмена</button>
+                <button class="primary danger" id="confirmDeleteArticlesButton" type="submit">Удалить</button>
+            </div>
+        </form>
     </dialog>
 
     <dialog class="modal" id="notificationLogsDialog">

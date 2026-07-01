@@ -99,7 +99,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'verify_write_off']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'verify_write_off', 'delete_by_articles']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -1225,6 +1225,48 @@ async function runTestAutoImport() {
     }
 }
 
+function openDeleteArticlesDialog() {
+    qs('#deleteArticlesInput').value = '';
+    qs('#deleteArticlesError').textContent = '';
+    qs('#deleteArticlesDialog').showModal();
+}
+
+function closeDeleteArticlesDialog() {
+    qs('#deleteArticlesDialog').close();
+    qs('#deleteArticlesForm').reset();
+    qs('#deleteArticlesError').textContent = '';
+}
+
+async function submitDeleteArticles(event) {
+    event.preventDefault();
+    const input = qs('#deleteArticlesInput');
+    const error = qs('#deleteArticlesError');
+    const articles = input.value.split(/\r?\n/).map((article) => article.trim()).filter(Boolean);
+    if (!articles.length) {
+        error.textContent = 'Введите хотя бы один артикул.';
+        return;
+    }
+    if (!confirm(`Удалить все партии по артикулам (${articles.length}) безвозвратно?`)) return;
+
+    const button = qs('#confirmDeleteArticlesButton');
+    button.disabled = true;
+    error.textContent = '';
+    try {
+        const result = await api('delete_by_articles', {
+            settings_password: state.settingsPassword,
+            articles: articles.join('\n'),
+        });
+        closeDeleteArticlesDialog();
+        showToast(`Удалено строк: ${result.deleted || 0}`);
+        await Promise.all([loadBatches(), loadHistory(), loadSettings()]);
+    } catch (deleteError) {
+        error.textContent = deleteError.message;
+        showToast(deleteError.message, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
 function showNotificationLogs() {
     const logs = state.settings?.notification_history || [];
     const body = qs('#notificationLogsBody');
@@ -1467,6 +1509,11 @@ function bindEvents() {
     qsa('[data-sort]').forEach((button) => button.addEventListener('click', () => toggleRegistrySort(button.dataset.sort)));
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
+
+    qs('#openDeleteArticlesDialogButton').addEventListener('click', openDeleteArticlesDialog);
+    qs('#deleteArticlesForm').addEventListener('submit', submitDeleteArticles);
+    qs('#closeDeleteArticlesDialogButton').addEventListener('click', closeDeleteArticlesDialog);
+    qs('#cancelDeleteArticlesButton').addEventListener('click', closeDeleteArticlesDialog);
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
