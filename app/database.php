@@ -28,11 +28,17 @@ function getDatabaseConnection(): PDO
 
     $dsn = "mysql:host={$host};dbname={$database};charset={$charset}";
 
-    return new PDO($dsn, $user, $password, [
+    $pdo = new PDO($dsn, $user, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
+
+    // Фиксируем часовой пояс сессии MariaDB на Москве, чтобы CURDATE(),
+    // CURRENT_TIMESTAMP и ON UPDATE считались одинаково в вебе и cron.
+    $pdo->exec("SET time_zone = '+03:00'");
+
+    return $pdo;
 }
 
 function getDatabaseConfigValue(string $envKey, string $configKey, ?string $default = null, bool $required = false): string
