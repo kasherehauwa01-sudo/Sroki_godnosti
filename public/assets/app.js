@@ -136,7 +136,9 @@ async function api(action, data = {}) {
         throw new Error(text || 'API вернул некорректный JSON.');
     }
     if (!response.ok || !json.ok) {
-        throw new Error(json.error || 'Ошибка API');
+        // Некоторые служебные действия API (например, тест автозагрузки)
+        // возвращают пользовательское описание в поле message, а не error.
+        throw new Error(json.error || json.message || 'Ошибка API');
     }
     return json;
 }
@@ -1397,6 +1399,14 @@ function bindEvents() {
     qs('#editBatchForm').addEventListener('submit', submitEditForm);
     qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
     qs('#cancelEditButton').addEventListener('click', closeEditDialog);
+
+    // Кнопки ручного добавления партий должны быть привязаны явно:
+    // без этих обработчиков диалог не открывается и пользователь не видит ошибки.
+    qs('#openAddBatchesButton').addEventListener('click', openAddBatchesDialog);
+    qs('#addBatchRowButton').addEventListener('click', () => createBatchRow());
+    qs('#addBatchesForm').addEventListener('submit', submitAddBatchesForm);
+    qs('#closeAddBatchesDialogButton').addEventListener('click', closeAddBatchesDialog);
+    qs('#cancelAddBatchesButton').addEventListener('click', closeAddBatchesDialog);
 
     qs('#openXlsImportButton').addEventListener('click', openXlsImportFromAddDialog);
     qs('#closeXlsImportDialogButton').addEventListener('click', closeXlsImportDialog);
