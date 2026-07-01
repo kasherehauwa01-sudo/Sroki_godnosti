@@ -7,7 +7,7 @@
 declare(strict_types=1);
 
 const APP_TIMEZONE = 'Europe/Moscow';
-const DATABASE_TIMEZONE = 'UTC';
+const DATABASE_TIMEZONE = APP_TIMEZONE;
 
 date_default_timezone_set(APP_TIMEZONE);
 
@@ -38,6 +38,10 @@ function handleApiRequest(): void
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $payload = readPayload();
         $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
+
+        if ($action !== 'test_auto_import') {
+            runDueAutoImport($pdo);
+        }
 
         refreshDaysLeft($pdo);
 
@@ -914,7 +918,9 @@ function autoImportLogStatus(string $action): string
 function autoImportLogText(string $action, array $payload): string
 {
     if ($action === 'auto_import_started') {
-        return 'Ручной тест автозагрузки запущен.';
+        return ($payload['mode'] ?? '') === 'daily_auto'
+            ? sprintf('Ежедневная автозагрузка запущена по расписанию %s МСК.', (string)($payload['time'] ?? '10:00'))
+            : 'Ручной тест автозагрузки запущен.';
     }
     if ($action === 'auto_import_completed') {
         return sprintf(
