@@ -104,6 +104,7 @@ manager@site.ru"></textarea></label>
                     <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
                     <div class="settings-actions">
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                        <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">Логи уведомлений</button>
                     </div>
                     <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
                 </div>
@@ -138,6 +139,12 @@ manager@site.ru"></textarea></label>
                         <dt>Последняя отправка письма:</dt><dd id="systemLastSent">Не выполнялось</dd>
                         <dt>Статус SMTP:</dt><dd id="systemSmtpStatus">Не выполнялось</dd>
                     </dl>
+                </div>
+
+                <div class="card form settings-delete-articles-card">
+                    <h3>Удаление артикулов</h3>
+                    <p class="subtitle">Удаляет из реестра все партии с точным совпадением в колонке «Артикул».</p>
+                    <button class="ghost-button danger" id="openDeleteArticlesDialogButton" formnovalidate type="button">Удаление артикулов</button>
                 </div>
 
                 <div class="card form settings-command-card">
@@ -412,6 +419,35 @@ manager@site.ru"></textarea></label>
             <div class="modal-actions">
                 <button class="ghost-button hidden" id="notificationDetailsButton" type="button">Подробнее</button>
                 <button class="primary" id="confirmNotificationDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal" id="deleteArticlesDialog">
+        <form class="card form modal-card" id="deleteArticlesForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Удаление артикулов</h2>
+                <button class="icon-button" id="closeDeleteArticlesDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Введите артикулы, которые нужно удалить из реестра и SQL-таблицы. Каждый артикул — с новой строки.</p>
+            <label>Артикулы<textarea id="deleteArticlesInput" rows="10" placeholder="12345&#10;ABC-77"></textarea></label>
+            <p class="field-error" id="deleteArticlesError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelDeleteArticlesButton" type="button">Отмена</button>
+                <button class="primary danger" id="confirmDeleteArticlesButton" type="submit">Удалить</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal" id="notificationLogsDialog">
+        <div class="card form modal-card notification-modal-card">
+            <div class="modal-heading">
+                <h2>Логи уведомлений</h2>
+                <button class="icon-button" id="closeNotificationLogsDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="notification-dialog-body" id="notificationLogsBody"></div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmNotificationLogsDialogButton" type="button">Закрыть</button>
             </div>
         </div>
     </dialog>
