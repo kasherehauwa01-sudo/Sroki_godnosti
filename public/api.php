@@ -7,7 +7,7 @@
 declare(strict_types=1);
 
 const APP_TIMEZONE = 'Europe/Moscow';
-const DATABASE_TIMEZONE = 'UTC';
+const DATABASE_TIMEZONE = APP_TIMEZONE;
 
 date_default_timezone_set(APP_TIMEZONE);
 
