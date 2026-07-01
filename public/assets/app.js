@@ -136,7 +136,9 @@ async function api(action, data = {}) {
         throw new Error(text || 'API вернул некорректный JSON.');
     }
     if (!response.ok || !json.ok) {
-        throw new Error(json.error || 'Ошибка API');
+        // Некоторые служебные действия API (например, тест автозагрузки)
+        // возвращают пользовательское описание в поле message, а не error.
+        throw new Error(json.error || json.message || 'Ошибка API');
     }
     return json;
 }
