@@ -24,6 +24,7 @@ const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта пар
 const SENDER_EMAIL = 'vr-vk@yandex.ru';
 const SETTINGS_PASSWORD_HASH = 'ff10705eafbaa3ff925fb0429d4b3f10379a4dd9dc1725654bbe0a5c9ce1a10f';
 const WRITE_OFF_PASSWORD_HASH = '816e2845d395e7703abac2dcbf9d54e39236fd39133362bf7ad3fce70dd7d78e';
+const NOTIFICATION_EVENT_DAYS = [180, 90, 60, 30, 15, 1];
 
 if (basename((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === 'api.php') {
     handleApiRequest();
@@ -44,6 +45,9 @@ function handleApiRequest(): void
         }
 
         refreshDaysLeft($pdo);
+        if ($action !== 'test_notification') {
+            runDueExpiryNotifications($pdo);
+        }
 
         if ($method === 'GET') {
             $result = match ($action) {
@@ -600,6 +604,147 @@ function normalizeBatchRow(array $row): array
         'status' => $row['status'],
         'updated_at' => $row['updated_at'],
     ];
+}
+
+function runDueExpiryNotifications(PDO $pdo): void
+{
+    $settings = getRawSettings($pdo);
+    $time = normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00'), '09:00');
+    $now = new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE));
+    $scheduledAt = new DateTimeImmutable($now->format('Y-m-d') . ' ' . $time, new DateTimeZone(APP_TIMEZONE));
+
+    if ($now < $scheduledAt) {
+        return;
+    }
+
+    if (!acquireNotificationLock($pdo)) {
+        return;
+    }
+
+    try {
+        if (!shouldRunExpiryNotificationsNow($pdo, $scheduledAt, $now)) {
+            return;
+        }
+
+        sendDueExpiryNotifications($pdo, $settings);
+    } catch (Throwable $error) {
+        writeLog($pdo, 'expiry_notifications_failed', [
+            'mode' => 'daily_auto',
+            'error' => $error->getMessage(),
+        ]);
+    } finally {
+        releaseNotificationLock($pdo);
+    }
+}
+
+function shouldRunExpiryNotificationsNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTimeImmutable $now): bool
+{
+    $statement = $pdo->prepare(
+        "SELECT action, created_at
+         FROM logs
+         WHERE action IN ('expiry_notifications_sent', 'expiry_notifications_failed', 'expiry_check_no_matches', 'expiry_check_skipped')
+           AND created_at >= :start
+         ORDER BY id DESC
+         LIMIT 1"
+    );
+    $statement->execute([':start' => $scheduledAt->format('Y-m-d H:i:s')]);
+    $lastRun = $statement->fetch();
+
+    if (!$lastRun) {
+        return true;
+    }
+
+    if (($lastRun['action'] ?? '') === 'expiry_notifications_sent') {
+        return false;
+    }
+
+    // Если в момент проверки не было событий/получателей или произошла ошибка,
+    // повторяем проверку не чаще одного раза в час, чтобы не пропустить партии после автозагрузки.
+    $lastRunAt = new DateTimeImmutable((string)$lastRun['created_at'], new DateTimeZone(APP_TIMEZONE));
+
+    return $lastRunAt <= $now->modify('-1 hour');
+}
+
+function sendDueExpiryNotifications(PDO $pdo, array $settings): void
+{
+    $emails = splitEmails((string)($settings['notification_email'] ?? ''));
+    if (!$emails) {
+        writeLog($pdo, 'expiry_check_skipped', [
+            'mode' => 'daily_auto',
+            'reason' => 'Не указаны email-получатели',
+        ]);
+        return;
+    }
+
+    $notificationDays = NOTIFICATION_EVENT_DAYS;
+    $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
+    $statement = $pdo->prepare(
+        "SELECT article, quantity, expiry_date, expiry_full_date, days_left
+         FROM batches
+         WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
+         ORDER BY days_left ASC, expiry_date ASC, article ASC"
+    );
+    $statement->execute($notificationDays);
+    $batches = $statement->fetchAll();
+
+    if (!$batches) {
+        writeLog($pdo, 'expiry_check_no_matches', [
+            'mode' => 'daily_auto',
+            'criteria' => $notificationDays,
+        ]);
+        return;
+    }
+
+    $sentEvents = [];
+    foreach (groupBatchesByDaysLeft($batches) as $daysLeft => $eventBatches) {
+        $subject = expiryNotificationSubject((int)$daysLeft);
+        $body = expiryNotificationBody($eventBatches, (int)$daysLeft);
+        sendNotificationEmail($pdo, $emails, $subject, $body, $settings);
+        $sentEvents[] = [
+            'days_left' => (int)$daysLeft,
+            'count' => count($eventBatches),
+            'subject' => $subject,
+            'text' => $body,
+        ];
+    }
+
+    writeLog($pdo, 'expiry_notifications_sent', [
+        'mode' => 'daily_auto',
+        'emails' => $emails,
+        'events' => $sentEvents,
+    ]);
+}
+
+function groupBatchesByDaysLeft(array $batches): array
+{
+    $groups = [];
+    foreach ($batches as $batch) {
+        $daysLeft = (int)$batch['days_left'];
+        $groups[$daysLeft][] = $batch;
+    }
+
+    ksort($groups, SORT_NUMERIC);
+    return $groups;
+}
+
+function acquireNotificationLock(PDO $pdo): bool
+{
+    try {
+        return (int)$pdo->query("SELECT GET_LOCK('sroki_godnosti_expiry_notifications', 0)")->fetchColumn() === 1;
+    } catch (Throwable) {
+        // Если advisory lock недоступен, ежедневная проверка логов всё равно не даст
+        // запускать рассылку повторно после уже записанного результата.
+        return true;
+    }
+}
+
+function releaseNotificationLock(PDO $pdo): void
+{
+    try {
+        $pdo->query("SELECT RELEASE_LOCK('sroki_godnosti_expiry_notifications')");
+    } catch (Throwable) {
+        // Ошибка освобождения блокировки не должна ломать ответ API.
+    }
 }
 
 function sendTestNotification(PDO $pdo, array $payload): array

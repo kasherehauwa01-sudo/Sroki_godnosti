@@ -3,8 +3,8 @@
  * Ежедневная проверка сроков годности для запуска из cron.
  *
  * Скрипт каждый день в 09:00 по МСК пересчитывает остаток дней, выбирает
- * партии со статусом «В наличии» только по включенным в настройках дням
- * уведомлений и отправляет отдельное письмо по каждому событию срока.
+ * партии со статусом «В наличии» по фиксированным событиям срока
+ * уведомлений и отправляет отдельное письмо по каждому событию.
  */
 declare(strict_types=1);
 
@@ -15,6 +15,7 @@ require_once __DIR__ . '/../app/mailer.php';
 require_once __DIR__ . '/../app/notification_templates.php';
 
 const SENDER_EMAIL = 'vr-vk@yandex.ru';
+const NOTIFICATION_EVENT_DAYS = [180, 90, 60, 30, 15, 1];
 
 try {
     $pdo = getDatabaseConnection();
@@ -120,14 +121,8 @@ function splitEmails(string $emails): array
 
 function getEnabledNotificationDays(array $settings): array
 {
-    $days = [];
-    foreach ([0, 180, 90, 60, 30, 15, 7, 1] as $day) {
-        if ((int)($settings['notify_' . $day . '_days'] ?? 0) === 1) {
-            $days[] = $day;
-        }
-    }
-
-    return $days ?: [15, 30, 60];
+    // Рассылка идет по утвержденным событиям независимо от старых флажков настроек.
+    return NOTIFICATION_EVENT_DAYS;
 }
 
 function groupBatchesByDaysLeft(array $batches): array
