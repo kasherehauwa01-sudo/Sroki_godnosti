@@ -253,11 +253,18 @@ function spreadsheetAttachmentToBatches(string $content, string $filename): arra
 
 function readSpreadsheetRows(string $content, string $filename): array
 {
+    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION) ?: 'xlsx');
+
     if (!class_exists(IOFactory::class)) {
-        throw new RuntimeException('Для чтения XLS/XLSX установите phpoffice/phpspreadsheet через Composer.');
+        if ($extension === 'xlsx') {
+            // Для XLSX используем встроенный запасной парсер, чтобы тест автозагрузки
+            // не падал на сервере без Composer-зависимостей. Старый XLS требует библиотеку.
+            return readXlsxRows($content);
+        }
+
+        throw new RuntimeException('Для чтения XLS установите phpoffice/phpspreadsheet через Composer или пришлите вложение в формате XLSX.');
     }
 
-    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION) ?: 'xlsx');
     $tmp = tempnam(sys_get_temp_dir(), 'auto-spreadsheet-');
     $path = $tmp . '.' . preg_replace('/[^a-z0-9]+/', '', $extension);
     rename($tmp, $path);
@@ -336,13 +343,30 @@ function readXlsxRows(string $content): array
     foreach ($xml->sheetData->row ?? [] as $row) {
         $values = [];
         foreach ($row->c ?? [] as $cell) {
-            $type = (string)$cell['t'];
-            $value = (string)$cell->v;
-            $values[] = $type === 's' ? ($shared[(int)$value] ?? '') : $value;
+            $value = readXlsxCellValue($cell, $shared);
+            $values[] = normalizeSpreadsheetCellEncoding($value);
         }
         $rows[] = $values;
     }
     return $rows;
+}
+
+function readXlsxCellValue(SimpleXMLElement $cell, array $shared): string
+{
+    $type = (string)$cell['t'];
+
+    if ($type === 's') {
+        $index = (int)((string)$cell->v);
+
+        return (string)($shared[$index] ?? '');
+    }
+
+    if ($type === 'inlineStr') {
+        // В некоторых XLSX строки лежат прямо в ячейке, без sharedStrings.xml.
+        return trim(implode('', array_map('strval', iterator_to_array($cell->is->t ?? []))));
+    }
+
+    return (string)$cell->v;
 }
 
 function rowsToBatchPayloads(array $rows): array
