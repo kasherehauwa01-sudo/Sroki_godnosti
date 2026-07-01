@@ -1400,6 +1400,14 @@ function bindEvents() {
     qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
     qs('#cancelEditButton').addEventListener('click', closeEditDialog);
 
+    // Кнопки ручного добавления партий должны быть привязаны явно:
+    // без этих обработчиков диалог не открывается и пользователь не видит ошибки.
+    qs('#openAddBatchesButton').addEventListener('click', openAddBatchesDialog);
+    qs('#addBatchRowButton').addEventListener('click', () => createBatchRow());
+    qs('#addBatchesForm').addEventListener('submit', submitAddBatchesForm);
+    qs('#closeAddBatchesDialogButton').addEventListener('click', closeAddBatchesDialog);
+    qs('#cancelAddBatchesButton').addEventListener('click', closeAddBatchesDialog);
+
     qs('#openXlsImportButton').addEventListener('click', openXlsImportFromAddDialog);
     qs('#closeXlsImportDialogButton').addEventListener('click', closeXlsImportDialog);
     qs('#cancelXlsImportButton').addEventListener('click', closeXlsImportDialog);
