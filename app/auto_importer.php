@@ -21,6 +21,93 @@ const AUTO_IMPORT_TIMEZONE = 'Europe/Moscow';
 
 date_default_timezone_set(AUTO_IMPORT_TIMEZONE);
 
+function runDueAutoImport(PDO $pdo): void
+{
+    ensureBatchesSchema($pdo);
+    ensureSettingsSchema($pdo);
+
+    $settings = getRawSettings($pdo);
+    $time = normalizeNotificationTime((string)($settings['auto_import_time'] ?? '10:00'), '10:00');
+    $now = new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+    $scheduledAt = new DateTimeImmutable($now->format('Y-m-d') . ' ' . $time, new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+
+    if ($now < $scheduledAt || $now > $scheduledAt->modify('+10 hours')) {
+        return;
+    }
+
+    if (!acquireAutoImportLock($pdo)) {
+        return;
+    }
+
+    try {
+        if (!shouldRunAutoImportNow($pdo, $scheduledAt, $now)) {
+            return;
+        }
+
+        writeLog($pdo, 'auto_import_started', [
+            'mode' => 'daily_auto',
+            'time' => $time,
+        ]);
+        runAutoImport($pdo, true);
+    } catch (Throwable $error) {
+        writeLog($pdo, 'auto_import_failed', [
+            'attempt' => 1,
+            'mode' => 'daily_auto',
+            'error' => $error->getMessage(),
+        ]);
+    } finally {
+        releaseAutoImportLock($pdo);
+    }
+}
+
+function shouldRunAutoImportNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTimeImmutable $now): bool
+{
+    $start = $scheduledAt->format('Y-m-d H:i:s');
+    $statement = $pdo->prepare(
+        "SELECT action, created_at
+         FROM logs
+         WHERE action IN ('auto_import_started', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found')
+           AND created_at >= :start
+         ORDER BY id DESC
+         LIMIT 1"
+    );
+    $statement->execute([':start' => $start]);
+    $lastRun = $statement->fetch();
+
+    if (!$lastRun) {
+        return true;
+    }
+
+    if (($lastRun['action'] ?? '') === 'auto_import_completed') {
+        return false;
+    }
+
+    // Если письмо ещё не пришло или была временная ошибка, повторяем не чаще одного раза в час.
+    $lastRunAt = new DateTimeImmutable((string)$lastRun['created_at'], new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+
+    return $lastRunAt <= $now->modify('-1 hour');
+}
+
+function acquireAutoImportLock(PDO $pdo): bool
+{
+    try {
+        return (int)$pdo->query("SELECT GET_LOCK('sroki_godnosti_auto_import', 0)")->fetchColumn() === 1;
+    } catch (Throwable) {
+        // Если блокировки MySQL недоступны, не останавливаем сервис: проверка логов ниже
+        // всё равно защищает от частых повторных запусков.
+        return true;
+    }
+}
+
+function releaseAutoImportLock(PDO $pdo): void
+{
+    try {
+        $pdo->query("SELECT RELEASE_LOCK('sroki_godnosti_auto_import')");
+    } catch (Throwable) {
+        // Освобождение advisory lock не должно ломать ответ API.
+    }
+}
+
 function runAutoImport(PDO $pdo, bool $once = false): array
 {
     ensureBatchesSchema($pdo);
