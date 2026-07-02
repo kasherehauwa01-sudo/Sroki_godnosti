@@ -6,13 +6,13 @@
  */
 declare(strict_types=1);
 
-function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings): bool
+function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings, array $attachments = []): bool
 {
-    sendSmtpEmail($pdo, $emails, $subject, $body, $settings);
+    sendSmtpEmail($pdo, $emails, $subject, $body, $settings, $attachments);
     return true;
 }
 
-function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings): void
+function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings, array $attachments = []): void
 {
     $defaultSender = defined('SENDER_EMAIL') ? (string)constant('SENDER_EMAIL') : 'vr-vk@yandex.ru';
     $host = trim((string)($settings['smtp_host'] ?? ''));
@@ -82,14 +82,50 @@ function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, a
         'To: ' . implode(', ', $emails),
         'Subject: ' . encodeMimeHeader($subject),
         'MIME-Version: 1.0',
-        'Content-Type: text/plain; charset=UTF-8',
-        'Content-Transfer-Encoding: 8bit',
         'Date: ' . date(DATE_RFC2822),
     ];
-    fwrite($socket, implode("\r\n", $headers) . "\r\n\r\n" . str_replace("\n.", "\n..", $body) . "\r\n.\r\n");
+
+    if ($attachments) {
+        $boundary = '=_sroki_' . bin2hex(random_bytes(12));
+        $headers[] = 'Content-Type: multipart/mixed; boundary="' . $boundary . '"';
+        $message = buildMultipartMessage($body, $attachments, $boundary);
+    } else {
+        $headers[] = 'Content-Type: text/plain; charset=UTF-8';
+        $headers[] = 'Content-Transfer-Encoding: 8bit';
+        $message = str_replace("\n.", "\n..", $body);
+    }
+
+    fwrite($socket, implode("\r\n", $headers) . "\r\n\r\n" . $message . "\r\n.\r\n");
     smtpExpect($socket, [250]);
     smtpCommand($socket, 'QUIT', [221]);
     fclose($socket);
+}
+
+function buildMultipartMessage(string $body, array $attachments, string $boundary): string
+{
+    $parts = [
+        '--' . $boundary,
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: 8bit',
+        '',
+        str_replace("\n.", "\n..", $body),
+    ];
+
+    foreach ($attachments as $attachment) {
+        $filename = (string)($attachment['filename'] ?? 'attachment.xls');
+        $contentType = (string)($attachment['content_type'] ?? 'application/octet-stream');
+        $content = (string)($attachment['content'] ?? '');
+        $parts[] = '--' . $boundary;
+        $parts[] = 'Content-Type: ' . $contentType . '; name="' . addcslashes($filename, '\"') . '"';
+        $parts[] = 'Content-Transfer-Encoding: base64';
+        $parts[] = 'Content-Disposition: attachment; filename="' . addcslashes($filename, '\"') . '"';
+        $parts[] = '';
+        $parts[] = chunk_split(base64_encode($content));
+    }
+
+    $parts[] = '--' . $boundary . '--';
+
+    return implode("\r\n", $parts);
 }
 
 function smtpCommand($socket, string $command, array $expectedCodes): string

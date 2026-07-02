@@ -764,7 +764,7 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
     $notificationDays = NOTIFICATION_EVENT_DAYS;
     $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
     $statement = $pdo->prepare(
-        "SELECT article, quantity, expiry_date, expiry_full_date, days_left
+        "SELECT article, code, quantity, expiry_date, expiry_full_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
          ORDER BY days_left ASC, expiry_date ASC, article ASC"
@@ -784,7 +784,7 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
     foreach (groupBatchesByDaysLeft($batches) as $daysLeft => $eventBatches) {
         $subject = expiryNotificationSubject((int)$daysLeft);
         $body = expiryNotificationBody($eventBatches, (int)$daysLeft);
-        sendNotificationEmail($pdo, $emails, $subject, $body, $settings);
+        sendNotificationEmail($pdo, $emails, $subject, $body, $settings, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)]);
         $sentEvents[] = [
             'days_left' => (int)$daysLeft,
             'count' => count($eventBatches),
@@ -798,6 +798,19 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
         'emails' => $emails,
         'events' => $sentEvents,
     ]);
+}
+
+function expiryCodesXlsAttachment(array $batches, int $daysLeft): array
+{
+    $rows = array_map(static function (array $batch): string {
+        return '<tr><td>' . htmlspecialchars((string)($batch['code'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td></tr>';
+    }, $batches);
+
+    return [
+        'filename' => 'codes_' . $daysLeft . '_days.xls',
+        'content_type' => 'application/vnd.ms-excel; charset=UTF-8',
+        'content' => "<html><head><meta charset=\"UTF-8\"></head><body><table>" . implode('', $rows) . "</table></body></html>",
+    ];
 }
 
 function groupBatchesByDaysLeft(array $batches): array
@@ -883,7 +896,7 @@ function runTestAutoImport(PDO $pdo, array $payload): array
 function findNearestExpiringBatch(PDO $pdo): ?array
 {
     $statement = $pdo->query(
-        "SELECT article, expiry_date, expiry_full_date, days_left
+        "SELECT article, code, expiry_date, expiry_full_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left >= 0
          ORDER BY days_left ASC, expiry_date ASC, article ASC

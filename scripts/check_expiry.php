@@ -34,7 +34,7 @@ try {
     $notificationDays = getEnabledNotificationDays($settings);
     $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
     $statement = $pdo->prepare(
-        "SELECT article, quantity, expiry_date, expiry_full_date, days_left
+        "SELECT article, code, quantity, expiry_date, expiry_full_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
          ORDER BY days_left ASC, expiry_date ASC, article ASC"
@@ -54,7 +54,7 @@ try {
         $body = expiryNotificationBody($eventBatches, $daysLeft);
 
         try {
-            sendNotificationEmail($pdo, $emails, $subject, $body, $settings);
+            sendNotificationEmail($pdo, $emails, $subject, $body, $settings, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)]);
             writeLog($pdo, 'expiry_notifications_sent', [
                 'emails' => $emails,
                 'criteria' => [$daysLeft],
@@ -83,6 +83,19 @@ try {
     exit(1);
 }
 
+
+function expiryCodesXlsAttachment(array $batches, int $daysLeft): array
+{
+    $rows = array_map(static function (array $batch): string {
+        return '<tr><td>' . htmlspecialchars((string)($batch['code'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td></tr>';
+    }, $batches);
+
+    return [
+        'filename' => 'codes_' . $daysLeft . '_days.xls',
+        'content_type' => 'application/vnd.ms-excel; charset=UTF-8',
+        'content' => "<html><head><meta charset=\"UTF-8\"></head><body><table>" . implode('', $rows) . "</table></body></html>",
+    ];
+}
 
 function getNotificationSettings(PDO $pdo): array
 {
