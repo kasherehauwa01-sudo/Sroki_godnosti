@@ -196,10 +196,15 @@ function normalizeFullExpiryText(value) {
     return `${dayValue.padStart(2, '0')}.${monthValue.padStart(2, '0')}.${normalizeExpiryYear(yearValue)}`;
 }
 
+function formatCreatedSource(source) {
+    if (source === 'xls') return 'Импорт xls';
+    return source || 'Ручной';
+}
+
 function formatCreatedAtWithSource(batch) {
     const dateTime = batch.createdAtFull || batch.created_at || batch.createdAt || '';
     const date = dateTime ? formatDateTimeRu(dateTime) : formatDateRu(batch.createdAt);
-    return `${date} (${batch.createdSource || 'Ручной'})`;
+    return `${date} (${formatCreatedSource(batch.createdSource)})`;
 }
 
 function formatDateTimeRu(value) {
@@ -442,7 +447,7 @@ function normalizeBatch(row) {
         id: String(getRowValue(row, ['id', 'ID']) || crypto.randomUUID()),
         createdAt: toDateInputValue(getRowValue(row, ['createdAt', 'created_at', 'Дата внесения'])) || new Date().toISOString().slice(0, 10),
         createdAtFull: getRowValue(row, ['createdAtFull']) || getRowValue(row, ['created_at']) || '',
-        createdSource: getRowValue(row, ['createdSource', 'created_source', 'Способ']) || 'Ручной',
+        createdSource: formatCreatedSource(getRowValue(row, ['createdSource', 'created_source', 'Способ']) || 'Ручной'),
         article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара', 'Артикул.'])).trim(),
         code: String(codeRaw || '').trim(),
         name: String(nameRaw || '').trim(),
@@ -1387,7 +1392,7 @@ function readXlsx(file) {
             const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: false });
             const decodedRows = rawRows.map(normalizeSpreadsheetRowEncoding);
             const detectedHeaders = decodedRows[0] ? Object.keys(decodedRows[0]).join(', ') : 'не найдены';
-            const normalizedRows = decodedRows.map((row) => ({ ...normalizeBatch(row), createdSource: 'xls' }));
+            const normalizedRows = decodedRows.map((row) => ({ ...normalizeBatch(row), createdSource: 'Импорт xls' }));
             state.importRows = normalizedRows.filter((row) => row.article && row.hasQuantity && row.expiryDate);
             const skipped = normalizedRows.length - state.importRows.length;
             const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.code || 'без кода'} — ${row.name || 'без наименования'} — ${row.quantity} — ${row.expiryInvalid ? `${row.expiryRaw} (некорректная дата)` : formatExpiryMonthRu(row.expiryDate, row.expiryFullDate)}`).join('\n');

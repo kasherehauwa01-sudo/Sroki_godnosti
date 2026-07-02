@@ -536,8 +536,7 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
     $article = trim((string)($payload['article'] ?? $payload['Артикул'] ?? ''));
     $code = trim((string)($payload['code'] ?? $payload['Код'] ?? ''));
     $name = trim((string)($payload['name'] ?? $payload['Наименование'] ?? ''));
-    $createdSource = trim((string)($payload['created_source'] ?? $payload['createdSource'] ?? $payload['Способ'] ?? 'Ручной'));
-    $createdSource = in_array($createdSource, ['Ручной', 'xls', 'Автозагрузка'], true) ? $createdSource : 'Ручной';
+    $createdSource = normalizeCreatedSource((string)($payload['created_source'] ?? $payload['createdSource'] ?? $payload['Способ'] ?? 'Ручной'));
     $quantityValue = $payload['quantity'] ?? $payload['Количество в партии'] ?? null;
     $quantity = (int)($quantityValue ?? 0);
     $expiryInput = (string)($payload['expiry_date'] ?? $payload['expiryDate'] ?? $payload['Срок годности до'] ?? '');
@@ -568,6 +567,16 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
         'expiry_raw' => $expiryInfo['invalid'] ? $expiryInfo['raw'] : null,
         'status' => $status,
     ];
+}
+
+function normalizeCreatedSource(string $source): string
+{
+    $source = trim($source);
+    if ($source === 'xls') {
+        return 'Импорт xls';
+    }
+
+    return in_array($source, ['Ручной', 'Импорт xls', 'Автозагрузка'], true) ? $source : 'Ручной';
 }
 
 function normalizeExpiryDate(string $value, string $rawValue = '', bool $forceInvalid = false, ?bool $forceFullDate = null): array
@@ -647,8 +656,8 @@ function normalizeBatchRow(array $row): array
         'createdAt' => date('Y-m-d', strtotime((string)$row['created_at'])),
         'createdAtFull' => formatMoscowDateTime((string)$row['created_at']),
         'created_at' => $row['created_at'],
-        'createdSource' => (string)($row['created_source'] ?? 'Ручной'),
-        'created_source' => (string)($row['created_source'] ?? 'Ручной'),
+        'createdSource' => normalizeCreatedSource((string)($row['created_source'] ?? 'Ручной')),
+        'created_source' => normalizeCreatedSource((string)($row['created_source'] ?? 'Ручной')),
         'article' => $row['article'],
         'code' => (string)($row['code'] ?? ''),
         'name' => $row['name'],
