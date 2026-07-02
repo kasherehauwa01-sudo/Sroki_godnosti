@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260702-5"></script>
+    <script defer src="assets/app.js?v=20260702-6"></script>
 </head>
 <body>
     <header class="topbar">
@@ -34,14 +34,12 @@ declare(strict_types=1);
         <section class="panel active" id="tab-registry">
             <div class="card registry-filter-card">
                 <div class="registry-search-row">
-                    <label>Поиск<input id="filterSearch" placeholder="Введите значение"></label>
-                    <label>Искать в
-                        <select id="filterSearchColumn">
-                            <option value="article">Артикул</option>
-                            <option value="code" selected>Код</option>
-                            <option value="name">Наименование</option>
-                        </select>
-                    </label>
+                    <input id="filterSearch" aria-label="Поиск" placeholder="Поиск...">
+                    <select id="filterSearchColumn" aria-label="Искать в">
+                        <option value="article">Артикул</option>
+                        <option value="code" selected>Код</option>
+                        <option value="name">Наименование</option>
+                    </select>
                 </div>
                 <div class="filters">
                 <label>Статус
