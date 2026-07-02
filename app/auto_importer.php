@@ -21,6 +21,93 @@ const AUTO_IMPORT_TIMEZONE = 'Europe/Moscow';
 
 date_default_timezone_set(AUTO_IMPORT_TIMEZONE);
 
+function runDueAutoImport(PDO $pdo): void
+{
+    ensureBatchesSchema($pdo);
+    ensureSettingsSchema($pdo);
+
+    $settings = getRawSettings($pdo);
+    $time = normalizeNotificationTime((string)($settings['auto_import_time'] ?? '10:00'), '10:00');
+    $now = new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+    $scheduledAt = new DateTimeImmutable($now->format('Y-m-d') . ' ' . $time, new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+
+    if ($now < $scheduledAt || $now > $scheduledAt->modify('+10 hours')) {
+        return;
+    }
+
+    if (!acquireAutoImportLock($pdo)) {
+        return;
+    }
+
+    try {
+        if (!shouldRunAutoImportNow($pdo, $scheduledAt, $now)) {
+            return;
+        }
+
+        writeLog($pdo, 'auto_import_started', [
+            'mode' => 'daily_auto',
+            'time' => $time,
+        ]);
+        runAutoImport($pdo, true);
+    } catch (Throwable $error) {
+        writeLog($pdo, 'auto_import_failed', [
+            'attempt' => 1,
+            'mode' => 'daily_auto',
+            'error' => $error->getMessage(),
+        ]);
+    } finally {
+        releaseAutoImportLock($pdo);
+    }
+}
+
+function shouldRunAutoImportNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTimeImmutable $now): bool
+{
+    $start = $scheduledAt->format('Y-m-d H:i:s');
+    $statement = $pdo->prepare(
+        "SELECT action, created_at
+         FROM logs
+         WHERE action IN ('auto_import_started', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found')
+           AND created_at >= :start
+         ORDER BY id DESC
+         LIMIT 1"
+    );
+    $statement->execute([':start' => $start]);
+    $lastRun = $statement->fetch();
+
+    if (!$lastRun) {
+        return true;
+    }
+
+    if (($lastRun['action'] ?? '') === 'auto_import_completed') {
+        return false;
+    }
+
+    // Если письмо ещё не пришло или была временная ошибка, повторяем не чаще одного раза в час.
+    $lastRunAt = new DateTimeImmutable((string)$lastRun['created_at'], new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+
+    return $lastRunAt <= $now->modify('-1 hour');
+}
+
+function acquireAutoImportLock(PDO $pdo): bool
+{
+    try {
+        return (int)$pdo->query("SELECT GET_LOCK('sroki_godnosti_auto_import', 0)")->fetchColumn() === 1;
+    } catch (Throwable) {
+        // Если блокировки MySQL недоступны, не останавливаем сервис: проверка логов ниже
+        // всё равно защищает от частых повторных запусков.
+        return true;
+    }
+}
+
+function releaseAutoImportLock(PDO $pdo): void
+{
+    try {
+        $pdo->query("SELECT RELEASE_LOCK('sroki_godnosti_auto_import')");
+    } catch (Throwable) {
+        // Освобождение advisory lock не должно ломать ответ API.
+    }
+}
+
 function runAutoImport(PDO $pdo, bool $once = false): array
 {
     ensureBatchesSchema($pdo);
@@ -253,11 +340,18 @@ function spreadsheetAttachmentToBatches(string $content, string $filename): arra
 
 function readSpreadsheetRows(string $content, string $filename): array
 {
+    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION) ?: 'xlsx');
+
     if (!class_exists(IOFactory::class)) {
-        throw new RuntimeException('Для чтения XLS/XLSX установите phpoffice/phpspreadsheet через Composer.');
+        if ($extension === 'xlsx') {
+            // Для XLSX используем встроенный запасной парсер, чтобы тест автозагрузки
+            // не падал на сервере без Composer-зависимостей. Старый XLS требует библиотеку.
+            return readXlsxRows($content);
+        }
+
+        throw new RuntimeException('Для чтения XLS установите phpoffice/phpspreadsheet через Composer или пришлите вложение в формате XLSX.');
     }
 
-    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION) ?: 'xlsx');
     $tmp = tempnam(sys_get_temp_dir(), 'auto-spreadsheet-');
     $path = $tmp . '.' . preg_replace('/[^a-z0-9]+/', '', $extension);
     rename($tmp, $path);
@@ -336,13 +430,30 @@ function readXlsxRows(string $content): array
     foreach ($xml->sheetData->row ?? [] as $row) {
         $values = [];
         foreach ($row->c ?? [] as $cell) {
-            $type = (string)$cell['t'];
-            $value = (string)$cell->v;
-            $values[] = $type === 's' ? ($shared[(int)$value] ?? '') : $value;
+            $value = readXlsxCellValue($cell, $shared);
+            $values[] = normalizeSpreadsheetCellEncoding($value);
         }
         $rows[] = $values;
     }
     return $rows;
+}
+
+function readXlsxCellValue(SimpleXMLElement $cell, array $shared): string
+{
+    $type = (string)$cell['t'];
+
+    if ($type === 's') {
+        $index = (int)((string)$cell->v);
+
+        return (string)($shared[$index] ?? '');
+    }
+
+    if ($type === 'inlineStr') {
+        // В некоторых XLSX строки лежат прямо в ячейке, без sharedStrings.xml.
+        return trim(implode('', array_map('strval', iterator_to_array($cell->is->t ?? []))));
+    }
+
+    return (string)$cell->v;
 }
 
 function rowsToBatchPayloads(array $rows): array
@@ -356,18 +467,23 @@ function rowsToBatchPayloads(array $rows): array
         throw new RuntimeException('Во вложении не найдены обязательные колонки: Артикул, Количество, Срок годности.');
     }
 
-    ['row' => $headerRow, 'article' => $articleIndex, 'quantity' => $quantityIndex, 'expiry' => $expiryIndex] = $headerInfo;
+    ['row' => $headerRow, 'article' => $articleIndex, 'quantity' => $quantityIndex, 'expiry' => $expiryIndex, 'code' => $codeIndex, 'name' => $nameIndex] = $headerInfo;
 
     $payloads = [];
     foreach (array_slice($rows, $headerRow + 1) as $row) {
         $article = trim((string)($row[$articleIndex] ?? ''));
         $quantity = trim((string)($row[$quantityIndex] ?? ''));
         $expiry = trim((string)($row[$expiryIndex] ?? ''));
+        $code = $codeIndex !== null ? trim((string)($row[$codeIndex] ?? '')) : '';
+        $name = $nameIndex !== null ? trim((string)($row[$nameIndex] ?? '')) : '';
         if ($article === '' || $quantity === '' || $expiry === '') {
             continue;
         }
         $payloads[] = [
             'article' => $article,
+            'code' => $code,
+            'name' => $name,
+            'createdSource' => 'Автозагрузка',
             'quantity' => preg_replace('/\D+/', '', $quantity) ?: 0,
             'expiry_date' => $expiry,
             'expiry_raw' => $expiry,
@@ -383,6 +499,8 @@ function findAutoImportHeaderRow(array $rows): ?array
         $headers = array_map('normalizeAutoImportHeader', $row);
         $articleIndex = findAutoImportColumn($headers, ['артикул', 'кодтовара', 'номенклатураартикул']);
         $quantityIndex = findAutoImportColumn($headers, ['количество', 'количествовпартии', 'остаток', 'колво']);
+        $codeIndex = findAutoImportColumn($headers, ['код', 'кодтовара']);
+        $nameIndex = findAutoImportColumn($headers, ['наименование', 'название', 'товар']);
         $expiryIndex = findAutoImportColumn($headers, ['срокгодностидо', 'срокгодности', 'годендо', 'срок']);
 
         if ($articleIndex !== null && $quantityIndex !== null && $expiryIndex !== null) {
@@ -391,6 +509,8 @@ function findAutoImportHeaderRow(array $rows): ?array
                 'article' => $articleIndex,
                 'quantity' => $quantityIndex,
                 'expiry' => $expiryIndex,
+                'code' => $codeIndex,
+                'name' => $nameIndex,
             ];
         }
     }
