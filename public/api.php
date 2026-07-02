@@ -534,7 +534,7 @@ function deleteBatchesByArticles(PDO $pdo, array $payload): array
 
 function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): array
 {
-    $createdAt = (string)($payload['created_at'] ?? $payload['createdAt'] ?? date('Y-m-d H:i:s'));
+    $createdAt = normalizeCreatedAtValue((string)($payload['created_at'] ?? $payload['createdAt'] ?? date('Y-m-d H:i:s')));
     $article = trim((string)($payload['article'] ?? $payload['Артикул'] ?? ''));
     $code = trim((string)($payload['code'] ?? $payload['Код'] ?? ''));
     $name = trim((string)($payload['name'] ?? $payload['Наименование'] ?? ''));
@@ -569,6 +569,16 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
         'expiry_raw' => $expiryInfo['invalid'] ? $expiryInfo['raw'] : null,
         'status' => $status,
     ];
+}
+
+function normalizeCreatedAtValue(string $createdAt): string
+{
+    $createdAt = trim($createdAt);
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $createdAt) === 1) {
+        return $createdAt . ' ' . date('H:i:s');
+    }
+
+    return $createdAt !== '' ? $createdAt : date('Y-m-d H:i:s');
 }
 
 function normalizeCreatedSource(string $source): string
@@ -656,7 +666,7 @@ function normalizeBatchRow(array $row): array
     return [
         'id' => (string)$row['id'],
         'createdAt' => date('Y-m-d', strtotime((string)$row['created_at'])),
-        'createdAtFull' => formatMoscowDateTime((string)$row['created_at']),
+        'createdAtFull' => formatMoscowDateTime(resolveCreatedAtForDisplay($row)),
         'created_at' => $row['created_at'],
         'createdSource' => normalizeCreatedSource((string)($row['created_source'] ?? 'Ручной')),
         'created_source' => normalizeCreatedSource((string)($row['created_source'] ?? 'Ручной')),
@@ -1215,6 +1225,16 @@ function notificationHistoryText(string $action, array $payload): string
     }
 
     return 'Уведомление отправлено.';
+}
+
+function resolveCreatedAtForDisplay(array $row): string
+{
+    $createdAt = (string)($row['created_at'] ?? '');
+    if (preg_match('/ 00:00:00$/', $createdAt) === 1 && !empty($row['updated_at'])) {
+        return (string)$row['updated_at'];
+    }
+
+    return $createdAt;
 }
 
 function getSystemSettingsInfo(?PDO $pdo): array
