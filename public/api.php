@@ -188,9 +188,9 @@ function buildBatchFilters(array $filters): array
     }
 
     if (!empty($filters['search'])) {
-        $searchColumn = (string)($filters['search_column'] ?? 'article');
+        $searchColumn = (string)($filters['search_column'] ?? 'code');
         $allowedSearchColumns = ['article' => 'article', 'code' => 'code', 'name' => 'name'];
-        $column = $allowedSearchColumns[$searchColumn] ?? 'article';
+        $column = $allowedSearchColumns[$searchColumn] ?? 'code';
         $conditions[] = $column . ' LIKE :search_value';
         $params[':search_value'] = '%' . trim((string)$filters['search']) . '%';
     }

@@ -1440,7 +1440,7 @@ function resetRegistryFilters() {
         field.value = '';
         delete field.dataset.customValue;
     });
-    qs('#filterSearchColumn').value = 'article';
+    qs('#filterSearchColumn').value = 'code';
     qs('#filterStatus').value = '';
     renderRegistry();
 }
