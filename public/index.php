@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260702-3"></script>
+    <script defer src="assets/app.js?v=20260702-4"></script>
 </head>
 <body>
     <header class="topbar">
@@ -33,7 +33,14 @@ declare(strict_types=1);
 
         <section class="panel active" id="tab-registry">
             <div class="card filters">
-                <label>Артикул<input id="filterArticle" placeholder="Например, 12345"></label>
+                <label>Поиск<input id="filterSearch" placeholder="Введите значение"></label>
+                <label>Искать в
+                    <select id="filterSearchColumn">
+                        <option value="article">Артикул</option>
+                        <option value="code">Код</option>
+                        <option value="name">Наименование</option>
+                    </select>
+                </label>
                 <label>Статус
                     <select id="filterStatus">
                         <option value="">Все</option>

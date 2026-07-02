@@ -472,7 +472,8 @@ function getFilterSelectValue(selector) {
 
 function getFilterParams() {
     return {
-        article: qs('#filterArticle').value.trim(),
+        search: qs('#filterSearch').value.trim(),
+        search_column: qs('#filterSearchColumn').value,
         status: qs('#filterStatus').value,
         days_to: getFilterSelectValue('#filterDaysTo'),
         event_days: getFilterSelectValue('#filterEventDays'),
@@ -485,6 +486,15 @@ function getBatchDaysLeft(batch) {
     const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
     const numericDays = Number(days);
     return Number.isFinite(numericDays) ? numericDays : null;
+}
+
+function matchesRegistrySearch(batch, search, column) {
+    if (!search) return true;
+
+    const query = search.toLowerCase();
+    const value = String(batch[column] || '').toLowerCase();
+
+    return value.includes(query);
 }
 
 function matchesEventDaysFilter(batch, eventDays) {
@@ -532,7 +542,7 @@ function renderRegistry() {
             || (numericDays !== null && (filters.days_to === 'expired' ? numericDays < 0 : numericDays >= 0 && numericDays <= Number(filters.days_to)));
         const matchesEvent = matchesEventDaysFilter(batch, filters.event_days);
 
-        return (!filters.article || batch.article.toLowerCase().includes(filters.article.toLowerCase()))
+        return matchesRegistrySearch(batch, filters.search, filters.search_column)
             && (!filters.status || batch.status === filters.status)
             && (!batch.expiryInvalid || !filters.days_to)
             && matchesDaysTo
@@ -1425,11 +1435,12 @@ function readXlsx(file) {
 }
 
 function resetRegistryFilters() {
-    ['#filterArticle', '#filterDaysTo', '#filterEventDays'].forEach((selector) => {
+    ['#filterSearch', '#filterDaysTo', '#filterEventDays'].forEach((selector) => {
         const field = qs(selector);
         field.value = '';
         delete field.dataset.customValue;
     });
+    qs('#filterSearchColumn').value = 'article';
     qs('#filterStatus').value = '';
     renderRegistry();
 }
@@ -1550,7 +1561,8 @@ function bindEvents() {
 
     ['#historyDatePreset', '#historyDateFrom', '#historyDateTo', '#historyActionFilter'].forEach((selector) => qs(selector).addEventListener('input', renderHistory));
 
-    qs('#filterArticle').addEventListener('input', renderRegistry);
+    qs('#filterSearch').addEventListener('input', renderRegistry);
+    qs('#filterSearchColumn').addEventListener('change', renderRegistry);
     qs('#filterStatus').addEventListener('change', renderRegistry);
     qs('#filterDaysTo').addEventListener('change', (event) => {
         handleCustomFilterSelect(event.target, 'Остаток дней до');

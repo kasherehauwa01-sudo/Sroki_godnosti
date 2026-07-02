@@ -188,9 +188,11 @@ function buildBatchFilters(array $filters): array
     }
 
     if (!empty($filters['search'])) {
-        $conditions[] = 'article LIKE :search_article';
-        $searchValue = '%' . trim((string)$filters['search']) . '%';
-        $params[':search_article'] = $searchValue;
+        $searchColumn = (string)($filters['search_column'] ?? 'article');
+        $allowedSearchColumns = ['article' => 'article', 'code' => 'code', 'name' => 'name'];
+        $column = $allowedSearchColumns[$searchColumn] ?? 'article';
+        $conditions[] = $column . ' LIKE :search_value';
+        $params[':search_value'] = '%' . trim((string)$filters['search']) . '%';
     }
 
     if (!empty($filters['status'])) {
