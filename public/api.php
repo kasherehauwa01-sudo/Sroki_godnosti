@@ -7,7 +7,7 @@
 declare(strict_types=1);
 
 const APP_TIMEZONE = 'Europe/Moscow';
-const DATABASE_TIMEZONE = 'UTC';
+const DATABASE_TIMEZONE = APP_TIMEZONE;
 
 date_default_timezone_set(APP_TIMEZONE);
 
@@ -24,6 +24,7 @@ const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта пар
 const SENDER_EMAIL = 'vr-vk@yandex.ru';
 const SETTINGS_PASSWORD_HASH = 'ff10705eafbaa3ff925fb0429d4b3f10379a4dd9dc1725654bbe0a5c9ce1a10f';
 const WRITE_OFF_PASSWORD_HASH = '816e2845d395e7703abac2dcbf9d54e39236fd39133362bf7ad3fce70dd7d78e';
+const NOTIFICATION_EVENT_DAYS = [180, 90, 60, 30, 15, 1];
 
 if (basename((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === 'api.php') {
     handleApiRequest();
@@ -39,7 +40,14 @@ function handleApiRequest(): void
         $payload = readPayload();
         $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
 
+        if ($action !== 'test_auto_import') {
+            runDueAutoImport($pdo);
+        }
+
         refreshDaysLeft($pdo);
+        if ($action !== 'test_notification') {
+            runDueExpiryNotifications($pdo);
+        }
 
         if ($method === 'GET') {
             $result = match ($action) {
@@ -52,10 +60,11 @@ function handleApiRequest(): void
         } else {
             $result = match ($action) {
                 'create' => createBatch($pdo, $payload),
-                'bulk_create' => bulkCreateBatches($pdo, $payload['batches'] ?? []),
+                'bulk_create' => bulkCreateBatches($pdo, $payload['batches'] ?? [], empty($payload['suppress_history'])),
                 'update' => updateBatch($pdo, $payload),
                 'delete' => deleteBatch($pdo, $payload),
                 'bulk_delete' => deleteBatches($pdo, $payload),
+                'delete_by_articles' => deleteBatchesByArticles($pdo, $payload),
                 'settings' => saveProtectedSettings($pdo, $payload),
                 'test_notification' => sendTestNotification($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
@@ -120,6 +129,8 @@ function ensureSettingsSchema(PDO $pdo): void
 function ensureBatchesSchema(PDO $pdo): void
 {
     $columns = [
+        'code' => "ALTER TABLE batches ADD COLUMN code VARCHAR(128) NOT NULL DEFAULT '' AFTER article",
+        'created_source' => "ALTER TABLE batches ADD COLUMN created_source VARCHAR(32) NOT NULL DEFAULT 'Ручной' AFTER created_at",
         'expiry_full_date' => "ALTER TABLE batches ADD COLUMN expiry_full_date TINYINT(1) NOT NULL DEFAULT 0 AFTER expiry_date",
         'expiry_invalid' => "ALTER TABLE batches ADD COLUMN expiry_invalid TINYINT(1) NOT NULL DEFAULT 0 AFTER expiry_date",
         'expiry_raw' => "ALTER TABLE batches ADD COLUMN expiry_raw VARCHAR(32) NULL AFTER expiry_invalid",
@@ -139,7 +150,7 @@ function ensureBatchesSchema(PDO $pdo): void
 function listBatches(PDO $pdo, array $filters): array
 {
     [$where, $params] = buildBatchFilters($filters);
-    $sql = 'SELECT id, created_at, article, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status, updated_at FROM batches ' . $where . ' ORDER BY expiry_date ASC, id DESC';
+    $sql = 'SELECT id, created_at, created_source, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status, updated_at FROM batches ' . $where . ' ORDER BY expiry_date ASC, id DESC';
     $statement = $pdo->prepare($sql);
     $statement->execute($params);
 
@@ -233,7 +244,7 @@ function createBatch(PDO $pdo, array $payload, bool $writeHistory = true): array
     return ['ok' => true, 'id' => $id, 'duplicate' => false, 'batch' => $batchInfo];
 }
 
-function bulkCreateBatches(PDO $pdo, array $batches): array
+function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true): array
 {
     $pdo->beginTransaction();
     try {
@@ -257,11 +268,13 @@ function bulkCreateBatches(PDO $pdo, array $batches): array
             $createdBatches[] = $result['batch'];
         }
         $pdo->commit();
-        writeLog($pdo, 'bulk_create', [
-            'batches' => $createdBatches,
-            'duplicates' => $duplicates,
-            'skipped_duplicates' => $skippedDuplicates,
-        ]);
+        if ($writeHistory) {
+            writeLog($pdo, 'bulk_create', [
+                'batches' => $createdBatches,
+                'duplicates' => $duplicates,
+                'skipped_duplicates' => $skippedDuplicates,
+            ]);
+        }
         return [
             'ok' => true,
             'added' => $added,
@@ -294,7 +307,9 @@ function updateBatch(PDO $pdo, array $payload): array
     $statement = $pdo->prepare(
         'UPDATE batches
          SET created_at = :created_at,
+             created_source = :created_source,
              article = :article,
+             code = :code,
              name = :name,
              quantity = :quantity,
              expiry_date = :expiry_date,
@@ -319,7 +334,9 @@ function buildCreateBatchParams(array $batch): array
 {
     return [
         'created_at' => $batch['created_at'],
+        'created_source' => $batch['created_source'],
         'article' => $batch['article'],
+        'code' => $batch['code'],
         'name' => $batch['name'],
         'quantity' => $batch['quantity'],
         'expiry_date' => $batch['expiry_date'],
@@ -335,7 +352,9 @@ function buildUpdateBatchParams(array $batch, int $id): array
 {
     return [
         'created_at' => $batch['created_at'],
+        'created_source' => $batch['created_source'],
         'article' => $batch['article'],
+        'code' => $batch['code'],
         'name' => $batch['name'],
         'quantity' => $batch['quantity'],
         'expiry_date' => $batch['expiry_date'],
@@ -379,8 +398,8 @@ function duplicateBatchInfo(array $batch): array
 function insertBatch(PDO $pdo, array $batch): int
 {
     $statement = $pdo->prepare(
-        'INSERT INTO batches (created_at, article, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status)
-         VALUES (:created_at, :article, :name, :quantity, :expiry_date, :expiry_full_date, :expiry_invalid, :expiry_raw, :days_left, :status)'
+        'INSERT INTO batches (created_at, created_source, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status)
+         VALUES (:created_at, :created_source, :article, :code, :name, :quantity, :expiry_date, :expiry_full_date, :expiry_invalid, :expiry_raw, :days_left, :status)'
     );
     $statement->execute(buildCreateBatchParams($batch));
 
@@ -389,7 +408,7 @@ function insertBatch(PDO $pdo, array $batch): int
 
 function findBatchForHistory(PDO $pdo, int $id): array
 {
-    $statement = $pdo->prepare('SELECT id, article, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE id = :id');
+    $statement = $pdo->prepare('SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE id = :id');
     $statement->execute([':id' => $id]);
     $row = $statement->fetch();
 
@@ -402,6 +421,8 @@ function historyBatchInfo(array $batch, ?int $id = null): array
     return [
         'id' => $id ?? (isset($batch['id']) ? (int)$batch['id'] : null),
         'article' => (string)($batch['article'] ?? ''),
+        'code' => (string)($batch['code'] ?? ''),
+        'name' => (string)($batch['name'] ?? ''),
         'quantity' => isset($batch['quantity']) ? (int)$batch['quantity'] : null,
         'expiry_date' => (string)($batch['expiry_date'] ?? ''),
         'expiry_full_date' => (bool)($batch['expiry_full_date'] ?? false),
@@ -469,11 +490,55 @@ function deleteBatches(PDO $pdo, array $payload): array
     return ['ok' => true, 'deleted' => $deleted];
 }
 
+function deleteBatchesByArticles(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    $articles = array_values(array_unique(array_filter(array_map(
+        static fn (string $article): string => trim($article),
+        preg_split('/\R+/', (string)($payload['articles'] ?? '')) ?: []
+    ), static fn (string $article): bool => $article !== '')));
+
+    if (!$articles) {
+        throw new InvalidArgumentException('Введите хотя бы один артикул для удаления.');
+    }
+
+    $placeholders = implode(',', array_fill(0, count($articles), '?'));
+    $select = $pdo->prepare("SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE article IN ($placeholders) ORDER BY article ASC, id ASC");
+    $select->execute($articles);
+    $batches = $select->fetchAll();
+
+    if (!$batches) {
+        writeLog($pdo, 'delete_by_articles_no_matches', ['articles' => $articles]);
+        return ['ok' => true, 'deleted' => 0, 'articles' => $articles];
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $delete = $pdo->prepare("DELETE FROM batches WHERE article IN ($placeholders)");
+        $delete->execute($articles);
+        $deleted = $delete->rowCount();
+        writeLog($pdo, 'delete_by_articles', [
+            'articles' => $articles,
+            'deleted' => $deleted,
+            'batches' => $batches,
+        ]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        $pdo->rollBack();
+        throw $error;
+    }
+
+    return ['ok' => true, 'deleted' => $deleted, 'articles' => $articles];
+}
+
 function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): array
 {
     $createdAt = (string)($payload['created_at'] ?? $payload['createdAt'] ?? date('Y-m-d H:i:s'));
     $article = trim((string)($payload['article'] ?? $payload['Артикул'] ?? ''));
-    $name = trim((string)($payload['name'] ?? ''));
+    $code = trim((string)($payload['code'] ?? $payload['Код'] ?? ''));
+    $name = trim((string)($payload['name'] ?? $payload['Наименование'] ?? ''));
+    $createdSource = normalizeCreatedSource((string)($payload['created_source'] ?? $payload['createdSource'] ?? $payload['Способ'] ?? 'Ручной'));
     $quantityValue = $payload['quantity'] ?? $payload['Количество в партии'] ?? null;
     $quantity = (int)($quantityValue ?? 0);
     $expiryInput = (string)($payload['expiry_date'] ?? $payload['expiryDate'] ?? $payload['Срок годности до'] ?? '');
@@ -493,7 +558,9 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
 
     return [
         'created_at' => date('Y-m-d H:i:s', strtotime($createdAt) ?: time()),
+        'created_source' => $createdSource,
         'article' => $article,
+        'code' => $code,
         'name' => $name,
         'quantity' => $quantity,
         'expiry_date' => $expiryDate,
@@ -502,6 +569,16 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
         'expiry_raw' => $expiryInfo['invalid'] ? $expiryInfo['raw'] : null,
         'status' => $status,
     ];
+}
+
+function normalizeCreatedSource(string $source): string
+{
+    $source = trim($source);
+    if ($source === 'xls') {
+        return 'Импорт xls';
+    }
+
+    return in_array($source, ['Ручной', 'Импорт xls', 'Автозагрузка'], true) ? $source : 'Ручной';
 }
 
 function normalizeExpiryDate(string $value, string $rawValue = '', bool $forceInvalid = false, ?bool $forceFullDate = null): array
@@ -579,8 +656,12 @@ function normalizeBatchRow(array $row): array
     return [
         'id' => (string)$row['id'],
         'createdAt' => date('Y-m-d', strtotime((string)$row['created_at'])),
+        'createdAtFull' => formatMoscowDateTime((string)$row['created_at']),
         'created_at' => $row['created_at'],
+        'createdSource' => normalizeCreatedSource((string)($row['created_source'] ?? 'Ручной')),
+        'created_source' => normalizeCreatedSource((string)($row['created_source'] ?? 'Ручной')),
         'article' => $row['article'],
+        'code' => (string)($row['code'] ?? ''),
         'name' => $row['name'],
         'quantity' => (int)$row['quantity'],
         'expiryDate' => $row['expiry_date'],
@@ -596,6 +677,147 @@ function normalizeBatchRow(array $row): array
         'status' => $row['status'],
         'updated_at' => $row['updated_at'],
     ];
+}
+
+function runDueExpiryNotifications(PDO $pdo): void
+{
+    $settings = getRawSettings($pdo);
+    $time = normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00'), '09:00');
+    $now = new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE));
+    $scheduledAt = new DateTimeImmutable($now->format('Y-m-d') . ' ' . $time, new DateTimeZone(APP_TIMEZONE));
+
+    if ($now < $scheduledAt) {
+        return;
+    }
+
+    if (!acquireNotificationLock($pdo)) {
+        return;
+    }
+
+    try {
+        if (!shouldRunExpiryNotificationsNow($pdo, $scheduledAt, $now)) {
+            return;
+        }
+
+        sendDueExpiryNotifications($pdo, $settings);
+    } catch (Throwable $error) {
+        writeLog($pdo, 'expiry_notifications_failed', [
+            'mode' => 'daily_auto',
+            'error' => $error->getMessage(),
+        ]);
+    } finally {
+        releaseNotificationLock($pdo);
+    }
+}
+
+function shouldRunExpiryNotificationsNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTimeImmutable $now): bool
+{
+    $statement = $pdo->prepare(
+        "SELECT action, created_at
+         FROM logs
+         WHERE action IN ('expiry_notifications_sent', 'expiry_notifications_failed', 'expiry_check_no_matches', 'expiry_check_skipped')
+           AND created_at >= :start
+         ORDER BY id DESC
+         LIMIT 1"
+    );
+    $statement->execute([':start' => $scheduledAt->format('Y-m-d H:i:s')]);
+    $lastRun = $statement->fetch();
+
+    if (!$lastRun) {
+        return true;
+    }
+
+    if (($lastRun['action'] ?? '') === 'expiry_notifications_sent') {
+        return false;
+    }
+
+    // Если в момент проверки не было событий/получателей или произошла ошибка,
+    // повторяем проверку не чаще одного раза в час, чтобы не пропустить партии после автозагрузки.
+    $lastRunAt = new DateTimeImmutable((string)$lastRun['created_at'], new DateTimeZone(APP_TIMEZONE));
+
+    return $lastRunAt <= $now->modify('-1 hour');
+}
+
+function sendDueExpiryNotifications(PDO $pdo, array $settings): void
+{
+    $emails = splitEmails((string)($settings['notification_email'] ?? ''));
+    if (!$emails) {
+        writeLog($pdo, 'expiry_check_skipped', [
+            'mode' => 'daily_auto',
+            'reason' => 'Не указаны email-получатели',
+        ]);
+        return;
+    }
+
+    $notificationDays = NOTIFICATION_EVENT_DAYS;
+    $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
+    $statement = $pdo->prepare(
+        "SELECT article, quantity, expiry_date, expiry_full_date, days_left
+         FROM batches
+         WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
+         ORDER BY days_left ASC, expiry_date ASC, article ASC"
+    );
+    $statement->execute($notificationDays);
+    $batches = $statement->fetchAll();
+
+    if (!$batches) {
+        writeLog($pdo, 'expiry_check_no_matches', [
+            'mode' => 'daily_auto',
+            'criteria' => $notificationDays,
+        ]);
+        return;
+    }
+
+    $sentEvents = [];
+    foreach (groupBatchesByDaysLeft($batches) as $daysLeft => $eventBatches) {
+        $subject = expiryNotificationSubject((int)$daysLeft);
+        $body = expiryNotificationBody($eventBatches, (int)$daysLeft);
+        sendNotificationEmail($pdo, $emails, $subject, $body, $settings);
+        $sentEvents[] = [
+            'days_left' => (int)$daysLeft,
+            'count' => count($eventBatches),
+            'subject' => $subject,
+            'text' => $body,
+        ];
+    }
+
+    writeLog($pdo, 'expiry_notifications_sent', [
+        'mode' => 'daily_auto',
+        'emails' => $emails,
+        'events' => $sentEvents,
+    ]);
+}
+
+function groupBatchesByDaysLeft(array $batches): array
+{
+    $groups = [];
+    foreach ($batches as $batch) {
+        $daysLeft = (int)$batch['days_left'];
+        $groups[$daysLeft][] = $batch;
+    }
+
+    ksort($groups, SORT_NUMERIC);
+    return $groups;
+}
+
+function acquireNotificationLock(PDO $pdo): bool
+{
+    try {
+        return (int)$pdo->query("SELECT GET_LOCK('sroki_godnosti_expiry_notifications', 0)")->fetchColumn() === 1;
+    } catch (Throwable) {
+        // Если advisory lock недоступен, ежедневная проверка логов всё равно не даст
+        // запускать рассылку повторно после уже записанного результата.
+        return true;
+    }
+}
+
+function releaseNotificationLock(PDO $pdo): void
+{
+    try {
+        $pdo->query("SELECT RELEASE_LOCK('sroki_godnosti_expiry_notifications')");
+    } catch (Throwable) {
+        // Ошибка освобождения блокировки не должна ломать ответ API.
+    }
 }
 
 function sendTestNotification(PDO $pdo, array $payload): array
@@ -914,7 +1136,9 @@ function autoImportLogStatus(string $action): string
 function autoImportLogText(string $action, array $payload): string
 {
     if ($action === 'auto_import_started') {
-        return 'Ручной тест автозагрузки запущен.';
+        return ($payload['mode'] ?? '') === 'daily_auto'
+            ? sprintf('Ежедневная автозагрузка запущена по расписанию %s МСК.', (string)($payload['time'] ?? '10:00'))
+            : 'Ручной тест автозагрузки запущен.';
     }
     if ($action === 'auto_import_completed') {
         return sprintf(
@@ -938,40 +1162,59 @@ function getNotificationHistory(?PDO $pdo): array
     $statement = $pdo->prepare(
         "SELECT action, payload, created_at
          FROM logs
-         WHERE action IN ('expiry_notifications_sent', 'test_notification_sent')
-         ORDER BY id DESC"
+         WHERE action IN ('expiry_notifications_sent', 'expiry_notifications_failed', 'test_notification_sent', 'test_notification_failed')
+         ORDER BY id DESC
+         LIMIT 100"
     );
     $statement->execute();
 
     return array_map(static function (array $row): array {
+        $action = (string)$row['action'];
         $payload = json_decode((string)($row['payload'] ?? ''), true);
         $payload = is_array($payload) ? $payload : [];
 
         return [
             'date' => formatMoscowDateTime((string)$row['created_at']),
-            'text' => notificationHistoryText((string)$row['action'], $payload),
+            'status' => notificationHistoryStatus($action),
+            'text' => notificationHistoryText($action, $payload),
         ];
     }, $statement->fetchAll());
 }
 
+function notificationHistoryStatus(string $action): string
+{
+    return str_ends_with($action, '_sent') ? 'Отправлено' : 'Ошибка';
+}
+
 function notificationHistoryText(string $action, array $payload): string
 {
+    if (str_ends_with($action, '_failed')) {
+        return (string)($payload['error'] ?? $payload['reason'] ?? 'Причина ошибки не указана.');
+    }
+
+    if ($action === 'expiry_notifications_sent' && isset($payload['events']) && is_array($payload['events'])) {
+        return implode("\n", array_map(static function (array $event): string {
+            return sprintf(
+                '%s Количество партий: %d.',
+                (string)($event['subject'] ?? 'Уведомление о сроке годности.'),
+                (int)($event['count'] ?? 0)
+            );
+        }, $payload['events']));
+    }
+
     if (isset($payload['text']) && trim((string)$payload['text']) !== '') {
         return (string)$payload['text'];
     }
 
     if ($action === 'test_notification_sent' && isset($payload['article'], $payload['days_left'])) {
         return sprintf(
-            'Истекает срок годности через %d дней у партии артикул %s.',
+            'Тестовое уведомление: истекает срок годности через %d дней у партии артикул %s.',
             (int)$payload['days_left'],
             (string)$payload['article']
         );
     }
 
-    $rows = isset($payload['rows']) ? (int)$payload['rows'] : 0;
-    return $rows > 0
-        ? 'Отправлено уведомление по партиям: ' . $rows . '.'
-        : 'Уведомление отправлено.';
+    return 'Уведомление отправлено.';
 }
 
 function getSystemSettingsInfo(?PDO $pdo): array
