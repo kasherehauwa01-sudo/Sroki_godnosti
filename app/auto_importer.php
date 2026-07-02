@@ -467,18 +467,23 @@ function rowsToBatchPayloads(array $rows): array
         throw new RuntimeException('Во вложении не найдены обязательные колонки: Артикул, Количество, Срок годности.');
     }
 
-    ['row' => $headerRow, 'article' => $articleIndex, 'quantity' => $quantityIndex, 'expiry' => $expiryIndex] = $headerInfo;
+    ['row' => $headerRow, 'article' => $articleIndex, 'quantity' => $quantityIndex, 'expiry' => $expiryIndex, 'code' => $codeIndex, 'name' => $nameIndex] = $headerInfo;
 
     $payloads = [];
     foreach (array_slice($rows, $headerRow + 1) as $row) {
         $article = trim((string)($row[$articleIndex] ?? ''));
         $quantity = trim((string)($row[$quantityIndex] ?? ''));
         $expiry = trim((string)($row[$expiryIndex] ?? ''));
+        $code = $codeIndex !== null ? trim((string)($row[$codeIndex] ?? '')) : '';
+        $name = $nameIndex !== null ? trim((string)($row[$nameIndex] ?? '')) : '';
         if ($article === '' || $quantity === '' || $expiry === '') {
             continue;
         }
         $payloads[] = [
             'article' => $article,
+            'code' => $code,
+            'name' => $name,
+            'createdSource' => 'Автозагрузка',
             'quantity' => preg_replace('/\D+/', '', $quantity) ?: 0,
             'expiry_date' => $expiry,
             'expiry_raw' => $expiry,
@@ -494,6 +499,8 @@ function findAutoImportHeaderRow(array $rows): ?array
         $headers = array_map('normalizeAutoImportHeader', $row);
         $articleIndex = findAutoImportColumn($headers, ['артикул', 'кодтовара', 'номенклатураартикул']);
         $quantityIndex = findAutoImportColumn($headers, ['количество', 'количествовпартии', 'остаток', 'колво']);
+        $codeIndex = findAutoImportColumn($headers, ['код', 'кодтовара']);
+        $nameIndex = findAutoImportColumn($headers, ['наименование', 'название', 'товар']);
         $expiryIndex = findAutoImportColumn($headers, ['срокгодностидо', 'срокгодности', 'годендо', 'срок']);
 
         if ($articleIndex !== null && $quantityIndex !== null && $expiryIndex !== null) {
@@ -502,6 +509,8 @@ function findAutoImportHeaderRow(array $rows): ?array
                 'article' => $articleIndex,
                 'quantity' => $quantityIndex,
                 'expiry' => $expiryIndex,
+                'code' => $codeIndex,
+                'name' => $nameIndex,
             ];
         }
     }

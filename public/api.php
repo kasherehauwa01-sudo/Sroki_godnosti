@@ -129,6 +129,8 @@ function ensureSettingsSchema(PDO $pdo): void
 function ensureBatchesSchema(PDO $pdo): void
 {
     $columns = [
+        'code' => "ALTER TABLE batches ADD COLUMN code VARCHAR(128) NOT NULL DEFAULT '' AFTER article",
+        'created_source' => "ALTER TABLE batches ADD COLUMN created_source VARCHAR(32) NOT NULL DEFAULT 'Ручной' AFTER created_at",
         'expiry_full_date' => "ALTER TABLE batches ADD COLUMN expiry_full_date TINYINT(1) NOT NULL DEFAULT 0 AFTER expiry_date",
         'expiry_invalid' => "ALTER TABLE batches ADD COLUMN expiry_invalid TINYINT(1) NOT NULL DEFAULT 0 AFTER expiry_date",
         'expiry_raw' => "ALTER TABLE batches ADD COLUMN expiry_raw VARCHAR(32) NULL AFTER expiry_invalid",
@@ -148,7 +150,7 @@ function ensureBatchesSchema(PDO $pdo): void
 function listBatches(PDO $pdo, array $filters): array
 {
     [$where, $params] = buildBatchFilters($filters);
-    $sql = 'SELECT id, created_at, article, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status, updated_at FROM batches ' . $where . ' ORDER BY expiry_date ASC, id DESC';
+    $sql = 'SELECT id, created_at, created_source, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status, updated_at FROM batches ' . $where . ' ORDER BY expiry_date ASC, id DESC';
     $statement = $pdo->prepare($sql);
     $statement->execute($params);
 
@@ -303,7 +305,9 @@ function updateBatch(PDO $pdo, array $payload): array
     $statement = $pdo->prepare(
         'UPDATE batches
          SET created_at = :created_at,
+             created_source = :created_source,
              article = :article,
+             code = :code,
              name = :name,
              quantity = :quantity,
              expiry_date = :expiry_date,
@@ -328,7 +332,9 @@ function buildCreateBatchParams(array $batch): array
 {
     return [
         'created_at' => $batch['created_at'],
+        'created_source' => $batch['created_source'],
         'article' => $batch['article'],
+        'code' => $batch['code'],
         'name' => $batch['name'],
         'quantity' => $batch['quantity'],
         'expiry_date' => $batch['expiry_date'],
@@ -344,7 +350,9 @@ function buildUpdateBatchParams(array $batch, int $id): array
 {
     return [
         'created_at' => $batch['created_at'],
+        'created_source' => $batch['created_source'],
         'article' => $batch['article'],
+        'code' => $batch['code'],
         'name' => $batch['name'],
         'quantity' => $batch['quantity'],
         'expiry_date' => $batch['expiry_date'],
@@ -388,8 +396,8 @@ function duplicateBatchInfo(array $batch): array
 function insertBatch(PDO $pdo, array $batch): int
 {
     $statement = $pdo->prepare(
-        'INSERT INTO batches (created_at, article, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status)
-         VALUES (:created_at, :article, :name, :quantity, :expiry_date, :expiry_full_date, :expiry_invalid, :expiry_raw, :days_left, :status)'
+        'INSERT INTO batches (created_at, created_source, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status)
+         VALUES (:created_at, :created_source, :article, :code, :name, :quantity, :expiry_date, :expiry_full_date, :expiry_invalid, :expiry_raw, :days_left, :status)'
     );
     $statement->execute(buildCreateBatchParams($batch));
 
@@ -398,7 +406,7 @@ function insertBatch(PDO $pdo, array $batch): int
 
 function findBatchForHistory(PDO $pdo, int $id): array
 {
-    $statement = $pdo->prepare('SELECT id, article, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE id = :id');
+    $statement = $pdo->prepare('SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE id = :id');
     $statement->execute([':id' => $id]);
     $row = $statement->fetch();
 
@@ -411,6 +419,8 @@ function historyBatchInfo(array $batch, ?int $id = null): array
     return [
         'id' => $id ?? (isset($batch['id']) ? (int)$batch['id'] : null),
         'article' => (string)($batch['article'] ?? ''),
+        'code' => (string)($batch['code'] ?? ''),
+        'name' => (string)($batch['name'] ?? ''),
         'quantity' => isset($batch['quantity']) ? (int)$batch['quantity'] : null,
         'expiry_date' => (string)($batch['expiry_date'] ?? ''),
         'expiry_full_date' => (bool)($batch['expiry_full_date'] ?? false),
@@ -492,7 +502,7 @@ function deleteBatchesByArticles(PDO $pdo, array $payload): array
     }
 
     $placeholders = implode(',', array_fill(0, count($articles), '?'));
-    $select = $pdo->prepare("SELECT id, article, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE article IN ($placeholders) ORDER BY article ASC, id ASC");
+    $select = $pdo->prepare("SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE article IN ($placeholders) ORDER BY article ASC, id ASC");
     $select->execute($articles);
     $batches = $select->fetchAll();
 
@@ -524,7 +534,10 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
 {
     $createdAt = (string)($payload['created_at'] ?? $payload['createdAt'] ?? date('Y-m-d H:i:s'));
     $article = trim((string)($payload['article'] ?? $payload['Артикул'] ?? ''));
-    $name = trim((string)($payload['name'] ?? ''));
+    $code = trim((string)($payload['code'] ?? $payload['Код'] ?? ''));
+    $name = trim((string)($payload['name'] ?? $payload['Наименование'] ?? ''));
+    $createdSource = trim((string)($payload['created_source'] ?? $payload['createdSource'] ?? $payload['Способ'] ?? 'Ручной'));
+    $createdSource = in_array($createdSource, ['Ручной', 'xls', 'Автозагрузка'], true) ? $createdSource : 'Ручной';
     $quantityValue = $payload['quantity'] ?? $payload['Количество в партии'] ?? null;
     $quantity = (int)($quantityValue ?? 0);
     $expiryInput = (string)($payload['expiry_date'] ?? $payload['expiryDate'] ?? $payload['Срок годности до'] ?? '');
@@ -544,7 +557,9 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
 
     return [
         'created_at' => date('Y-m-d H:i:s', strtotime($createdAt) ?: time()),
+        'created_source' => $createdSource,
         'article' => $article,
+        'code' => $code,
         'name' => $name,
         'quantity' => $quantity,
         'expiry_date' => $expiryDate,
@@ -630,8 +645,12 @@ function normalizeBatchRow(array $row): array
     return [
         'id' => (string)$row['id'],
         'createdAt' => date('Y-m-d', strtotime((string)$row['created_at'])),
+        'createdAtFull' => formatMoscowDateTime((string)$row['created_at']),
         'created_at' => $row['created_at'],
+        'createdSource' => (string)($row['created_source'] ?? 'Ручной'),
+        'created_source' => (string)($row['created_source'] ?? 'Ручной'),
         'article' => $row['article'],
+        'code' => (string)($row['code'] ?? ''),
         'name' => $row['name'],
         'quantity' => (int)$row['quantity'],
         'expiryDate' => $row['expiry_date'],
