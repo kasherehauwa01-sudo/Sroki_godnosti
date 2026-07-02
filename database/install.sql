@@ -7,7 +7,9 @@ USE sroki_godnosti;
 CREATE TABLE IF NOT EXISTS batches (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_source VARCHAR(32) NOT NULL DEFAULT 'Ручной',
     article VARCHAR(128) NOT NULL,
+    code VARCHAR(128) NOT NULL DEFAULT '',
     name VARCHAR(255) NOT NULL,
     quantity INT NOT NULL DEFAULT 0,
     expiry_date DATE NOT NULL,
@@ -19,6 +21,7 @@ CREATE TABLE IF NOT EXISTS batches (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     INDEX idx_batches_article (article),
+    INDEX idx_batches_code (code),
     INDEX idx_batches_name (name),
     INDEX idx_batches_status (status),
     INDEX idx_batches_expiry_date (expiry_date),
