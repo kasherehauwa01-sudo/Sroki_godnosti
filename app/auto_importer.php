@@ -178,7 +178,7 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         throw new RuntimeException('Во вложении не найдены строки для загрузки.');
     }
 
-    $result = bulkCreateBatches($pdo, $rows);
+    $result = bulkCreateBatches($pdo, $rows, false);
 
     markAutoImportMessageSeen(
         $username,

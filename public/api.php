@@ -244,7 +244,7 @@ function createBatch(PDO $pdo, array $payload, bool $writeHistory = true): array
     return ['ok' => true, 'id' => $id, 'duplicate' => false, 'batch' => $batchInfo];
 }
 
-function bulkCreateBatches(PDO $pdo, array $batches): array
+function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true): array
 {
     $pdo->beginTransaction();
     try {
@@ -268,11 +268,13 @@ function bulkCreateBatches(PDO $pdo, array $batches): array
             $createdBatches[] = $result['batch'];
         }
         $pdo->commit();
-        writeLog($pdo, 'bulk_create', [
-            'batches' => $createdBatches,
-            'duplicates' => $duplicates,
-            'skipped_duplicates' => $skippedDuplicates,
-        ]);
+        if ($writeHistory) {
+            writeLog($pdo, 'bulk_create', [
+                'batches' => $createdBatches,
+                'duplicates' => $duplicates,
+                'skipped_duplicates' => $skippedDuplicates,
+            ]);
+        }
         return [
             'ok' => true,
             'added' => $added,
