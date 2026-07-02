@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260630-2"></script>
+    <script defer src="assets/app.js?v=20260702-1"></script>
 </head>
 <body>
     <header class="topbar">
@@ -74,7 +74,7 @@ declare(strict_types=1);
             <div class="registry-summary" id="registrySummary">Показано строк: 0</div>
             <div class="table-wrap card wide">
                 <table>
-                    <thead><tr><th class="selection-column hidden" id="selectionHeader"><label class="select-all-row"><input id="selectAllBatches" type="checkbox"> Выделить все</label></th><th><button class="sort-button" data-sort="article" type="button">Артикул <span class="sort-indicator" data-sort-indicator="article"></span></button></th><th><button class="sort-button" data-sort="quantity" type="button">Количество <span class="sort-indicator" data-sort-indicator="quantity"></span></button></th><th><button class="sort-button" data-sort="expiryDate" type="button">Срок годности <span class="sort-indicator" data-sort-indicator="expiryDate"></span></button></th><th><button class="sort-button" data-sort="daysLeft" type="button">Остаток дней <span class="sort-indicator" data-sort-indicator="daysLeft"></span></button></th><th>Статус</th><th><button class="sort-button" data-sort="createdAt" type="button">Дата внесения <span class="sort-indicator" data-sort-indicator="createdAt"></span></button></th><th>Действия</th></tr></thead>
+                    <thead><tr><th class="selection-column hidden" id="selectionHeader"><label class="select-all-row"><input id="selectAllBatches" type="checkbox"> Выделить все</label></th><th><button class="sort-button" data-sort="article" type="button">Артикул <span class="sort-indicator" data-sort-indicator="article"></span></button></th><th>Код</th><th>Наименование</th><th><button class="sort-button" data-sort="expiryDate" type="button">Срок годности <span class="sort-indicator" data-sort-indicator="expiryDate"></span></button></th><th><button class="sort-button" data-sort="daysLeft" type="button">Остаток дней <span class="sort-indicator" data-sort-indicator="daysLeft"></span></button></th><th>Статус</th><th><button class="sort-button" data-sort="createdAt" type="button">Дата внесения <span class="sort-indicator" data-sort-indicator="createdAt"></span></button></th><th>Действия</th></tr></thead>
                     <tbody id="registryBody"></tbody>
                 </table>
             </div>
@@ -104,6 +104,7 @@ manager@site.ru"></textarea></label>
                     <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
                     <div class="settings-actions">
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                        <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">Логи уведомлений</button>
                     </div>
                     <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
                 </div>
@@ -138,6 +139,12 @@ manager@site.ru"></textarea></label>
                         <dt>Последняя отправка письма:</dt><dd id="systemLastSent">Не выполнялось</dd>
                         <dt>Статус SMTP:</dt><dd id="systemSmtpStatus">Не выполнялось</dd>
                     </dl>
+                </div>
+
+                <div class="card form settings-delete-articles-card">
+                    <h3>Удаление артикулов</h3>
+                    <p class="subtitle">Удаляет из реестра все партии с точным совпадением в колонке «Артикул».</p>
+                    <button class="ghost-button danger" id="openDeleteArticlesDialogButton" formnovalidate type="button">Удаление артикулов</button>
                 </div>
 
                 <div class="card form settings-command-card">
@@ -385,6 +392,8 @@ manager@site.ru"></textarea></label>
             </div>
             <input id="editBatchId" name="id" type="hidden">
             <label>Артикул<input id="editArticle" name="article" required autocomplete="off"></label>
+            <label>Код<input id="editCode" name="code" autocomplete="off"></label>
+            <label>Наименование<input id="editName" name="name" autocomplete="off"></label>
             <label>Количество в партии<input id="editQuantity" name="quantity" required min="0" step="1" type="number"></label>
             <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10"></label>
             <label>Статус
@@ -412,6 +421,35 @@ manager@site.ru"></textarea></label>
             <div class="modal-actions">
                 <button class="ghost-button hidden" id="notificationDetailsButton" type="button">Подробнее</button>
                 <button class="primary" id="confirmNotificationDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal" id="deleteArticlesDialog">
+        <form class="card form modal-card" id="deleteArticlesForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Удаление артикулов</h2>
+                <button class="icon-button" id="closeDeleteArticlesDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Введите артикулы, которые нужно удалить из реестра и SQL-таблицы. Каждый артикул — с новой строки.</p>
+            <label>Артикулы<textarea id="deleteArticlesInput" rows="10" placeholder="12345&#10;ABC-77"></textarea></label>
+            <p class="field-error" id="deleteArticlesError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelDeleteArticlesButton" type="button">Отмена</button>
+                <button class="primary danger" id="confirmDeleteArticlesButton" type="submit">Удалить</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal" id="notificationLogsDialog">
+        <div class="card form modal-card notification-modal-card">
+            <div class="modal-heading">
+                <h2>Логи уведомлений</h2>
+                <button class="icon-button" id="closeNotificationLogsDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="notification-dialog-body" id="notificationLogsBody"></div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmNotificationLogsDialogButton" type="button">Закрыть</button>
             </div>
         </div>
     </dialog>

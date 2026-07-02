@@ -99,7 +99,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'verify_write_off']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'verify_write_off', 'delete_by_articles']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -136,7 +136,9 @@ async function api(action, data = {}) {
         throw new Error(text || 'API вернул некорректный JSON.');
     }
     if (!response.ok || !json.ok) {
-        throw new Error(json.error || 'Ошибка API');
+        // Некоторые служебные действия API (например, тест автозагрузки)
+        // возвращают пользовательское описание в поле message, а не error.
+        throw new Error(json.error || json.message || 'Ошибка API');
     }
     return json;
 }
@@ -192,6 +194,19 @@ function normalizeFullExpiryText(value) {
 
     const [, dayValue, monthValue, yearValue] = match;
     return `${dayValue.padStart(2, '0')}.${monthValue.padStart(2, '0')}.${normalizeExpiryYear(yearValue)}`;
+}
+
+function formatCreatedAtWithSource(batch) {
+    const dateTime = batch.createdAtFull || batch.created_at || batch.createdAt || '';
+    const date = dateTime ? formatDateTimeRu(dateTime) : formatDateRu(batch.createdAt);
+    return `${date} (${batch.createdSource || 'Ручной'})`;
+}
+
+function formatDateTimeRu(value) {
+    const normalized = String(value || '').replace(' ', 'T');
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) return String(value || '');
+    return date.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
 }
 
 function expiryDateInfo(value) {
@@ -413,6 +428,8 @@ function normalizeSpreadsheetRowEncoding(row) {
 }
 
 function normalizeBatch(row) {
+    const codeRaw = getRowValue(row, ['code', 'Код', 'Код товара']);
+    const nameRaw = getRowValue(row, ['name', 'Наименование', 'Название']);
     const quantityRaw = getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']);
     const expiryRawValue = getRowValue(row, ['expiryRaw', 'expiry_raw', 'expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности до.', 'Срок годности', 'Годен до', 'Срокгодностидо']);
     const expiryInfo = expiryDateInfo(expiryRawValue);
@@ -424,7 +441,11 @@ function normalizeBatch(row) {
     return {
         id: String(getRowValue(row, ['id', 'ID']) || crypto.randomUUID()),
         createdAt: toDateInputValue(getRowValue(row, ['createdAt', 'created_at', 'Дата внесения'])) || new Date().toISOString().slice(0, 10),
+        createdAtFull: getRowValue(row, ['createdAtFull']) || getRowValue(row, ['created_at']) || '',
+        createdSource: getRowValue(row, ['createdSource', 'created_source', 'Способ']) || 'Ручной',
         article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара', 'Артикул.'])).trim(),
+        code: String(codeRaw || '').trim(),
+        name: String(nameRaw || '').trim(),
         quantity: Number(quantityRaw || 0),
         hasQuantity: String(quantityRaw).trim() !== '',
         expiryDate: toExpiryDateValue(expiryRawValue),
@@ -529,11 +550,12 @@ function renderRegistry() {
         return `<tr class="${batch.expiryInvalid ? 'indicator-purple invalid-expiry-row' : indicatorClass(days)}">
             ${selectionCell}
             <td>${escapeHtml(batch.article)}</td>
-            <td>${escapeHtml(batch.quantity)}</td>
+            <td>${escapeHtml(batch.code || '')}</td>
+            <td>${escapeHtml(batch.name || '')}</td>
             <td>${escapeHtml(batch.expiryInvalid ? (batch.expiryRaw || formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate)) : formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate))}</td>
             <td>${batch.expiryInvalid ? '—' : formatDays(days)}</td>
             <td><select class="status-select" data-id="${escapeHtml(batch.id)}" ${state.writeOffAccessGranted ? '' : 'disabled'}>${options}</select></td>
-            <td>${escapeHtml(formatDateRu(batch.createdAt))}</td>
+            <td>${escapeHtml(formatCreatedAtWithSource(batch))}</td>
             <td>
                 <div class="row-actions">
                     <button class="small-button icon-action edit-batch-button" data-id="${escapeHtml(batch.id)}" type="button" title="Редактировать" aria-label="Редактировать партию">✏️</button>
@@ -542,7 +564,7 @@ function renderRegistry() {
                 </div>
             </td>
         </tr>`;
-    }).join('') || `<tr><td colspan="${state.writeOffAccessGranted ? 8 : 7}">Партий не найдено.</td></tr>`;
+    }).join('') || `<tr><td colspan="${state.writeOffAccessGranted ? 9 : 8}">Партий не найдено.</td></tr>`;
 
     qsa('.batch-select-checkbox').forEach((checkbox) => checkbox.addEventListener('change', onBatchSelectionChange));
     updateSelectionControls();
@@ -634,6 +656,8 @@ function openEditDialog(id) {
 
     qs('#editBatchId').value = batch.id;
     qs('#editArticle').value = batch.article;
+    qs('#editCode').value = batch.code || '';
+    qs('#editName').value = batch.name || '';
     qs('#editQuantity').value = batch.quantity;
     qs('#editExpiryDate').value = batch.expiryInvalid ? (batch.expiryRaw || formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate)) : formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate);
     qs('#editStatus').value = batch.status;
@@ -651,6 +675,8 @@ function createBatchRow(values = {}) {
     row.className = 'batch-row';
     row.innerHTML = `
         <label>Артикул<input class="batch-row-article" required autocomplete="off" value="${escapeHtml(values.article || '')}"></label>
+        <label>Код<input class="batch-row-code" autocomplete="off" value="${escapeHtml(values.code || '')}"></label>
+        <label>Наименование<input class="batch-row-name" autocomplete="off" value="${escapeHtml(values.name || '')}"></label>
         <label>Количество в партии<input class="batch-row-quantity" required min="0" step="1" type="number" value="${escapeHtml(values.quantity ?? '')}"></label>
         <label>Срок годности<input class="batch-row-expiry" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10" value="${escapeHtml(values.expiryDate || '')}"></label>
         <button class="small-button danger remove-batch-row-button" type="button" aria-label="Удалить строку">🗑️</button>
@@ -686,6 +712,9 @@ function closeAddBatchesDialog() {
 function collectBatchRows() {
     return qsa('.batch-row').map((row) => normalizeBatch({
         article: row.querySelector('.batch-row-article').value,
+        code: row.querySelector('.batch-row-code').value,
+        name: row.querySelector('.batch-row-name').value,
+        createdSource: 'Ручной',
         quantity: row.querySelector('.batch-row-quantity').value,
         expiryDate: row.querySelector('.batch-row-expiry').value,
     }));
@@ -732,6 +761,8 @@ async function submitEditForm(event) {
     const form = new FormData(event.target);
     const batch = normalizeBatch(Object.fromEntries(form.entries()));
     batch.id = String(form.get('id'));
+    const previousBatch = state.batches.find((item) => item.id === batch.id);
+    batch.createdSource = previousBatch?.createdSource || batch.createdSource;
     batch.write_off_password = state.writeOffPassword;
 
     try {
@@ -948,13 +979,15 @@ function formatHistoryBatch(batch) {
     if (!batch) return 'партия не найдена';
 
     const article = batch.article ? `арт. ${batch.article}` : `ID ${batch.id || 'не указан'}`;
+    const code = batch.code ? `, код ${batch.code}` : '';
+    const name = batch.name ? `, наименование ${batch.name}` : '';
     const expiry = batch.expiry_date || batch.expiryDate
         ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate, batch.expiry_full_date || batch.expiryFullDate)}`
         : 'без указанного срока годности';
     const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
     const status = batch.status ? `, статус «${batch.status}»` : '';
 
-    return `партия ${article} ${expiry}${quantity}${status}`;
+    return `партия ${article}${code}${name} ${expiry}${quantity}${status}`;
 }
 
 function formatHistoryBatchList(batches) {
@@ -1127,6 +1160,7 @@ function renderNotificationHistory(history) {
     container.innerHTML = history.map((item) => `
         <article class="notification-history-item">
             <time>${escapeHtml(item.date || 'Дата не указана')}</time>
+            <p><strong>${escapeHtml(item.status || 'Статус не указан')}</strong></p>
             <p>${escapeHtml(item.text || 'Текст уведомления не указан')}</p>
         </article>
     `).join('');
@@ -1222,6 +1256,69 @@ async function runTestAutoImport() {
     }
 }
 
+function openDeleteArticlesDialog() {
+    qs('#deleteArticlesInput').value = '';
+    qs('#deleteArticlesError').textContent = '';
+    qs('#deleteArticlesDialog').showModal();
+}
+
+function closeDeleteArticlesDialog() {
+    qs('#deleteArticlesDialog').close();
+    qs('#deleteArticlesForm').reset();
+    qs('#deleteArticlesError').textContent = '';
+}
+
+async function submitDeleteArticles(event) {
+    event.preventDefault();
+    const input = qs('#deleteArticlesInput');
+    const error = qs('#deleteArticlesError');
+    const articles = input.value.split(/\r?\n/).map((article) => article.trim()).filter(Boolean);
+    if (!articles.length) {
+        error.textContent = 'Введите хотя бы один артикул.';
+        return;
+    }
+    if (!confirm(`Удалить все партии по артикулам (${articles.length}) безвозвратно?`)) return;
+
+    const button = qs('#confirmDeleteArticlesButton');
+    button.disabled = true;
+    error.textContent = '';
+    try {
+        const result = await api('delete_by_articles', {
+            settings_password: state.settingsPassword,
+            articles: articles.join('\n'),
+        });
+        closeDeleteArticlesDialog();
+        showToast(`Удалено строк: ${result.deleted || 0}`);
+        await Promise.all([loadBatches(), loadHistory(), loadSettings()]);
+    } catch (deleteError) {
+        error.textContent = deleteError.message;
+        showToast(deleteError.message, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function showNotificationLogs() {
+    const logs = state.settings?.notification_history || [];
+    const body = qs('#notificationLogsBody');
+    if (!logs.length) {
+        body.textContent = 'Логи уведомлений пока отсутствуют.';
+    } else {
+        body.innerHTML = logs.map((log) => `
+            <article class="notification-history-item">
+                <time>${escapeHtml(log.date || 'Дата не указана')}</time>
+                <p><strong>${escapeHtml(log.status || 'Статус не указан')}</strong></p>
+                <p>${escapeHtml(log.text || 'Описание отсутствует')}</p>
+            </article>
+        `).join('');
+    }
+    qs('#notificationLogsDialog').showModal();
+}
+
+function closeNotificationLogs() {
+    qs('#notificationLogsDialog').close();
+}
+
 function showAutoImportLogs() {
     const logs = state.settings?.auto_import_logs || [];
     const body = qs('#autoImportLogsBody');
@@ -1252,6 +1349,8 @@ function downloadTemplateXlsx() {
     const worksheet = XLSX.utils.json_to_sheet([
         {
             Артикул: '12345',
+            Код: 'K-001',
+            Наименование: 'Товар',
             Количество: 10,
             'Срок годности до': '31.12.2026',
         },
@@ -1288,10 +1387,10 @@ function readXlsx(file) {
             const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: false });
             const decodedRows = rawRows.map(normalizeSpreadsheetRowEncoding);
             const detectedHeaders = decodedRows[0] ? Object.keys(decodedRows[0]).join(', ') : 'не найдены';
-            const normalizedRows = decodedRows.map(normalizeBatch);
+            const normalizedRows = decodedRows.map((row) => ({ ...normalizeBatch(row), createdSource: 'xls' }));
             state.importRows = normalizedRows.filter((row) => row.article && row.hasQuantity && row.expiryDate);
             const skipped = normalizedRows.length - state.importRows.length;
-            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.quantity} — ${row.expiryInvalid ? `${row.expiryRaw} (некорректная дата)` : formatExpiryMonthRu(row.expiryDate, row.expiryFullDate)}`).join('\n');
+            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.code || 'без кода'} — ${row.name || 'без наименования'} — ${row.quantity} — ${row.expiryInvalid ? `${row.expiryRaw} (некорректная дата)` : formatExpiryMonthRu(row.expiryDate, row.expiryFullDate)}`).join('\n');
             qs('#importPreview').textContent = [
                 `Файл: ${file.name}`,
                 `Найдено строк: ${rawRows.length}`,
@@ -1398,6 +1497,14 @@ function bindEvents() {
     qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
     qs('#cancelEditButton').addEventListener('click', closeEditDialog);
 
+    // Кнопки ручного добавления партий должны быть привязаны явно:
+    // без этих обработчиков диалог не открывается и пользователь не видит ошибки.
+    qs('#openAddBatchesButton').addEventListener('click', openAddBatchesDialog);
+    qs('#addBatchRowButton').addEventListener('click', () => createBatchRow());
+    qs('#addBatchesForm').addEventListener('submit', submitAddBatchesForm);
+    qs('#closeAddBatchesDialogButton').addEventListener('click', closeAddBatchesDialog);
+    qs('#cancelAddBatchesButton').addEventListener('click', closeAddBatchesDialog);
+
     qs('#openXlsImportButton').addEventListener('click', openXlsImportFromAddDialog);
     qs('#closeXlsImportDialogButton').addEventListener('click', closeXlsImportDialog);
     qs('#cancelXlsImportButton').addEventListener('click', closeXlsImportDialog);
@@ -1436,7 +1543,15 @@ function bindEvents() {
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
     qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
 
+    qs('#openDeleteArticlesDialogButton').addEventListener('click', openDeleteArticlesDialog);
+    qs('#deleteArticlesForm').addEventListener('submit', submitDeleteArticles);
+    qs('#closeDeleteArticlesDialogButton').addEventListener('click', closeDeleteArticlesDialog);
+    qs('#cancelDeleteArticlesButton').addEventListener('click', closeDeleteArticlesDialog);
+
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
+    qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
+    qs('#closeNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
+    qs('#confirmNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
     qs('#testAutoImportButton').addEventListener('click', runTestAutoImport);
     qs('#showAutoImportLogsButton').addEventListener('click', showAutoImportLogs);
     qs('#closeAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
@@ -1474,11 +1589,12 @@ function batchExportMapper(batch) {
     const days = batch.daysLeft ?? daysLeft(batch.expiryDate);
     return {
         Артикул: batch.article,
-        Количество: batch.quantity,
+        Код: batch.code || '',
+        Наименование: batch.name || '',
         'Срок годности': formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate),
         'Остаток дней': formatDays(days),
         'Статус партии': batch.status,
-        'Дата внесения': batch.createdAt,
+        'Дата внесения': formatCreatedAtWithSource(batch),
     };
 }
 
