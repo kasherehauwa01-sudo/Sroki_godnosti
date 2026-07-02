@@ -60,7 +60,7 @@ function handleApiRequest(): void
         } else {
             $result = match ($action) {
                 'create' => createBatch($pdo, $payload),
-                'bulk_create' => bulkCreateBatches($pdo, $payload['batches'] ?? []),
+                'bulk_create' => bulkCreateBatches($pdo, $payload['batches'] ?? [], empty($payload['suppress_history'])),
                 'update' => updateBatch($pdo, $payload),
                 'delete' => deleteBatch($pdo, $payload),
                 'bulk_delete' => deleteBatches($pdo, $payload),

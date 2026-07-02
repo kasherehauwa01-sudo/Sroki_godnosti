@@ -133,6 +133,9 @@ async function api(action, data = {}) {
     try {
         json = JSON.parse(text);
     } catch (error) {
+        if (response.status === 413) {
+            throw new Error('Файл слишком большой для одной загрузки. Попробуйте загрузить его частями или обратитесь к администратору.');
+        }
         throw new Error(text || 'API вернул некорректный JSON.');
     }
     if (!response.ok || !json.ok) {
@@ -1460,6 +1463,19 @@ function handleCustomFilterSelect(select, label) {
     select.dataset.customValue = String(normalizedValue);
 }
 
+async function importRowsInChunks(rows, chunkSize = 100) {
+    const summary = { added: 0, skipped_duplicates: 0, duplicates: [] };
+    for (let index = 0; index < rows.length; index += chunkSize) {
+        const chunk = rows.slice(index, index + chunkSize);
+        const result = await api('bulk_create', { batches: chunk, suppress_history: true });
+        summary.added += Number(result.added || 0);
+        summary.skipped_duplicates += Number(result.skipped_duplicates || 0);
+        summary.duplicates.push(...(result.duplicates || []));
+        qs('#importPreview').textContent = `Загружаю строки ${Math.min(index + chunk.length, rows.length)} из ${rows.length}...`;
+    }
+    return summary;
+}
+
 function bindEvents() {
     qsa('.tab').forEach((button) => button.addEventListener('click', async () => {
         const targetTab = button.dataset.tab;
@@ -1518,7 +1534,7 @@ function bindEvents() {
     qs('#xlsxInput').addEventListener('change', (event) => event.target.files[0] && readXlsx(event.target.files[0]));
     qs('#importButton').addEventListener('click', async () => {
         try {
-            const result = await api('bulk_create', { batches: state.importRows });
+            const result = await importRowsInChunks(state.importRows);
             if (Number(result.skipped_duplicates || 0) > 0) {
                 showDuplicateNotification(result.added || 0, result.skipped_duplicates || 0, formatImportDuplicateBatches(result.duplicates));
                 showToast(`Загружено строк: ${result.added || 0}. Пропущено дублей: ${result.skipped_duplicates}`);
