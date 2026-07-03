@@ -620,6 +620,13 @@ function sortRegistryRows() {
 
     const multiplier = direction === 'desc' ? -1 : 1;
     state.filteredBatches.sort((left, right) => {
+        const leftWrittenOff = left.status === 'Списана';
+        const rightWrittenOff = right.status === 'Списана';
+        if (leftWrittenOff !== rightWrittenOff) {
+            // Списанные партии всегда показываем в конце реестра независимо от выбранной сортировки.
+            return leftWrittenOff ? 1 : -1;
+        }
+
         if (field === 'daysLeft') {
             const leftDays = left.expiryInvalid ? Number.POSITIVE_INFINITY : (left.daysLeft ?? daysLeft(left.expiryDate));
             const rightDays = right.expiryInvalid ? Number.POSITIVE_INFINITY : (right.daysLeft ?? daysLeft(right.expiryDate));
