@@ -99,7 +99,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'verify_write_off', 'delete_by_articles']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'verify_write_off', 'delete_by_articles']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -1250,6 +1250,28 @@ async function sendTestNotification() {
     }
 }
 
+async function sendTestMissingFilterNotification() {
+    const button = qs('#testMissingFilterButton');
+    const status = qs('#testMissingFilterStatus');
+    button.disabled = true;
+    status.textContent = 'Сохраняю настройки и проверяю сегодняшнее письмо...';
+    showToast('Проверяю товары без фильтра «Срок годности»...');
+
+    try {
+        await persistSettings();
+        const result = await api('test_missing_filter_notification', { settings_password: state.settingsPassword });
+        await loadSettings();
+        status.textContent = result.message || 'Проверка завершена.';
+        showToast(status.textContent);
+    } catch (error) {
+        await loadSettings().catch(() => {});
+        status.textContent = error.message;
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
 async function runTestAutoImport() {
     const button = qs('#testAutoImportButton');
     const status = qs('#testAutoImportStatus');
@@ -1616,6 +1638,7 @@ function bindEvents() {
     qs('#cancelDeleteArticlesButton').addEventListener('click', closeDeleteArticlesDialog);
 
     qs('#showMissingFilterLogsButton').addEventListener('click', showMissingFilterLogs);
+    qs('#testMissingFilterButton').addEventListener('click', sendTestMissingFilterNotification);
     qs('#closeMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
     qs('#confirmMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
 
@@ -1667,6 +1690,19 @@ function batchExportMapper(batch) {
         'Статус партии': batch.status,
         'Дата внесения': formatCreatedAtWithSource(batch),
     };
+}
+
+function startSchedulerHeartbeat() {
+    const runTick = async () => {
+        try {
+            await api('tick');
+        } catch (error) {
+            console.warn('Не удалось выполнить проверку расписания', error);
+        }
+    };
+
+    runTick();
+    setInterval(runTick, 30000);
 }
 
 function startSchedulerHeartbeat() {

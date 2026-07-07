@@ -41,7 +41,7 @@ function handleApiRequest(): void
         $payload = readPayload();
         $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
 
-        if ($action !== 'test_auto_import') {
+        if (!in_array($action, ['test_auto_import', 'test_missing_filter_notification'], true)) {
             runDueAutoImport($pdo);
         }
 
@@ -70,6 +70,7 @@ function handleApiRequest(): void
                 'settings' => saveProtectedSettings($pdo, $payload),
                 'test_notification' => sendTestNotification($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
+                'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
                 'verify_write_off' => verifyWriteOffPassword($payload),
                 default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
             };
@@ -911,6 +912,13 @@ function runTestAutoImport(PDO $pdo, array $payload): array
     writeLog($pdo, 'auto_import_started', ['mode' => 'manual_test']);
 
     return runAutoImport($pdo, true);
+}
+
+function runTestMissingFilterNotification(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+
+    return runMissingExpiryFilterNotificationTest($pdo);
 }
 
 function findNearestExpiringBatch(PDO $pdo): ?array

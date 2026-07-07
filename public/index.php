@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-2"></script>
+    <script defer src="assets/app.js?v=20260707-3"></script>
 </head>
 <body>
     <header class="topbar">
@@ -128,8 +128,10 @@ manager@site.ru"></textarea></label>
                     <label>Получатели<textarea id="missingFilterEmails" rows="5" placeholder="ivan@mail.ru&#10;petrov@mail.ru"></textarea></label>
                     <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
                     <div class="settings-actions">
+                        <button class="ghost-button" id="testMissingFilterButton" formnovalidate type="button">Тест</button>
                         <button class="ghost-button" id="showMissingFilterLogsButton" formnovalidate type="button">Логи</button>
                     </div>
+                    <p class="subtitle" id="testMissingFilterStatus" role="status" aria-live="polite"></p>
                 </div>
 
                 <div class="card form settings-auto-import-card">

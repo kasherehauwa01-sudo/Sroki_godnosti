@@ -144,6 +144,50 @@ function runAutoImport(PDO $pdo, bool $once = false): array
     ];
 }
 
+function runMissingExpiryFilterNotificationTest(PDO $pdo): array
+{
+    ensureSettingsSchema($pdo);
+    ensureMissingFilterLogSchema($pdo);
+    $settings = getRawSettings($pdo);
+    $username = trim((string)($settings['smtp_username'] ?? ''));
+    $password = (string)($settings['smtp_password'] ?? '');
+    if ($username === '' || $password === '') {
+        throw new RuntimeException('Для проверки заполните SMTP логин и пароль в настройках.');
+    }
+
+    $mail = fetchTodayAutoImportMessage($username, $password);
+    if (!$mail) {
+        return ['ok' => true, 'message' => 'Письмо текущей даты не найдено. Уведомление не отправлено.'];
+    }
+
+    $attachments = extractSpreadsheetAttachments($mail['message']);
+    if (!$attachments) {
+        throw new RuntimeException('В найденном письме нет вложения XLS/XLSX.');
+    }
+
+    $codes = [];
+    foreach ($attachments as $attachment) {
+        $codes = array_merge($codes, findMissingExpiryFilterCodes(readSpreadsheetRows($attachment['content'], $attachment['filename'])));
+    }
+
+    $result = notifyMissingExpiryFilterProducts($pdo, $codes);
+    if (($result['status'] ?? '') === 'empty') {
+        return ['ok' => true, 'message' => 'В сегодняшнем файле товары без фильтра «Срок годности» не найдены.'];
+    }
+
+    if (($result['status'] ?? '') === 'sent') {
+        return [
+            'ok' => true,
+            'message' => 'Тестовое уведомление отправлено. Найдено кодов: ' . (int)($result['count'] ?? 0) . '.',
+        ];
+    }
+
+    return [
+        'ok' => false,
+        'message' => (string)($result['message'] ?? 'Не удалось отправить уведомление о товарах без фильтра.'),
+    ];
+}
+
 function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $time): array
 {
     $username = trim((string)($settings['smtp_username'] ?? ''));
@@ -495,19 +539,21 @@ function findMissingFilterHeaderRow(array $rows): ?array
     return null;
 }
 
-function notifyMissingExpiryFilterProducts(PDO $pdo, array $codes): void
+function notifyMissingExpiryFilterProducts(PDO $pdo, array $codes): array
 {
     $codes = array_values(array_unique(array_filter(array_map('trim', $codes))));
     if (!$codes) {
-        return;
+        return ['status' => 'empty', 'count' => 0];
     }
 
     ensureMissingFilterLogSchema($pdo);
     $settings = getRawSettings($pdo);
     $recipients = splitEmails((string)($settings['missing_filter_email'] ?? ''));
     if (!$recipients) {
-        writeMissingFilterLog($pdo, $codes, [], 'ERROR', 'Не указаны получатели уведомлений о товарах без фильтра.');
-        return;
+        $message = 'Не указаны получатели уведомлений о товарах без фильтра.';
+        writeMissingFilterLog($pdo, $codes, [], 'ERROR', $message);
+
+        return ['status' => 'error', 'count' => count($codes), 'message' => $message];
     }
 
     $body = "Следующие товары не имеют заполненного фильтра \"Срок годности\".\n\n"
@@ -517,8 +563,12 @@ function notifyMissingExpiryFilterProducts(PDO $pdo, array $codes): void
     try {
         sendNotificationEmail($pdo, $recipients, 'Товары без фильтра "Срок годности"', $body, $settings);
         writeMissingFilterLog($pdo, $codes, $recipients, 'SUCCESS', '');
+
+        return ['status' => 'sent', 'count' => count($codes), 'recipients' => $recipients];
     } catch (Throwable $error) {
         writeMissingFilterLog($pdo, $codes, $recipients, 'ERROR', $error->getMessage());
+
+        return ['status' => 'error', 'count' => count($codes), 'message' => $error->getMessage()];
     }
 }
 
