@@ -23,14 +23,16 @@ function expiryNotificationBody(array $batches, int $daysLeft): string
     $lines = [];
     foreach ($batches as $batch) {
         $lines[] = sprintf(
-            'Артикул %s Срок годности до %s',
-            (string)($batch['article'] ?? ''),
+            'Код %s Срок годности до %s',
+            (string)($batch['code'] ?? ''),
             formatExpiryMonth((string)($batch['expiry_date'] ?? ''), (bool)($batch['expiry_full_date'] ?? false))
         );
     }
 
     $lines[] = '';
     $lines[] = expiryNotificationInstruction($daysLeft);
+    $lines[] = '';
+    $lines[] = 'XLS файл для загрузки в 1с – во вложении.';
 
     return implode("\n", $lines);
 }

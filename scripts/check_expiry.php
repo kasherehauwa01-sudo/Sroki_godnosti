@@ -3,8 +3,8 @@
  * Ежедневная проверка сроков годности для запуска из cron.
  *
  * Скрипт каждый день в 09:00 по МСК пересчитывает остаток дней, выбирает
- * партии со статусом «В наличии» только по включенным в настройках дням
- * уведомлений и отправляет отдельное письмо по каждому событию срока.
+ * партии со статусом «В наличии» по фиксированным событиям срока
+ * уведомлений и отправляет отдельное письмо по каждому событию.
  */
 declare(strict_types=1);
 
@@ -15,6 +15,7 @@ require_once __DIR__ . '/../app/mailer.php';
 require_once __DIR__ . '/../app/notification_templates.php';
 
 const SENDER_EMAIL = 'vr-vk@yandex.ru';
+const NOTIFICATION_EVENT_DAYS = [180, 90, 60, 30, 15, 1];
 
 try {
     $pdo = getDatabaseConnection();
@@ -33,7 +34,7 @@ try {
     $notificationDays = getEnabledNotificationDays($settings);
     $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
     $statement = $pdo->prepare(
-        "SELECT article, quantity, expiry_date, expiry_full_date, days_left
+        "SELECT article, code, quantity, expiry_date, expiry_full_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
          ORDER BY days_left ASC, expiry_date ASC, article ASC"
@@ -53,7 +54,7 @@ try {
         $body = expiryNotificationBody($eventBatches, $daysLeft);
 
         try {
-            sendNotificationEmail($pdo, $emails, $subject, $body, $settings);
+            sendNotificationEmail($pdo, $emails, $subject, $body, $settings, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)]);
             writeLog($pdo, 'expiry_notifications_sent', [
                 'emails' => $emails,
                 'criteria' => [$daysLeft],
@@ -82,6 +83,19 @@ try {
     exit(1);
 }
 
+
+function expiryCodesXlsAttachment(array $batches, int $daysLeft): array
+{
+    $rows = array_map(static function (array $batch): string {
+        return '<tr><td>' . htmlspecialchars((string)($batch['code'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td></tr>';
+    }, $batches);
+
+    return [
+        'filename' => 'codes_' . $daysLeft . '_days.xls',
+        'content_type' => 'application/vnd.ms-excel; charset=UTF-8',
+        'content' => "<html><head><meta charset=\"UTF-8\"></head><body><table><tr><td></td></tr>" . implode('', $rows) . "</table></body></html>",
+    ];
+}
 
 function getNotificationSettings(PDO $pdo): array
 {
@@ -120,14 +134,8 @@ function splitEmails(string $emails): array
 
 function getEnabledNotificationDays(array $settings): array
 {
-    $days = [];
-    foreach ([0, 180, 90, 60, 30, 15, 7, 1] as $day) {
-        if ((int)($settings['notify_' . $day . '_days'] ?? 0) === 1) {
-            $days[] = $day;
-        }
-    }
-
-    return $days ?: [15, 30, 60];
+    // Рассылка идет по утвержденным событиям независимо от старых флажков настроек.
+    return NOTIFICATION_EVENT_DAYS;
 }
 
 function groupBatchesByDaysLeft(array $batches): array
