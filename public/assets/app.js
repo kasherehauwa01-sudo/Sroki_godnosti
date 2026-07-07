@@ -910,6 +910,15 @@ async function loadWarehouses() {
     renderWarehouses();
 }
 
+
+function formatWarehouseEmails(value) {
+    return String(value || '')
+        .split(/\r?\n/)
+        .map((email) => email.trim())
+        .filter(Boolean)
+        .join('\n') || '—';
+}
+
 function renderWarehouses() {
     const body = qs('#warehousesBody');
     if (!body) return;
@@ -917,7 +926,7 @@ function renderWarehouses() {
         <tr>
             <td>${escapeHtml(warehouse.name)}</td>
             <td>${escapeHtml(warehouse.sort_order)}</td>
-            <td>${escapeHtml(warehouse.email || '—')}</td>
+            <td class="warehouse-email-cell">${escapeHtml(formatWarehouseEmails(warehouse.email))}</td>
             <td>${warehouse.is_active ? 'Активен' : 'Отключен'}</td>
             <td>
                 <div class="row-actions">

@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-5"></script>
+    <script defer src="assets/app.js?v=20260707-6"></script>
 </head>
 <body>
     <header class="topbar">
@@ -479,7 +479,7 @@ manager@site.ru"></textarea></label>
             </div>
             <label>Название склада<input id="warehouseName" required autocomplete="off"></label>
             <label>Порядок отображения<input id="warehouseSortOrder" required step="1" type="number" value="0"></label>
-            <label>Email для уведомлений<input id="warehouseEmail" autocomplete="email" type="email" placeholder="sklad@example.ru"></label>
+            <label>Email для уведомлений<textarea id="warehouseEmail" autocomplete="email" rows="4" placeholder="sklad@example.ru&#10;manager@example.ru"></textarea></label>
             <label class="checkbox-row"><input id="warehouseIsActive" type="checkbox" checked> Активен</label>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelWarehouseButton" type="button">Отмена</button>

@@ -29,7 +29,7 @@ function ensureWarehouseSchema(PDO $pdo): void
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             name VARCHAR(255) NOT NULL,
             sort_order INT NOT NULL DEFAULT 0,
-            email VARCHAR(255) NULL,
+            email TEXT NULL,
             is_active TINYINT(1) NOT NULL DEFAULT 1,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -67,7 +67,16 @@ function ensureWarehouseEmailColumn(PDO $pdo): void
     );
     $statement->execute([':table' => 'warehouses', ':column' => 'email']);
     if ((int)$statement->fetchColumn() === 0) {
-        $pdo->exec('ALTER TABLE warehouses ADD COLUMN email VARCHAR(255) NULL AFTER sort_order');
+        $pdo->exec('ALTER TABLE warehouses ADD COLUMN email TEXT NULL AFTER sort_order');
+        return;
+    }
+
+    $typeStatement = $pdo->prepare(
+        'SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+    );
+    $typeStatement->execute([':table' => 'warehouses', ':column' => 'email']);
+    if ((string)$typeStatement->fetchColumn() !== 'text') {
+        $pdo->exec('ALTER TABLE warehouses MODIFY COLUMN email TEXT NULL');
     }
 }
 
@@ -159,23 +168,26 @@ function normalizeWarehousePayload(array $payload): array
     return [
         ':name' => $name,
         ':sort_order' => (int)($payload['sort_order'] ?? 0),
-        ':email' => normalizeWarehouseEmail((string)($payload['email'] ?? '')),
+        ':email' => normalizeWarehouseEmails((string)($payload['email'] ?? '')),
         ':is_active' => filter_var($payload['is_active'] ?? true, FILTER_VALIDATE_BOOLEAN) ? 1 : 0,
     ];
 }
 
 
-function normalizeWarehouseEmail(string $email): ?string
+function normalizeWarehouseEmails(string $emails): ?string
 {
-    $email = trim($email);
-    if ($email === '') {
-        return null;
-    }
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        throw new InvalidArgumentException('Введите корректный email склада.');
+    $items = array_values(array_filter(array_map(
+        static fn (string $email): string => trim($email),
+        preg_split('/\R+/', $emails) ?: []
+    ), static fn (string $email): bool => $email !== ''));
+
+    foreach ($items as $email) {
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new InvalidArgumentException('Введите корректные email склада, каждый адрес с новой строки.');
+        }
     }
 
-    return $email;
+    return $items ? implode("\n", $items) : null;
 }
 
 function getWarehouse(PDO $pdo, int $id): array
