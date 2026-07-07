@@ -1006,7 +1006,9 @@ function switchSettingsTab(tabName) {
         button.classList.toggle('active', button.dataset.settingsTab === tabName);
     });
     qsa('[data-settings-panel]').forEach((panel) => {
-        panel.classList.toggle('active', panel.dataset.settingsPanel === tabName);
+        const isActive = panel.dataset.settingsPanel === tabName;
+        panel.classList.toggle('active', isActive);
+        panel.hidden = !isActive;
     });
 }
 

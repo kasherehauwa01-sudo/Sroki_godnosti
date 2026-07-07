@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-9"></script>
+    <script defer src="assets/app.js?v=20260707-10"></script>
 </head>
 <body>
     <header class="topbar">
@@ -206,7 +206,7 @@ manager@site.ru"></textarea></label>
                     <button class="primary" id="saveSettingsButton" type="submit">Сохранить настройки</button>
                 </div>
             </form>
-            <div class="settings-subpanel" data-settings-panel="warehouses">
+            <div class="settings-subpanel" data-settings-panel="warehouses" hidden>
                 <div class="card form settings-warehouses-card">
                     <div class="section-heading registry-heading">
                         <div>
