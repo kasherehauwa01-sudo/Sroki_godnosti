@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-8"></script>
+    <script defer src="assets/app.js?v=20260707-9"></script>
 </head>
 <body>
     <header class="topbar">
@@ -27,12 +27,14 @@ declare(strict_types=1);
             <button class="tab" data-tab="help" type="button">Помощь</button>
             <button class="tab" data-tab="warehouses" type="button">Склады</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
-            <button class="primary nav-action" id="openAddBatchesButton" type="button">Добавить партию</button>
-            <button class="ghost-button" id="openWriteOffButton" type="button">Списать / Удалить</button>
-            <button class="small-button danger hidden" id="bulkDeleteButton" type="button">Удалить</button>
         </nav>
 
         <section class="panel active" id="tab-registry">
+            <div class="registry-actions registry-top-actions">
+                <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
+                <button class="ghost-button" id="openWriteOffButton" type="button">Списать / Удалить</button>
+                <button class="small-button danger hidden" id="bulkDeleteButton" type="button">Удалить</button>
+            </div>
             <div class="card registry-filter-card">
                 <div class="registry-search-row">
                     <input id="filterSearch" aria-label="Поиск" placeholder="Поиск...">
