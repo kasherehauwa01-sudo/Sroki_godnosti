@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-10"></script>
+    <script defer src="assets/app.js?v=20260707-11"></script>
 </head>
 <body>
     <header class="topbar">
@@ -96,6 +96,7 @@ declare(strict_types=1);
             <div class="settings-subtabs" aria-label="Разделы настроек">
                 <button class="settings-subtab active" data-settings-tab="main" type="button">Основные</button>
                 <button class="settings-subtab" data-settings-tab="warehouses" type="button">Склады</button>
+                <button class="settings-subtab" data-settings-tab="stock-fill" type="button">Заполнение остатков</button>
             </div>
             <form class="settings-grid settings-subpanel active" data-settings-panel="main" id="settingsForm">
                 <div class="card form">
@@ -206,6 +207,24 @@ manager@site.ru"></textarea></label>
                     <button class="primary" id="saveSettingsButton" type="submit">Сохранить настройки</button>
                 </div>
             </form>
+
+            <div class="settings-subpanel" data-settings-panel="stock-fill" hidden>
+                <div class="card form settings-stock-fill-card">
+                    <div class="section-heading registry-heading">
+                        <div>
+                            <h3>Заполнение остатков</h3>
+                            <p>Отслеживайте формы, отправленные складам для заполнения остатков партий.</p>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Склад</th><th>Партий</th><th>Заполнено</th><th>Статус</th><th>Последнее изменение</th><th>Действия</th></tr></thead>
+                            <tbody id="stockNotificationsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <div class="settings-subpanel" data-settings-panel="warehouses" hidden>
                 <div class="card form settings-warehouses-card">
                     <div class="section-heading registry-heading">

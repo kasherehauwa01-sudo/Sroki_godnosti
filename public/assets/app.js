@@ -16,6 +16,7 @@ const state = {
     selectedBatchIds: new Set(),
     warehouses: [],
     editingWarehouseId: null,
+    stockNotifications: [],
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -100,7 +101,7 @@ async function copyDeployCommand() {
 }
 
 function getApiMethod(action, data = {}) {
-    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock']);
+    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'stock_notifications', 'stock_notification']);
     const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete']);
 
     // Действие settings используется и для чтения, и для сохранения:
@@ -973,6 +974,7 @@ async function submitWarehouseForm(event) {
         closeWarehouseDialog();
         showToast('Склад сохранен.');
         await loadWarehouses();
+        await loadStockNotifications();
     } catch (error) {
         showToast(error.message, true);
     }
@@ -984,20 +986,62 @@ async function deleteWarehouse(id) {
         const result = await api('warehouse_delete', { id });
         showToast(result.soft_deleted ? 'Склад используется в остатках и был отключен.' : 'Склад удален.');
         await loadWarehouses();
+        await loadStockNotifications();
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+
+async function loadStockNotifications() {
+    const result = await api('stock_notifications');
+    state.stockNotifications = result.notifications || [];
+    renderStockNotifications();
+}
+
+function renderStockNotifications() {
+    const body = qs('#stockNotificationsBody');
+    if (!body) return;
+    body.innerHTML = state.stockNotifications.map((notification) => `
+        <tr>
+            <td>${escapeHtml(notification.warehouse)}</td>
+            <td>${Number(notification.total_items || 0)} партий</td>
+            <td>${Number(notification.filled_items || 0)} заполнено</td>
+            <td>${escapeHtml(notification.status)}</td>
+            <td>${escapeHtml(notification.last_changed_at || '—')}</td>
+            <td><button class="small-button stock-notification-details-button" data-id="${notification.id}" type="button">Открыть</button></td>
+        </tr>
+    `).join('') || '<tr><td colspan="6">Уведомлений по заполнению остатков пока нет.</td></tr>';
+    qsa('.stock-notification-details-button').forEach((button) => button.addEventListener('click', () => openStockNotificationDetails(button.dataset.id)));
+}
+
+async function openStockNotificationDetails(id) {
+    try {
+        const result = await api('stock_notification', { id });
+        const notification = result.notification || {};
+        const items = (result.items || []).map((item) => `${item.article} — ${item.name || item.code || ''}: ${formatQuantity(item.quantity)}`).join('\n');
+        const logs = (result.logs || []).map((log) => `${log.created_at}: партия ${log.batch_id || '—'}, ${log.old_quantity ?? '—'} → ${log.new_quantity}, IP ${log.ip || '—'}`).join('\n');
+        showNotificationDialog(
+            `Склад: ${notification.warehouse}\nДата отправки: ${notification.sent_at || notification.created_at}\nEmail:\n${notification.email}\nСсылка: ${notification.url || '—'}\nСтатус: ${notification.status}\n\nПартии:\n${items || 'Нет партий'}\n\nЖурнал изменений:\n${logs || 'Изменений пока нет.'}`,
+            'Карточка заполнения остатков'
+        );
     } catch (error) {
         showToast(error.message, true);
     }
 }
 
 async function loadSettings() {
-    const [settingsResult, warehousesResult] = await Promise.all([
+    const [settingsResult, warehousesResult, stockNotificationsResult] = await Promise.all([
         api('settings', { settings_password: state.settingsPassword }),
         api('warehouses'),
+        api('stock_notifications'),
     ]);
     state.settings = settingsResult.settings || { emails: [], rules: [] };
     state.warehouses = warehousesResult.warehouses || [];
+    state.stockNotifications = stockNotificationsResult.notifications || [];
     renderSettings();
     renderWarehouses();
+    renderStockNotifications();
 }
 
 

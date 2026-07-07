@@ -57,6 +57,7 @@ function ensureWarehouseSchema(PDO $pdo): void
 
     ensureWarehouseEmailColumn($pdo);
     seedDefaultWarehouses($pdo);
+    ensureStockNotificationSchema($pdo);
 }
 
 
@@ -247,4 +248,406 @@ function getBatchStockByWarehouses(PDO $pdo, int $batchId): array
     ], $rows);
 
     return ['items' => $items, 'total' => array_sum(array_column($items, 'quantity'))];
+}
+
+function ensureStockNotificationSchema(PDO $pdo): void
+{
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS stock_notifications (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            warehouse_id BIGINT UNSIGNED NOT NULL,
+            event_key VARCHAR(128) NOT NULL,
+            subject VARCHAR(255) NOT NULL,
+            email TEXT NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            sent_at DATETIME NULL,
+            first_opened_at DATETIME NULL,
+            last_opened_at DATETIME NULL,
+            last_changed_at DATETIME NULL,
+            completed_at DATETIME NULL,
+            status ENUM('Не открыта', 'Открыта', 'Частично заполнена', 'Заполнена', 'Просрочена', 'Закрыта администратором') NOT NULL DEFAULT 'Не открыта',
+            PRIMARY KEY (id),
+            INDEX idx_stock_notifications_warehouse (warehouse_id),
+            INDEX idx_stock_notifications_status (status),
+            INDEX idx_stock_notifications_created_at (created_at),
+            CONSTRAINT fk_stock_notifications_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS stock_notification_tokens (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            notification_id BIGINT UNSIGNED NOT NULL,
+            token VARCHAR(128) NULL,
+            token_hash CHAR(64) NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL,
+            status ENUM('Активна', 'Истек срок действия', 'Закрыта администратором') NOT NULL DEFAULT 'Активна',
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_stock_token_hash (token_hash),
+            INDEX idx_stock_token_notification (notification_id),
+            INDEX idx_stock_token_expires (expires_at),
+            CONSTRAINT fk_stock_token_notification FOREIGN KEY (notification_id) REFERENCES stock_notifications(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS stock_notification_items (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            notification_id BIGINT UNSIGNED NOT NULL,
+            batch_id BIGINT UNSIGNED NULL,
+            article VARCHAR(128) NOT NULL,
+            code VARCHAR(128) NOT NULL DEFAULT '',
+            name VARCHAR(255) NOT NULL DEFAULT '',
+            expiry_date DATE NULL,
+            expiry_full_date TINYINT(1) NOT NULL DEFAULT 0,
+            sort_order INT NOT NULL DEFAULT 0,
+            PRIMARY KEY (id),
+            INDEX idx_stock_items_notification (notification_id),
+            INDEX idx_stock_items_batch (batch_id),
+            CONSTRAINT fk_stock_items_notification FOREIGN KEY (notification_id) REFERENCES stock_notifications(id) ON DELETE CASCADE,
+            CONSTRAINT fk_stock_items_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS stock_change_logs (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            notification_id BIGINT UNSIGNED NOT NULL,
+            warehouse_id BIGINT UNSIGNED NOT NULL,
+            batch_id BIGINT UNSIGNED NULL,
+            old_quantity DECIMAL(14,3) NULL,
+            new_quantity DECIMAL(14,3) NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            ip VARCHAR(64) NULL,
+            user_agent TEXT NULL,
+            PRIMARY KEY (id),
+            INDEX idx_stock_change_notification (notification_id),
+            INDEX idx_stock_change_batch (batch_id),
+            CONSTRAINT fk_stock_change_notification FOREIGN KEY (notification_id) REFERENCES stock_notifications(id) ON DELETE CASCADE,
+            CONSTRAINT fk_stock_change_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT,
+            CONSTRAINT fk_stock_change_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    ensureStockTokenColumn($pdo);
+}
+
+function ensureStockTokenColumn(PDO $pdo): void
+{
+    $statement = $pdo->prepare(
+        'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+    );
+    $statement->execute([':table' => 'stock_notification_tokens', ':column' => 'token']);
+    if ((int)$statement->fetchColumn() === 0) {
+        $pdo->exec('ALTER TABLE stock_notification_tokens ADD COLUMN token VARCHAR(128) NULL AFTER notification_id');
+    }
+}
+
+function createStockNotification(PDO $pdo, array $warehouse, array $batches, string $eventKey, string $subject, string $baseUrl): array
+{
+    ensureStockNotificationSchema($pdo);
+    $token = bin2hex(random_bytes(32));
+    $expiresAt = (new DateTimeImmutable('now'))->modify('+3 days')->format('Y-m-d H:i:s');
+    $emails = normalizeWarehouseEmails((string)($warehouse['email'] ?? ''));
+    if ($emails === null) {
+        throw new InvalidArgumentException('У склада не указаны email для уведомления.');
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $notification = $pdo->prepare(
+            'INSERT INTO stock_notifications (warehouse_id, event_key, subject, email, sent_at)
+             VALUES (:warehouse_id, :event_key, :subject, :email, NOW())'
+        );
+        $notification->execute([
+            ':warehouse_id' => (int)$warehouse['id'],
+            ':event_key' => $eventKey,
+            ':subject' => $subject,
+            ':email' => $emails,
+        ]);
+        $notificationId = (int)$pdo->lastInsertId();
+
+        $tokenStatement = $pdo->prepare(
+            'INSERT INTO stock_notification_tokens (notification_id, token, token_hash, expires_at) VALUES (:notification_id, :token, :token_hash, :expires_at)'
+        );
+        $tokenStatement->execute([
+            ':notification_id' => $notificationId,
+            ':token' => $token,
+            ':token_hash' => hash('sha256', $token),
+            ':expires_at' => $expiresAt,
+        ]);
+
+        $item = $pdo->prepare(
+            'INSERT INTO stock_notification_items (notification_id, batch_id, article, code, name, expiry_date, expiry_full_date, sort_order)
+             VALUES (:notification_id, :batch_id, :article, :code, :name, :expiry_date, :expiry_full_date, :sort_order)'
+        );
+        foreach (array_values($batches) as $index => $batch) {
+            $item->execute([
+                ':notification_id' => $notificationId,
+                ':batch_id' => isset($batch['id']) ? (int)$batch['id'] : null,
+                ':article' => (string)($batch['article'] ?? ''),
+                ':code' => (string)($batch['code'] ?? ''),
+                ':name' => (string)($batch['name'] ?? ''),
+                ':expiry_date' => $batch['expiry_date'] ?? null,
+                ':expiry_full_date' => (int)($batch['expiry_full_date'] ?? 0),
+                ':sort_order' => $index + 1,
+            ]);
+        }
+        $pdo->commit();
+    } catch (Throwable $error) {
+        $pdo->rollBack();
+        throw $error;
+    }
+
+    return [
+        'id' => $notificationId,
+        'token' => $token,
+        'url' => rtrim($baseUrl, '/') . '/fill-stock.php/' . $token,
+        'expires_at' => $expiresAt,
+        'emails' => explode("\n", $emails),
+    ];
+}
+
+function getActiveWarehousesWithEmails(PDO $pdo): array
+{
+    $warehouses = listWarehouses($pdo, true);
+    return array_values(array_filter($warehouses, static fn (array $warehouse): bool => trim((string)($warehouse['email'] ?? '')) !== ''));
+}
+
+function loadStockFormByToken(PDO $pdo, string $token, bool $markOpened = true): array
+{
+    ensureStockNotificationSchema($pdo);
+    $hash = hash('sha256', trim($token));
+    $statement = $pdo->prepare(
+        "SELECT n.*, w.name AS warehouse_name, t.token, t.expires_at, t.status AS token_status
+         FROM stock_notification_tokens t
+         INNER JOIN stock_notifications n ON n.id = t.notification_id
+         INNER JOIN warehouses w ON w.id = n.warehouse_id
+         WHERE t.token_hash = :token_hash
+         LIMIT 1"
+    );
+    $statement->execute([':token_hash' => $hash]);
+    $notification = $statement->fetch();
+    if (!$notification) {
+        throw new InvalidArgumentException('Форма заполнения остатков не найдена.');
+    }
+
+    refreshStockNotificationExpiry($pdo, $notification);
+    if (!isStockNotificationActive($notification)) {
+        return ['active' => false, 'message' => 'Срок действия формы заполнения остатков истек. Если необходимо внести изменения, дождитесь следующего уведомления или обратитесь к администратору.'];
+    }
+
+    if ($markOpened) {
+        $pdo->prepare(
+            "UPDATE stock_notifications
+             SET first_opened_at = COALESCE(first_opened_at, NOW()), last_opened_at = NOW(), status = IF(status = 'Не открыта', 'Открыта', status)
+             WHERE id = :id"
+        )->execute([':id' => (int)$notification['id']]);
+    }
+
+    $items = getStockNotificationItems($pdo, (int)$notification['id'], (int)$notification['warehouse_id']);
+    return [
+        'active' => true,
+        'notification' => normalizeStockNotificationRow($notification, $items),
+        'items' => $items,
+    ];
+}
+
+function refreshStockNotificationExpiry(PDO $pdo, array &$notification): void
+{
+    if ((string)$notification['token_status'] === 'Активна' && strtotime((string)$notification['expires_at']) < time()) {
+        $pdo->prepare("UPDATE stock_notification_tokens SET status = 'Истек срок действия' WHERE notification_id = :id")->execute([':id' => (int)$notification['id']]);
+        $pdo->prepare("UPDATE stock_notifications SET status = 'Просрочена' WHERE id = :id AND status <> 'Заполнена'")->execute([':id' => (int)$notification['id']]);
+        $notification['token_status'] = 'Истек срок действия';
+        if ((string)$notification['status'] !== 'Заполнена') {
+            $notification['status'] = 'Просрочена';
+        }
+    }
+}
+
+function isStockNotificationActive(array $notification): bool
+{
+    return (string)$notification['token_status'] === 'Активна'
+        && !in_array((string)$notification['status'], ['Просрочена', 'Закрыта администратором'], true)
+        && strtotime((string)$notification['expires_at']) >= time();
+}
+
+function getStockNotificationItems(PDO $pdo, int $notificationId, int $warehouseId): array
+{
+    $statement = $pdo->prepare(
+        'SELECT i.id, i.batch_id, i.article, i.code, i.name, i.expiry_date, i.expiry_full_date, COALESCE(bs.quantity, 0) AS quantity
+         FROM stock_notification_items i
+         LEFT JOIN batch_stock bs ON bs.batch_id = i.batch_id AND bs.warehouse_id = :warehouse_id
+         WHERE i.notification_id = :notification_id
+         ORDER BY i.sort_order ASC, i.id ASC'
+    );
+    $statement->execute([':warehouse_id' => $warehouseId, ':notification_id' => $notificationId]);
+
+    return array_map(static fn (array $row): array => [
+        'id' => (int)$row['id'],
+        'batch_id' => isset($row['batch_id']) ? (int)$row['batch_id'] : null,
+        'article' => (string)$row['article'],
+        'code' => (string)$row['code'],
+        'name' => (string)$row['name'],
+        'expiry_date' => (string)($row['expiry_date'] ?? ''),
+        'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
+        'quantity' => (int)$row['quantity'],
+    ], $statement->fetchAll());
+}
+
+function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, string $userAgent): array
+{
+    $form = loadStockFormByToken($pdo, $token, false);
+    if (empty($form['active'])) {
+        throw new RuntimeException($form['message']);
+    }
+
+    $notification = $form['notification'];
+    $itemsById = [];
+    foreach ($form['items'] as $item) {
+        $itemsById[(int)$item['id']] = $item;
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $upsert = $pdo->prepare(
+            'INSERT INTO batch_stock (batch_id, warehouse_id, quantity)
+             VALUES (:batch_id, :warehouse_id, :quantity)
+             ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)'
+        );
+        $log = $pdo->prepare(
+            'INSERT INTO stock_change_logs (notification_id, warehouse_id, batch_id, old_quantity, new_quantity, ip, user_agent)
+             VALUES (:notification_id, :warehouse_id, :batch_id, :old_quantity, :new_quantity, :ip, :user_agent)'
+        );
+        foreach ($quantities as $itemId => $quantity) {
+            $itemId = (int)$itemId;
+            if (!isset($itemsById[$itemId]) || empty($itemsById[$itemId]['batch_id'])) {
+                continue;
+            }
+            if (!is_int($quantity) && !ctype_digit((string)$quantity)) {
+                throw new InvalidArgumentException('Остаток должен быть целым числом больше или равным 0.');
+            }
+            $newQuantity = (int)$quantity;
+            if ($newQuantity < 0) {
+                throw new InvalidArgumentException('Остаток должен быть целым числом больше или равным 0.');
+            }
+            $oldQuantity = (int)$itemsById[$itemId]['quantity'];
+            $upsert->execute([
+                ':batch_id' => (int)$itemsById[$itemId]['batch_id'],
+                ':warehouse_id' => (int)$notification['warehouse_id'],
+                ':quantity' => $newQuantity,
+            ]);
+            if ($oldQuantity !== $newQuantity) {
+                $log->execute([
+                    ':notification_id' => (int)$notification['id'],
+                    ':warehouse_id' => (int)$notification['warehouse_id'],
+                    ':batch_id' => (int)$itemsById[$itemId]['batch_id'],
+                    ':old_quantity' => $oldQuantity,
+                    ':new_quantity' => $newQuantity,
+                    ':ip' => $ip,
+                    ':user_agent' => $userAgent,
+                ]);
+            }
+        }
+        updateStockNotificationProgress($pdo, (int)$notification['id']);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        $pdo->rollBack();
+        throw $error;
+    }
+
+    return ['ok' => true] + loadStockFormByToken($pdo, $token, false);
+}
+
+function updateStockNotificationProgress(PDO $pdo, int $notificationId): void
+{
+    $statement = $pdo->prepare(
+        'SELECT COUNT(*) AS total, SUM(CASE WHEN bs.id IS NULL THEN 0 ELSE 1 END) AS filled
+         FROM stock_notification_items i
+         INNER JOIN stock_notifications n ON n.id = i.notification_id
+         LEFT JOIN batch_stock bs ON bs.batch_id = i.batch_id AND bs.warehouse_id = n.warehouse_id
+         WHERE i.notification_id = :notification_id'
+    );
+    $statement->execute([':notification_id' => $notificationId]);
+    $row = $statement->fetch() ?: ['total' => 0, 'filled' => 0];
+    $total = (int)$row['total'];
+    $filled = (int)$row['filled'];
+    $status = $filled <= 0 ? 'Открыта' : ($filled >= $total ? 'Заполнена' : 'Частично заполнена');
+    $completedSql = $status === 'Заполнена' ? ', completed_at = COALESCE(completed_at, NOW())' : '';
+    $pdo->prepare("UPDATE stock_notifications SET status = :status, last_changed_at = NOW()$completedSql WHERE id = :id")
+        ->execute([':status' => $status, ':id' => $notificationId]);
+}
+
+function listStockNotifications(PDO $pdo): array
+{
+    ensureStockNotificationSchema($pdo);
+    $statement = $pdo->query(
+        'SELECT n.*, w.name AS warehouse_name, COUNT(i.id) AS total_items,
+                SUM(CASE WHEN bs.id IS NULL THEN 0 ELSE 1 END) AS filled_items
+         FROM stock_notifications n
+         INNER JOIN warehouses w ON w.id = n.warehouse_id
+         LEFT JOIN stock_notification_items i ON i.notification_id = n.id
+         LEFT JOIN batch_stock bs ON bs.batch_id = i.batch_id AND bs.warehouse_id = n.warehouse_id
+         GROUP BY n.id
+         ORDER BY n.created_at DESC, n.id DESC
+         LIMIT 100'
+    );
+
+    return array_map(static fn (array $row): array => normalizeStockNotificationSummary($row), $statement->fetchAll());
+}
+
+function getStockNotificationDetails(PDO $pdo, int $id): array
+{
+    ensureStockNotificationSchema($pdo);
+    $statement = $pdo->prepare('SELECT n.*, w.name AS warehouse_name, t.token, t.expires_at FROM stock_notifications n INNER JOIN warehouses w ON w.id = n.warehouse_id LEFT JOIN stock_notification_tokens t ON t.notification_id = n.id WHERE n.id = :id');
+    $statement->execute([':id' => $id]);
+    $notification = $statement->fetch();
+    if (!$notification) {
+        throw new InvalidArgumentException('Уведомление по остаткам не найдено.');
+    }
+    $items = getStockNotificationItems($pdo, (int)$id, (int)$notification['warehouse_id']);
+    $logStatement = $pdo->prepare('SELECT batch_id, old_quantity, new_quantity, created_at, ip, user_agent FROM stock_change_logs WHERE notification_id = :id ORDER BY created_at DESC, id DESC');
+    $logStatement->execute([':id' => $id]);
+
+    return [
+        'notification' => normalizeStockNotificationRow($notification, $items),
+        'items' => $items,
+        'logs' => $logStatement->fetchAll(),
+    ];
+}
+
+function normalizeStockNotificationSummary(array $row): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'warehouse' => (string)$row['warehouse_name'],
+        'total_items' => (int)($row['total_items'] ?? 0),
+        'filled_items' => (int)($row['filled_items'] ?? 0),
+        'status' => (string)$row['status'],
+        'last_changed_at' => (string)($row['last_changed_at'] ?? ''),
+        'created_at' => (string)$row['created_at'],
+    ];
+}
+
+function normalizeStockNotificationRow(array $row, array $items): array
+{
+    return [
+        'id' => (int)$row['id'],
+        'warehouse_id' => (int)$row['warehouse_id'],
+        'warehouse' => (string)($row['warehouse_name'] ?? ''),
+        'email' => (string)$row['email'],
+        'subject' => (string)$row['subject'],
+        'status' => (string)$row['status'],
+        'created_at' => (string)$row['created_at'],
+        'sent_at' => (string)($row['sent_at'] ?? ''),
+        'first_opened_at' => (string)($row['first_opened_at'] ?? ''),
+        'last_opened_at' => (string)($row['last_opened_at'] ?? ''),
+        'last_changed_at' => (string)($row['last_changed_at'] ?? ''),
+        'completed_at' => (string)($row['completed_at'] ?? ''),
+        'expires_at' => (string)($row['expires_at'] ?? ''),
+        'url' => !empty($row['token']) ? publicBaseUrl() . '/fill-stock.php/' . (string)$row['token'] : '',
+        'total_items' => count($items),
+        'filled_items' => count(array_filter($items, static fn (array $item): bool => (int)$item['quantity'] > 0)),
+    ];
 }
