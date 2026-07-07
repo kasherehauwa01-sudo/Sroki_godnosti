@@ -17,6 +17,7 @@ require_once __DIR__ . '/../app/database.php';
 require_once __DIR__ . '/../app/mailer.php';
 require_once __DIR__ . '/../app/notification_templates.php';
 require_once __DIR__ . '/../app/auto_importer.php';
+require_once __DIR__ . '/../app/warehouse_repository.php';
 
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
@@ -37,6 +38,7 @@ function handleApiRequest(): void
         ensureBatchesSchema($pdo);
         ensureSettingsSchema($pdo);
         ensureMissingFilterLogSchema($pdo);
+        ensureWarehouseSchema($pdo);
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $payload = readPayload();
         $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
@@ -56,6 +58,8 @@ function handleApiRequest(): void
                 'report' => ['ok' => true, 'batches' => reportBatches($pdo, $_GET)],
                 'settings' => getProtectedSettings($pdo, $_GET),
                 'logs' => ['ok' => true, 'logs' => getLogs($pdo)],
+                'warehouses' => ['ok' => true, 'warehouses' => listWarehouses($pdo, !empty($_GET['active_only']))],
+                'batch_stock' => ['ok' => true, 'stock' => getBatchStockByWarehouses($pdo, (int)($_GET['batch_id'] ?? 0))],
                 'tick' => ['ok' => true],
                 default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
             };
@@ -72,6 +76,9 @@ function handleApiRequest(): void
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
                 'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
                 'verify_write_off' => verifyWriteOffPassword($payload),
+                'warehouse_create' => createWarehouse($pdo, $payload),
+                'warehouse_update' => updateWarehouse($pdo, $payload),
+                'warehouse_delete' => deleteWarehouse($pdo, $payload),
                 default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
             };
         }
@@ -773,11 +780,11 @@ function shouldRunExpiryNotificationsNow(PDO $pdo, DateTimeImmutable $scheduledA
 
 function sendDueExpiryNotifications(PDO $pdo, array $settings): void
 {
-    $emails = splitEmails((string)($settings['notification_email'] ?? ''));
+    $emails = getWarehouseNotificationEmails($pdo);
     if (!$emails) {
         writeLog($pdo, 'expiry_check_skipped', [
             'mode' => 'daily_auto',
-            'reason' => 'Не указаны email-получатели',
+            'reason' => 'Не указаны email складов для уведомлений',
         ]);
         return;
     }
@@ -871,9 +878,9 @@ function sendTestNotification(PDO $pdo, array $payload): array
     assertSettingsPassword($payload);
 
     $settings = getRawSettings($pdo);
-    $emails = splitEmails((string)($settings['notification_email'] ?? ''));
+    $emails = getWarehouseNotificationEmails($pdo);
     if (!$emails) {
-        throw new RuntimeException('Добавьте хотя бы одного получателя перед отправкой тестового уведомления.');
+        throw new RuntimeException('Добавьте хотя бы один email во вкладке «Настройки» → «Склады» перед отправкой тестового уведомления.');
     }
 
     $batch = findNearestExpiringBatch($pdo);
