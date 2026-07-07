@@ -1682,6 +1682,19 @@ function startSchedulerHeartbeat() {
     setInterval(runTick, 30000);
 }
 
+function startSchedulerHeartbeat() {
+    const runTick = async () => {
+        try {
+            await api('tick');
+        } catch (error) {
+            console.warn('Не удалось выполнить проверку расписания', error);
+        }
+    };
+
+    runTick();
+    setInterval(runTick, 30000);
+}
+
 async function bootstrap() {
     try {
         await Promise.all([loadBatches(), loadHistory()]);
