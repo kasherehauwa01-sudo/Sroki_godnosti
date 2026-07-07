@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS settings (
     smtp_port SMALLINT UNSIGNED NULL,
     smtp_username VARCHAR(255) NULL,
     smtp_password TEXT NULL,
-    smtp_from_email VARCHAR(255) NULL,
+    smtp_from_email TEXT NULL,
     smtp_from_name VARCHAR(255) NULL,
     notification_time CHAR(5) NOT NULL DEFAULT '09:00',
     auto_import_time CHAR(5) NOT NULL DEFAULT '10:00',
@@ -95,3 +95,115 @@ INSERT INTO settings (
     missing_filter_email
 ) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00', '10:00', NULL)
 ON DUPLICATE KEY UPDATE id = id;
+
+CREATE TABLE IF NOT EXISTS warehouses (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    name VARCHAR(255) NOT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    email TEXT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_warehouses_active_order (is_active, sort_order),
+    UNIQUE KEY uniq_warehouses_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS batch_stock (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    batch_id BIGINT UNSIGNED NOT NULL,
+    warehouse_id BIGINT UNSIGNED NOT NULL,
+    quantity DECIMAL(14,3) NOT NULL DEFAULT 0,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_batch_stock_batch_warehouse (batch_id, warehouse_id),
+    INDEX idx_batch_stock_batch (batch_id),
+    INDEX idx_batch_stock_warehouse (warehouse_id),
+    CONSTRAINT fk_batch_stock_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE,
+    CONSTRAINT fk_batch_stock_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO warehouses (name, sort_order, email, is_active) VALUES
+    ('Авиаторов', 10, NULL, 1),
+    ('Козловская', 20, NULL, 1),
+    ('Цитрус', 30, NULL, 1),
+    ('Привоз', 40, NULL, 1),
+    ('Бахтурова', 50, NULL, 1),
+    ('Ахтубинск', 60, NULL, 1),
+    ('СтройГрад', 70, NULL, 1),
+    ('Европа', 80, NULL, 1),
+    ('Парк Хаус', 90, NULL, 1),
+    ('ЦУМ', 100, NULL, 1),
+    ('Простор', 110, NULL, 1),
+    ('Универ', 120, NULL, 1)
+ON DUPLICATE KEY UPDATE name = VALUES(name);
+
+CREATE TABLE IF NOT EXISTS stock_notifications (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    warehouse_id BIGINT UNSIGNED NOT NULL,
+    event_key VARCHAR(128) NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    email TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sent_at DATETIME NULL,
+    first_opened_at DATETIME NULL,
+    last_opened_at DATETIME NULL,
+    last_changed_at DATETIME NULL,
+    completed_at DATETIME NULL,
+    status ENUM('Не открыта', 'Открыта', 'Частично заполнена', 'Заполнена', 'Просрочена', 'Закрыта администратором') NOT NULL DEFAULT 'Не открыта',
+    PRIMARY KEY (id),
+    INDEX idx_stock_notifications_warehouse (warehouse_id),
+    INDEX idx_stock_notifications_status (status),
+    INDEX idx_stock_notifications_created_at (created_at),
+    CONSTRAINT fk_stock_notifications_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS stock_notification_tokens (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    notification_id BIGINT UNSIGNED NOT NULL,
+    token VARCHAR(128) NULL,
+    token_hash CHAR(64) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    status ENUM('Активна', 'Истек срок действия', 'Закрыта администратором') NOT NULL DEFAULT 'Активна',
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_stock_token_hash (token_hash),
+    INDEX idx_stock_token_notification (notification_id),
+    INDEX idx_stock_token_expires (expires_at),
+    CONSTRAINT fk_stock_token_notification FOREIGN KEY (notification_id) REFERENCES stock_notifications(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS stock_notification_items (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    notification_id BIGINT UNSIGNED NOT NULL,
+    batch_id BIGINT UNSIGNED NULL,
+    article VARCHAR(128) NOT NULL,
+    code VARCHAR(128) NOT NULL DEFAULT '',
+    name VARCHAR(255) NOT NULL DEFAULT '',
+    expiry_date DATE NULL,
+    expiry_full_date TINYINT(1) NOT NULL DEFAULT 0,
+    sort_order INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    INDEX idx_stock_items_notification (notification_id),
+    INDEX idx_stock_items_batch (batch_id),
+    CONSTRAINT fk_stock_items_notification FOREIGN KEY (notification_id) REFERENCES stock_notifications(id) ON DELETE CASCADE,
+    CONSTRAINT fk_stock_items_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS stock_change_logs (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    notification_id BIGINT UNSIGNED NOT NULL,
+    warehouse_id BIGINT UNSIGNED NOT NULL,
+    batch_id BIGINT UNSIGNED NULL,
+    old_quantity DECIMAL(14,3) NULL,
+    new_quantity DECIMAL(14,3) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ip VARCHAR(64) NULL,
+    user_agent TEXT NULL,
+    PRIMARY KEY (id),
+    INDEX idx_stock_change_notification (notification_id),
+    INDEX idx_stock_change_batch (batch_id),
+    CONSTRAINT fk_stock_change_notification FOREIGN KEY (notification_id) REFERENCES stock_notifications(id) ON DELETE CASCADE,
+    CONSTRAINT fk_stock_change_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_stock_change_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

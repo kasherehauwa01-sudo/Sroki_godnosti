@@ -17,6 +17,7 @@ require_once __DIR__ . '/../app/database.php';
 require_once __DIR__ . '/../app/mailer.php';
 require_once __DIR__ . '/../app/notification_templates.php';
 require_once __DIR__ . '/../app/auto_importer.php';
+require_once __DIR__ . '/../app/warehouse_repository.php';
 
 const ACTIVE_STATUS = 'В наличии';
 const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
@@ -37,6 +38,7 @@ function handleApiRequest(): void
         ensureBatchesSchema($pdo);
         ensureSettingsSchema($pdo);
         ensureMissingFilterLogSchema($pdo);
+        ensureWarehouseSchema($pdo);
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $payload = readPayload();
         $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
@@ -56,6 +58,11 @@ function handleApiRequest(): void
                 'report' => ['ok' => true, 'batches' => reportBatches($pdo, $_GET)],
                 'settings' => getProtectedSettings($pdo, $_GET),
                 'logs' => ['ok' => true, 'logs' => getLogs($pdo)],
+                'warehouses' => ['ok' => true, 'warehouses' => listWarehouses($pdo, !empty($_GET['active_only']))],
+                'batch_stock' => ['ok' => true, 'stock' => getBatchStockByWarehouses($pdo, (int)($_GET['batch_id'] ?? 0))],
+                'stock_form' => ['ok' => true] + loadStockFormByToken($pdo, (string)($_GET['token'] ?? '')),
+                'stock_notifications' => ['ok' => true, 'notifications' => listStockNotifications($pdo)],
+                'stock_notification' => ['ok' => true] + getStockNotificationDetails($pdo, (int)($_GET['id'] ?? 0)),
                 'tick' => ['ok' => true],
                 default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
             };
@@ -72,6 +79,10 @@ function handleApiRequest(): void
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
                 'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
                 'verify_write_off' => verifyWriteOffPassword($payload),
+                'warehouse_create' => createWarehouse($pdo, $payload),
+                'warehouse_update' => updateWarehouse($pdo, $payload),
+                'warehouse_delete' => deleteWarehouse($pdo, $payload),
+                'save_stock_form' => saveStockForm($pdo, (string)($payload['token'] ?? ''), (array)($payload['quantities'] ?? []), clientIp(), (string)($_SERVER['HTTP_USER_AGENT'] ?? '')),
                 default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
             };
         }
@@ -81,6 +92,20 @@ function handleApiRequest(): void
         http_response_code(500);
         echo json_encode(['ok' => false, 'error' => $error->getMessage()], JSON_UNESCAPED_UNICODE);
     }
+}
+
+
+function publicBaseUrl(): string
+{
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = (string)($_SERVER['HTTP_HOST'] ?? 'localhost');
+    $path = rtrim(str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/'))), '/');
+    return $scheme . '://' . $host . ($path === '' ? '' : $path);
+}
+
+function clientIp(): string
+{
+    return (string)($_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '');
 }
 
 function readPayload(): array
@@ -773,11 +798,11 @@ function shouldRunExpiryNotificationsNow(PDO $pdo, DateTimeImmutable $scheduledA
 
 function sendDueExpiryNotifications(PDO $pdo, array $settings): void
 {
-    $emails = splitEmails((string)($settings['notification_email'] ?? ''));
+    $emails = getWarehouseNotificationEmails($pdo);
     if (!$emails) {
         writeLog($pdo, 'expiry_check_skipped', [
             'mode' => 'daily_auto',
-            'reason' => 'Не указаны email-получатели',
+            'reason' => 'Не указаны email складов для уведомлений',
         ]);
         return;
     }
@@ -785,7 +810,7 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
     $notificationDays = NOTIFICATION_EVENT_DAYS;
     $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
     $statement = $pdo->prepare(
-        "SELECT article, code, quantity, expiry_date, expiry_full_date, days_left
+        "SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
          ORDER BY days_left ASC, expiry_date ASC, article ASC"
@@ -802,16 +827,29 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
     }
 
     $sentEvents = [];
+    $warehouses = getActiveWarehousesWithEmails($pdo);
     foreach (groupBatchesByDaysLeft($batches) as $daysLeft => $eventBatches) {
         $subject = expiryNotificationSubject((int)$daysLeft);
-        $body = expiryNotificationBody($eventBatches, (int)$daysLeft);
-        sendNotificationEmail($pdo, $emails, $subject, $body, $settings, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)]);
-        $sentEvents[] = [
-            'days_left' => (int)$daysLeft,
-            'count' => count($eventBatches),
-            'subject' => $subject,
-            'text' => $body,
-        ];
+        foreach ($warehouses as $warehouse) {
+            $form = createStockNotification($pdo, $warehouse, $eventBatches, 'expiry_' . (int)$daysLeft, $subject, publicBaseUrl());
+            $body = expiryNotificationBody($eventBatches, (int)$daysLeft)
+                . "
+
+Необходимо заполнить остатки партий.
+
+Для заполнения перейдите по ссылке:
+" . $form['url'];
+            sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)]);
+            $sentEvents[] = [
+                'days_left' => (int)$daysLeft,
+                'warehouse_id' => (int)$warehouse['id'],
+                'warehouse' => (string)$warehouse['name'],
+                'notification_id' => (int)$form['id'],
+                'count' => count($eventBatches),
+                'subject' => $subject,
+                'text' => $body,
+            ];
+        }
     }
 
     writeLog($pdo, 'expiry_notifications_sent', [
@@ -871,9 +909,9 @@ function sendTestNotification(PDO $pdo, array $payload): array
     assertSettingsPassword($payload);
 
     $settings = getRawSettings($pdo);
-    $emails = splitEmails((string)($settings['notification_email'] ?? ''));
+    $emails = getWarehouseNotificationEmails($pdo);
     if (!$emails) {
-        throw new RuntimeException('Добавьте хотя бы одного получателя перед отправкой тестового уведомления.');
+        throw new RuntimeException('Добавьте хотя бы один email во вкладке «Настройки» → «Склады» перед отправкой тестового уведомления.');
     }
 
     $batch = findNearestExpiringBatch($pdo);
@@ -884,8 +922,19 @@ function sendTestNotification(PDO $pdo, array $payload): array
     $daysLeft = (int)($batch['days_left'] ?? 0);
     $body = expiryNotificationBody([$batch], $daysLeft);
     $subject = expiryNotificationSubject($daysLeft);
+    $warehouse = getActiveWarehousesWithEmails($pdo)[0] ?? null;
+    if (!$warehouse) {
+        throw new RuntimeException('Добавьте хотя бы один email во вкладке «Настройки» → «Склады» перед отправкой тестового уведомления.');
+    }
+    $form = createStockNotification($pdo, $warehouse, [$batch], 'test_expiry_' . $daysLeft, $subject, publicBaseUrl());
+    $body .= "
+
+Необходимо заполнить остатки партий.
+
+Для заполнения перейдите по ссылке:
+" . $form['url'];
     try {
-        sendNotificationEmail($pdo, $emails, $subject, $body, $settings);
+        sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings);
         writeLog($pdo, 'test_notification_sent', [
             'emails' => $emails,
             'article' => $batch['article'] ?? '',
@@ -924,7 +973,7 @@ function runTestMissingFilterNotification(PDO $pdo, array $payload): array
 function findNearestExpiringBatch(PDO $pdo): ?array
 {
     $statement = $pdo->query(
-        "SELECT article, code, expiry_date, expiry_full_date, days_left
+        "SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left >= 0
          ORDER BY days_left ASC, expiry_date ASC, article ASC
