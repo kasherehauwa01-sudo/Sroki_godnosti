@@ -917,6 +917,7 @@ function renderWarehouses() {
         <tr>
             <td>${escapeHtml(warehouse.name)}</td>
             <td>${escapeHtml(warehouse.sort_order)}</td>
+            <td>${escapeHtml(warehouse.email || '—')}</td>
             <td>${warehouse.is_active ? 'Активен' : 'Отключен'}</td>
             <td>
                 <div class="row-actions">
@@ -925,7 +926,7 @@ function renderWarehouses() {
                 </div>
             </td>
         </tr>
-    `).join('') || '<tr><td colspan="4">Склады не найдены.</td></tr>';
+    `).join('') || '<tr><td colspan="5">Склады не найдены.</td></tr>';
 
     qsa('.edit-warehouse-button').forEach((button) => button.addEventListener('click', () => openWarehouseDialog(button.dataset.id)));
     qsa('.delete-warehouse-button').forEach((button) => button.addEventListener('click', () => deleteWarehouse(button.dataset.id)));
@@ -937,6 +938,7 @@ function openWarehouseDialog(id = null) {
     qs('#warehouseDialogTitle').textContent = warehouse ? 'Изменить склад' : 'Добавить склад';
     qs('#warehouseName').value = warehouse?.name || '';
     qs('#warehouseSortOrder').value = warehouse?.sort_order ?? 0;
+    qs('#warehouseEmail').value = warehouse?.email || '';
     qs('#warehouseIsActive').checked = warehouse ? Boolean(warehouse.is_active) : true;
     qs('#warehouseDialog').showModal();
 }
@@ -952,6 +954,7 @@ async function submitWarehouseForm(event) {
     const payload = {
         name: qs('#warehouseName').value,
         sort_order: qs('#warehouseSortOrder').value,
+        email: qs('#warehouseEmail').value,
         is_active: qs('#warehouseIsActive').checked,
     };
     if (state.editingWarehouseId) payload.id = state.editingWarehouseId;

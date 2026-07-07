@@ -29,6 +29,7 @@ function ensureWarehouseSchema(PDO $pdo): void
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             name VARCHAR(255) NOT NULL,
             sort_order INT NOT NULL DEFAULT 0,
+            email VARCHAR(255) NULL,
             is_active TINYINT(1) NOT NULL DEFAULT 1,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -54,7 +55,20 @@ function ensureWarehouseSchema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 
+    ensureWarehouseEmailColumn($pdo);
     seedDefaultWarehouses($pdo);
+}
+
+
+function ensureWarehouseEmailColumn(PDO $pdo): void
+{
+    $statement = $pdo->prepare(
+        'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+    );
+    $statement->execute([':table' => 'warehouses', ':column' => 'email']);
+    if ((int)$statement->fetchColumn() === 0) {
+        $pdo->exec('ALTER TABLE warehouses ADD COLUMN email VARCHAR(255) NULL AFTER sort_order');
+    }
 }
 
 function seedDefaultWarehouses(PDO $pdo): void
@@ -64,7 +78,7 @@ function seedDefaultWarehouses(PDO $pdo): void
         return;
     }
 
-    $statement = $pdo->prepare('INSERT INTO warehouses (name, sort_order, is_active) VALUES (:name, :sort_order, 1)');
+    $statement = $pdo->prepare('INSERT INTO warehouses (name, sort_order, email, is_active) VALUES (:name, :sort_order, NULL, 1)');
     foreach (DEFAULT_WAREHOUSES as $index => $name) {
         $statement->execute([':name' => $name, ':sort_order' => ($index + 1) * 10]);
     }
@@ -72,7 +86,7 @@ function seedDefaultWarehouses(PDO $pdo): void
 
 function listWarehouses(PDO $pdo, bool $activeOnly = false): array
 {
-    $sql = 'SELECT id, name, sort_order, is_active, created_at, updated_at FROM warehouses';
+    $sql = 'SELECT id, name, sort_order, email, is_active, created_at, updated_at FROM warehouses';
     if ($activeOnly) {
         $sql .= ' WHERE is_active = 1';
     }
@@ -87,6 +101,7 @@ function normalizeWarehouseRow(array $row): array
         'id' => (int)$row['id'],
         'name' => (string)$row['name'],
         'sort_order' => (int)$row['sort_order'],
+        'email' => (string)($row['email'] ?? ''),
         'is_active' => (bool)$row['is_active'],
         'created_at' => (string)$row['created_at'],
         'updated_at' => (string)$row['updated_at'],
@@ -96,7 +111,7 @@ function normalizeWarehouseRow(array $row): array
 function createWarehouse(PDO $pdo, array $payload): array
 {
     $warehouse = normalizeWarehousePayload($payload);
-    $statement = $pdo->prepare('INSERT INTO warehouses (name, sort_order, is_active) VALUES (:name, :sort_order, :is_active)');
+    $statement = $pdo->prepare('INSERT INTO warehouses (name, sort_order, email, is_active) VALUES (:name, :sort_order, :email, :is_active)');
     $statement->execute($warehouse);
 
     return ['ok' => true, 'warehouse' => getWarehouse($pdo, (int)$pdo->lastInsertId())];
@@ -110,7 +125,7 @@ function updateWarehouse(PDO $pdo, array $payload): array
     }
 
     $warehouse = normalizeWarehousePayload($payload);
-    $statement = $pdo->prepare('UPDATE warehouses SET name = :name, sort_order = :sort_order, is_active = :is_active WHERE id = :id');
+    $statement = $pdo->prepare('UPDATE warehouses SET name = :name, sort_order = :sort_order, email = :email, is_active = :is_active WHERE id = :id');
     $statement->execute($warehouse + [':id' => $id]);
 
     return ['ok' => true, 'warehouse' => getWarehouse($pdo, $id)];
@@ -144,13 +159,28 @@ function normalizeWarehousePayload(array $payload): array
     return [
         ':name' => $name,
         ':sort_order' => (int)($payload['sort_order'] ?? 0),
+        ':email' => normalizeWarehouseEmail((string)($payload['email'] ?? '')),
         ':is_active' => filter_var($payload['is_active'] ?? true, FILTER_VALIDATE_BOOLEAN) ? 1 : 0,
     ];
 }
 
+
+function normalizeWarehouseEmail(string $email): ?string
+{
+    $email = trim($email);
+    if ($email === '') {
+        return null;
+    }
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Введите корректный email склада.');
+    }
+
+    return $email;
+}
+
 function getWarehouse(PDO $pdo, int $id): array
 {
-    $statement = $pdo->prepare('SELECT id, name, sort_order, is_active, created_at, updated_at FROM warehouses WHERE id = :id');
+    $statement = $pdo->prepare('SELECT id, name, sort_order, email, is_active, created_at, updated_at FROM warehouses WHERE id = :id');
     $statement->execute([':id' => $id]);
     $warehouse = $statement->fetch();
     if (!$warehouse) {
@@ -171,7 +201,7 @@ function warehouseHasStock(PDO $pdo, int $id): bool
 function getBatchStockByWarehouses(PDO $pdo, int $batchId): array
 {
     $statement = $pdo->prepare(
-        'SELECT w.id AS warehouse_id, w.name, w.sort_order, COALESCE(bs.quantity, 0) AS quantity
+        'SELECT w.id AS warehouse_id, w.name, w.sort_order, w.email, COALESCE(bs.quantity, 0) AS quantity
          FROM warehouses w
          LEFT JOIN batch_stock bs ON bs.warehouse_id = w.id AND bs.batch_id = :batch_id
          WHERE w.is_active = 1
@@ -184,6 +214,7 @@ function getBatchStockByWarehouses(PDO $pdo, int $batchId): array
         'warehouse_id' => (int)$row['warehouse_id'],
         'name' => (string)$row['name'],
         'sort_order' => (int)$row['sort_order'],
+        'email' => (string)($row['email'] ?? ''),
         'quantity' => (float)$row['quantity'],
     ], $rows);
 
