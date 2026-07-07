@@ -95,3 +95,45 @@ INSERT INTO settings (
     missing_filter_email
 ) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00', '10:00', NULL)
 ON DUPLICATE KEY UPDATE id = id;
+
+CREATE TABLE IF NOT EXISTS warehouses (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    name VARCHAR(255) NOT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    email VARCHAR(255) NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_warehouses_active_order (is_active, sort_order),
+    UNIQUE KEY uniq_warehouses_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS batch_stock (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    batch_id BIGINT UNSIGNED NOT NULL,
+    warehouse_id BIGINT UNSIGNED NOT NULL,
+    quantity DECIMAL(14,3) NOT NULL DEFAULT 0,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_batch_stock_batch_warehouse (batch_id, warehouse_id),
+    INDEX idx_batch_stock_batch (batch_id),
+    INDEX idx_batch_stock_warehouse (warehouse_id),
+    CONSTRAINT fk_batch_stock_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE,
+    CONSTRAINT fk_batch_stock_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO warehouses (name, sort_order, email, is_active) VALUES
+    ('Авиаторов', 10, NULL, 1),
+    ('Козловская', 20, NULL, 1),
+    ('Цитрус', 30, NULL, 1),
+    ('Привоз', 40, NULL, 1),
+    ('Бахтурова', 50, NULL, 1),
+    ('Ахтубинск', 60, NULL, 1),
+    ('СтройГрад', 70, NULL, 1),
+    ('Европа', 80, NULL, 1),
+    ('Парк Хаус', 90, NULL, 1),
+    ('ЦУМ', 100, NULL, 1),
+    ('Простор', 110, NULL, 1),
+    ('Универ', 120, NULL, 1)
+ON DUPLICATE KEY UPDATE name = VALUES(name);
