@@ -1000,6 +1000,16 @@ async function loadSettings() {
     renderWarehouses();
 }
 
+
+function switchSettingsTab(tabName) {
+    qsa('.settings-subtab').forEach((button) => {
+        button.classList.toggle('active', button.dataset.settingsTab === tabName);
+    });
+    qsa('[data-settings-panel]').forEach((panel) => {
+        panel.classList.toggle('active', panel.dataset.settingsPanel === tabName);
+    });
+}
+
 function switchTab(tabName) {
     document.body.dataset.activeTab = tabName;
     qsa('.tab, .panel').forEach((item) => item.classList.remove('active'));
@@ -1691,6 +1701,8 @@ function bindEvents() {
             await loadSettings();
         }
     }));
+
+    qsa('.settings-subtab').forEach((button) => button.addEventListener('click', () => switchSettingsTab(button.dataset.settingsTab)));
 
     qs('#closeNotificationDialogButton').addEventListener('click', closeNotificationDialog);
     qs('#closeBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);

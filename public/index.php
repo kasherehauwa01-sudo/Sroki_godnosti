@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-7"></script>
+    <script defer src="assets/app.js?v=20260707-8"></script>
 </head>
 <body>
     <header class="topbar">
@@ -91,7 +91,11 @@ declare(strict_types=1);
         </section>
 
         <section class="panel" id="tab-settings">
-            <form class="settings-grid" id="settingsForm">
+            <div class="settings-subtabs" aria-label="Разделы настроек">
+                <button class="settings-subtab active" data-settings-tab="main" type="button">Основные</button>
+                <button class="settings-subtab" data-settings-tab="warehouses" type="button">Склады</button>
+            </div>
+            <form class="settings-grid settings-subpanel active" data-settings-panel="main" id="settingsForm">
                 <div class="card form">
                     <h3>Уведомления</h3>
                     <label class="checkbox-row"><input id="notify0" name="notify_0_days" type="checkbox"> В день просрочки</label>
@@ -200,6 +204,23 @@ manager@site.ru"></textarea></label>
                     <button class="primary" id="saveSettingsButton" type="submit">Сохранить настройки</button>
                 </div>
             </form>
+            <div class="settings-subpanel" data-settings-panel="warehouses">
+                <div class="card form settings-warehouses-card">
+                    <div class="section-heading registry-heading">
+                        <div>
+                            <h3>Склады</h3>
+                            <p>Управляйте списком складов и email-адресами для уведомлений по событиям.</p>
+                        </div>
+                        <button class="primary" id="openWarehouseDialogButton" type="button">Добавить склад</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Название</th><th>Порядок</th><th>Email</th><th>Статус</th><th>Действия</th></tr></thead>
+                            <tbody id="warehousesBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </section>
 
 
