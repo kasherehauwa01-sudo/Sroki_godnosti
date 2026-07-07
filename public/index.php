@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-3"></script>
+    <script defer src="assets/app.js?v=20260707-6"></script>
 </head>
 <body>
     <header class="topbar">
@@ -25,6 +25,7 @@ declare(strict_types=1);
             <button class="tab active" data-tab="registry" type="button">Реестр</button>
             <button class="tab" data-tab="history" type="button">История</button>
             <button class="tab" data-tab="help" type="button">Помощь</button>
+            <button class="tab" data-tab="warehouses" type="button">Склады</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
             <button class="primary nav-action" id="openAddBatchesButton" type="button">Добавить партию</button>
             <button class="ghost-button" id="openWriteOffButton" type="button">Списать / Удалить</button>
@@ -284,6 +285,23 @@ manager@site.ru"></textarea></label>
 
 
 
+
+        <section class="panel" id="tab-warehouses">
+            <div class="section-heading registry-heading">
+                <div>
+                    <h2>Склады</h2>
+                    <p>Управляйте списком складов, который используется в карточках партий и будущей загрузке остатков.</p>
+                </div>
+                <button class="primary" id="openWarehouseDialogButton" type="button">Добавить склад</button>
+            </div>
+            <div class="table-wrap card">
+                <table>
+                    <thead><tr><th>Название</th><th>Порядок</th><th>Email</th><th>Статус</th><th>Действия</th></tr></thead>
+                    <tbody id="warehousesBody"></tbody>
+                </table>
+            </div>
+        </section>
+
         <section class="panel" id="tab-history">
             <div class="card filters history-filters">
                 <label>Дата
@@ -427,6 +445,45 @@ manager@site.ru"></textarea></label>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelEditButton" type="button">Отмена</button>
                 <button class="primary" type="submit">Ок</button>
+            </div>
+        </form>
+    </dialog>
+
+
+    <dialog class="modal" id="batchStockDialog">
+        <div class="card form modal-card">
+            <div class="modal-heading">
+                <h2 id="batchStockTitle">Остатки партии</h2>
+                <button class="icon-button" id="closeBatchStockDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle" id="batchStockMeta"></p>
+            <h3>Остатки партии по складам</h3>
+            <div class="table-wrap stock-table-wrap">
+                <table class="stock-table">
+                    <thead><tr><th>Склад</th><th>Количество</th></tr></thead>
+                    <tbody id="batchStockBody"></tbody>
+                    <tfoot><tr><th>Итого</th><th class="numeric-cell" id="batchStockTotal">0</th></tr></tfoot>
+                </table>
+            </div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmBatchStockDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal" id="warehouseDialog">
+        <form class="card form modal-card" id="warehouseForm" method="dialog">
+            <div class="modal-heading">
+                <h2 id="warehouseDialogTitle">Добавить склад</h2>
+                <button class="icon-button" id="closeWarehouseDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <label>Название склада<input id="warehouseName" required autocomplete="off"></label>
+            <label>Порядок отображения<input id="warehouseSortOrder" required step="1" type="number" value="0"></label>
+            <label>Email для уведомлений<textarea id="warehouseEmail" autocomplete="email" rows="4" placeholder="sklad@example.ru&#10;manager@example.ru"></textarea></label>
+            <label class="checkbox-row"><input id="warehouseIsActive" type="checkbox" checked> Активен</label>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelWarehouseButton" type="button">Отмена</button>
+                <button class="primary" type="submit">Сохранить</button>
             </div>
         </form>
     </dialog>

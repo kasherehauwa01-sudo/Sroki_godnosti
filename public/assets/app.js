@@ -14,6 +14,8 @@ const state = {
     writeOffAccessGranted: false,
     writeOffPassword: '',
     selectedBatchIds: new Set(),
+    warehouses: [],
+    editingWarehouseId: null,
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -98,8 +100,8 @@ async function copyDeployCommand() {
 }
 
 function getApiMethod(action, data = {}) {
-    const readActions = new Set(['list', 'logs', 'tick']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'verify_write_off', 'delete_by_articles']);
+    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -565,7 +567,7 @@ function renderRegistry() {
         const invalidDateActions = batch.expiryInvalid
             ? `<span class="invalid-date-label">некорректная дата</span><button class="small-button fix-expiry-button" data-id="${escapeHtml(batch.id)}" type="button">Исправить</button>`
             : '';
-        return `<tr class="${batch.expiryInvalid ? 'indicator-purple invalid-expiry-row' : indicatorClass(days)}">
+        return `<tr class="${batch.expiryInvalid ? 'indicator-purple invalid-expiry-row' : indicatorClass(days)}" data-batch-id="${escapeHtml(batch.id)}">
             ${selectionCell}
             <td>${escapeHtml(batch.article)}</td>
             <td>${escapeHtml(batch.code || '')}</td>
@@ -589,6 +591,10 @@ function renderRegistry() {
     qsa('.status-select').forEach((select) => select.addEventListener('change', onStatusChange));
     qsa('.edit-batch-button').forEach((button) => button.addEventListener('click', () => openEditDialog(button.dataset.id)));
     qsa('.fix-expiry-button').forEach((button) => button.addEventListener('click', () => openEditDialog(button.dataset.id)));
+    qsa('#registryBody tr[data-batch-id]').forEach((row) => row.addEventListener('click', (event) => {
+        if (event.target.closest('button, select, input, a')) return;
+        openBatchStockDialog(row.dataset.batchId);
+    }));
     qsa('.delete-batch-button').forEach((button) => button.addEventListener('click', () => deleteBatch(button.dataset.id)));
 }
 
@@ -673,6 +679,38 @@ async function onStatusChange(event) {
     } catch (error) {
         showToast(error.message, true);
     }
+}
+
+async function openBatchStockDialog(id) {
+    const batch = state.batches.find((item) => item.id === id);
+    if (!batch) return;
+
+    qs('#batchStockTitle').textContent = `Остатки партии: ${batch.article}`;
+    qs('#batchStockMeta').textContent = `${batch.code ? `Код: ${batch.code}. ` : ''}${batch.name || ''}`;
+    qs('#batchStockBody').innerHTML = '<tr><td colspan="2">Загрузка...</td></tr>';
+    qs('#batchStockTotal').textContent = '0';
+    qs('#batchStockDialog').showModal();
+
+    try {
+        const result = await api('batch_stock', { batch_id: id });
+        const items = result.stock?.items || [];
+        const total = Number(result.stock?.total || 0);
+        qs('#batchStockBody').innerHTML = items.map((item) => `
+            <tr><td>${escapeHtml(item.name)}</td><td class="numeric-cell">${formatQuantity(item.quantity)}</td></tr>
+        `).join('') || '<tr><td colspan="2">Активные склады не найдены.</td></tr>';
+        qs('#batchStockTotal').textContent = formatQuantity(total);
+    } catch (error) {
+        qs('#batchStockBody').innerHTML = `<tr><td colspan="2">${escapeHtml(error.message)}</td></tr>`;
+    }
+}
+
+function closeBatchStockDialog() {
+    qs('#batchStockDialog').close();
+}
+
+function formatQuantity(value) {
+    const number = Number(value || 0);
+    return Number.isInteger(number) ? String(number) : number.toLocaleString('ru-RU', { maximumFractionDigits: 3 });
 }
 
 function openEditDialog(id) {
@@ -863,6 +901,92 @@ async function loadBatches() {
     const result = await api('list');
     state.batches = (result.batches || []).map(normalizeBatch);
     renderRegistry();
+}
+
+
+async function loadWarehouses() {
+    const result = await api('warehouses');
+    state.warehouses = result.warehouses || [];
+    renderWarehouses();
+}
+
+
+function formatWarehouseEmails(value) {
+    return String(value || '')
+        .split(/\r?\n/)
+        .map((email) => email.trim())
+        .filter(Boolean)
+        .join('\n') || '—';
+}
+
+function renderWarehouses() {
+    const body = qs('#warehousesBody');
+    if (!body) return;
+    body.innerHTML = state.warehouses.map((warehouse) => `
+        <tr>
+            <td>${escapeHtml(warehouse.name)}</td>
+            <td>${escapeHtml(warehouse.sort_order)}</td>
+            <td class="warehouse-email-cell">${escapeHtml(formatWarehouseEmails(warehouse.email))}</td>
+            <td>${warehouse.is_active ? 'Активен' : 'Отключен'}</td>
+            <td>
+                <div class="row-actions">
+                    <button class="small-button edit-warehouse-button" data-id="${warehouse.id}" type="button">Изменить</button>
+                    <button class="small-button danger delete-warehouse-button" data-id="${warehouse.id}" type="button">Удалить</button>
+                </div>
+            </td>
+        </tr>
+    `).join('') || '<tr><td colspan="5">Склады не найдены.</td></tr>';
+
+    qsa('.edit-warehouse-button').forEach((button) => button.addEventListener('click', () => openWarehouseDialog(button.dataset.id)));
+    qsa('.delete-warehouse-button').forEach((button) => button.addEventListener('click', () => deleteWarehouse(button.dataset.id)));
+}
+
+function openWarehouseDialog(id = null) {
+    const warehouse = id ? state.warehouses.find((item) => String(item.id) === String(id)) : null;
+    state.editingWarehouseId = warehouse ? warehouse.id : null;
+    qs('#warehouseDialogTitle').textContent = warehouse ? 'Изменить склад' : 'Добавить склад';
+    qs('#warehouseName').value = warehouse?.name || '';
+    qs('#warehouseSortOrder').value = warehouse?.sort_order ?? 0;
+    qs('#warehouseEmail').value = warehouse?.email || '';
+    qs('#warehouseIsActive').checked = warehouse ? Boolean(warehouse.is_active) : true;
+    qs('#warehouseDialog').showModal();
+}
+
+function closeWarehouseDialog() {
+    qs('#warehouseDialog').close();
+    qs('#warehouseForm').reset();
+    state.editingWarehouseId = null;
+}
+
+async function submitWarehouseForm(event) {
+    event.preventDefault();
+    const payload = {
+        name: qs('#warehouseName').value,
+        sort_order: qs('#warehouseSortOrder').value,
+        email: qs('#warehouseEmail').value,
+        is_active: qs('#warehouseIsActive').checked,
+    };
+    if (state.editingWarehouseId) payload.id = state.editingWarehouseId;
+
+    try {
+        await api(state.editingWarehouseId ? 'warehouse_update' : 'warehouse_create', payload);
+        closeWarehouseDialog();
+        showToast('Склад сохранен.');
+        await loadWarehouses();
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+async function deleteWarehouse(id) {
+    if (!confirm('Удалить склад? Если он используется в остатках, склад будет отключен.')) return;
+    try {
+        const result = await api('warehouse_delete', { id });
+        showToast(result.soft_deleted ? 'Склад используется в остатках и был отключен.' : 'Склад удален.');
+        await loadWarehouses();
+    } catch (error) {
+        showToast(error.message, true);
+    }
 }
 
 async function loadSettings() {
@@ -1553,6 +1677,12 @@ function bindEvents() {
             return;
         }
 
+        if (targetTab === 'warehouses') {
+            switchTab(targetTab);
+            await loadWarehouses();
+            return;
+        }
+
         if (targetTab === 'settings' && !state.settingsAccessGranted) {
             openSettingsPasswordDialog();
             return;
@@ -1565,6 +1695,12 @@ function bindEvents() {
     }));
 
     qs('#closeNotificationDialogButton').addEventListener('click', closeNotificationDialog);
+    qs('#closeBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
+    qs('#confirmBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
+    qs('#openWarehouseDialogButton').addEventListener('click', () => openWarehouseDialog());
+    qs('#warehouseForm').addEventListener('submit', submitWarehouseForm);
+    qs('#closeWarehouseDialogButton').addEventListener('click', closeWarehouseDialog);
+    qs('#cancelWarehouseButton').addEventListener('click', closeWarehouseDialog);
     qs('#confirmNotificationDialogButton').addEventListener('click', closeNotificationDialog);
     qs('#notificationDetailsButton').addEventListener('click', showNotificationDetails);
 
