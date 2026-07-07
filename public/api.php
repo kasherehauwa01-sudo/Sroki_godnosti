@@ -810,7 +810,7 @@ function expiryCodesXlsAttachment(array $batches, int $daysLeft): array
     return [
         'filename' => 'codes_' . $daysLeft . '_days.xls',
         'content_type' => 'application/vnd.ms-excel; charset=UTF-8',
-        'content' => "<html><head><meta charset=\"UTF-8\"></head><body><table>" . implode('', $rows) . "</table></body></html>",
+        'content' => "<html><head><meta charset=\"UTF-8\"></head><body><table><tr><td></td></tr>" . implode('', $rows) . "</table></body></html>",
     ];
 }
 
