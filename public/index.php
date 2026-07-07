@@ -25,6 +25,7 @@ declare(strict_types=1);
             <button class="tab active" data-tab="registry" type="button">Реестр</button>
             <button class="tab" data-tab="history" type="button">История</button>
             <button class="tab" data-tab="help" type="button">Помощь</button>
+            <button class="tab" data-tab="warehouses" type="button">Склады</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
             <button class="primary nav-action" id="openAddBatchesButton" type="button">Добавить партию</button>
             <button class="ghost-button" id="openWriteOffButton" type="button">Списать / Удалить</button>
