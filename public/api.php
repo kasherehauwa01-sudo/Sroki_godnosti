@@ -36,6 +36,7 @@ function handleApiRequest(): void
         $pdo = getDatabaseConnection();
         ensureBatchesSchema($pdo);
         ensureSettingsSchema($pdo);
+        ensureMissingFilterLogSchema($pdo);
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $payload = readPayload();
         $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
@@ -114,6 +115,7 @@ function ensureSettingsSchema(PDO $pdo): void
         'smtp_from_name' => "ALTER TABLE settings ADD COLUMN smtp_from_name VARCHAR(255) NULL AFTER smtp_from_email",
         'notification_time' => "ALTER TABLE settings ADD COLUMN notification_time CHAR(5) NOT NULL DEFAULT '09:00' AFTER smtp_from_name",
         'auto_import_time' => "ALTER TABLE settings ADD COLUMN auto_import_time CHAR(5) NOT NULL DEFAULT '10:00' AFTER notification_time",
+        'missing_filter_email' => "ALTER TABLE settings ADD COLUMN missing_filter_email TEXT NULL AFTER auto_import_time",
     ];
 
     foreach ($columns as $column => $sql) {
@@ -125,6 +127,23 @@ function ensureSettingsSchema(PDO $pdo): void
             $pdo->exec($sql);
         }
     }
+}
+
+function ensureMissingFilterLogSchema(PDO $pdo): void
+{
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS notification_missing_filter_logs (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            codes TEXT NOT NULL,
+            recipients TEXT NOT NULL,
+            status ENUM('SUCCESS', 'ERROR') NOT NULL,
+            error_message TEXT NULL,
+            PRIMARY KEY (id),
+            INDEX idx_missing_filter_created_at (created_at),
+            INDEX idx_missing_filter_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
 }
 
 function ensureBatchesSchema(PDO $pdo): void
@@ -992,6 +1011,9 @@ function normalizeSettings(array $settings): array
         'notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
         'auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? '10:00'), '10:00'),
         'auto_import' => getAutoImportInfo($GLOBALS['pdo_for_settings_info'] ?? null),
+        'missing_filter_email' => (string)($settings['missing_filter_email'] ?? ''),
+        'missing_filter_emails' => splitEmails((string)($settings['missing_filter_email'] ?? '')),
+        'missing_filter_logs' => getMissingFilterLogs($GLOBALS['pdo_for_settings_info'] ?? null),
         'auto_import_logs' => getAutoImportLogs($GLOBALS['pdo_for_settings_info'] ?? null),
         'notification_history' => getNotificationHistory($GLOBALS['pdo_for_settings_info'] ?? null),
         'system' => getSystemSettingsInfo($GLOBALS['pdo_for_settings_info'] ?? null),
@@ -1042,6 +1064,7 @@ function saveSettings(PDO $pdo, array $settings): array
         ':smtp_from_name' => trim((string)($settings['smtp_from_name'] ?? $current['smtp_from_name'] ?? 'Сроки годности')),
         ':notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? $current['notification_time'] ?? '09:00')),
         ':auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? $current['auto_import_time'] ?? '10:00'), '10:00'),
+        ':missing_filter_email' => implode(',', splitEmails((string)($settings['missing_filter_email'] ?? $current['missing_filter_email'] ?? ''))),
     ];
 
     $statement = $pdo->prepare(
@@ -1062,7 +1085,8 @@ function saveSettings(PDO $pdo, array $settings): array
              smtp_from_email = :smtp_from_email,
              smtp_from_name = :smtp_from_name,
              notification_time = :notification_time,
-             auto_import_time = :auto_import_time
+             auto_import_time = :auto_import_time,
+             missing_filter_email = :missing_filter_email
          WHERE id = 1'
     );
     $statement->execute($params);
@@ -1120,6 +1144,30 @@ function getAutoImportInfo(?PDO $pdo): array
         'status' => $row['action'] === 'auto_import_completed' ? 'Выполнено' : 'Ошибка',
         'error' => (string)($payload['error'] ?? $payload['message'] ?? ''),
     ];
+}
+
+function getMissingFilterLogs(?PDO $pdo): array
+{
+    if (!$pdo) {
+        return [];
+    }
+
+    ensureMissingFilterLogSchema($pdo);
+    $statement = $pdo->query('SELECT created_at, codes, recipients, status, error_message FROM notification_missing_filter_logs ORDER BY id DESC LIMIT 50');
+
+    return array_map(static function (array $row): array {
+        $codes = json_decode((string)$row['codes'], true);
+        $recipients = json_decode((string)$row['recipients'], true);
+
+        return [
+            'date' => formatMoscowDateTime((string)$row['created_at']),
+            'count' => is_array($codes) ? count($codes) : 0,
+            'codes' => is_array($codes) ? $codes : [],
+            'recipients' => is_array($recipients) ? $recipients : [],
+            'status' => (string)$row['status'] === 'SUCCESS' ? 'Успешно' : 'Ошибка',
+            'error' => (string)($row['error_message'] ?? ''),
+        ];
+    }, $statement->fetchAll());
 }
 
 function getAutoImportLogs(?PDO $pdo): array

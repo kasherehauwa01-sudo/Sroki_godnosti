@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-1"></script>
+    <script defer src="assets/app.js?v=20260707-2"></script>
 </head>
 <body>
     <header class="topbar">
@@ -121,6 +121,15 @@ manager@site.ru"></textarea></label>
                 <div class="card form notification-history-card">
                     <h3>История уведомлений</h3>
                     <div class="notification-history-list" id="notificationHistoryList" aria-live="polite">Уведомления пока не отправлялись.</div>
+                </div>
+
+                <div class="card form missing-filter-card">
+                    <h3>Уведомления «Товар без фильтров»</h3>
+                    <label>Получатели<textarea id="missingFilterEmails" rows="5" placeholder="ivan@mail.ru&#10;petrov@mail.ru"></textarea></label>
+                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="showMissingFilterLogsButton" formnovalidate type="button">Логи</button>
+                    </div>
                 </div>
 
                 <div class="card form settings-auto-import-card">
@@ -459,6 +468,19 @@ manager@site.ru"></textarea></label>
             <div class="notification-dialog-body" id="notificationLogsBody"></div>
             <div class="modal-actions">
                 <button class="primary" id="confirmNotificationLogsDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal" id="missingFilterLogsDialog">
+        <div class="card form modal-card notification-modal-card">
+            <div class="modal-heading">
+                <h2>Логи товаров без фильтра</h2>
+                <button class="icon-button" id="closeMissingFilterLogsDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="notification-dialog-body" id="missingFilterLogsBody"></div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmMissingFilterLogsDialogButton" type="button">Закрыть</button>
             </div>
         </div>
     </dialog>

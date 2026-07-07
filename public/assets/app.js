@@ -1159,6 +1159,7 @@ function renderSettings() {
     setCheckedIfPresent('#notify1', Boolean(settings.notify_1_day));
     setValueIfPresent('#notificationEmails', (settings.emails || []).join('\n'));
     setValueIfPresent('#notificationTime', settings.notification_time || '09:00');
+    setValueIfPresent('#missingFilterEmails', (settings.missing_filter_emails || []).join('\n'));
     renderNotificationHistory(settings.notification_history || []);
 
     const autoImport = settings.auto_import || {};
@@ -1193,6 +1194,7 @@ function renderNotificationHistory(history) {
 
 function collectSettingsForm() {
     const emails = qs('#notificationEmails').value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean);
+    const missingFilterEmails = qs('#missingFilterEmails').value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean);
     const notificationTimeInput = qs('#notificationTime');
 
     return {
@@ -1207,6 +1209,7 @@ function collectSettingsForm() {
         notification_time: notificationTimeInput ? (notificationTimeInput.value || '09:00') : (state.settings && state.settings.notification_time ? state.settings.notification_time : '09:00'),
         auto_import_time: '10:00',
         emails,
+        missing_filter_email: missingFilterEmails.join(','),
     };
 }
 
@@ -1342,6 +1345,30 @@ function showNotificationLogs() {
 
 function closeNotificationLogs() {
     qs('#notificationLogsDialog').close();
+}
+
+function showMissingFilterLogs() {
+    const logs = state.settings?.missing_filter_logs || [];
+    const body = qs('#missingFilterLogsBody');
+    if (!logs.length) {
+        body.textContent = 'Логи уведомлений пока отсутствуют.';
+    } else {
+        body.innerHTML = logs.map((log) => `
+            <article class="notification-history-item">
+                <time>${escapeHtml(log.date || 'Дата не указана')}</time>
+                <p><strong>${escapeHtml(log.status || 'Статус не указан')}</strong></p>
+                <p>Количество найденных товаров: ${escapeHtml(log.count ?? 0)}</p>
+                <p>Коды: ${escapeHtml((log.codes || []).join(', ') || '—')}</p>
+                <p>Получатели: ${escapeHtml((log.recipients || []).join(', ') || '—')}</p>
+                ${log.error ? `<p>Ошибка: ${escapeHtml(log.error)}</p>` : ''}
+            </article>
+        `).join('');
+    }
+    qs('#missingFilterLogsDialog').showModal();
+}
+
+function closeMissingFilterLogs() {
+    qs('#missingFilterLogsDialog').close();
 }
 
 function showAutoImportLogs() {
@@ -1588,6 +1615,10 @@ function bindEvents() {
     qs('#closeDeleteArticlesDialogButton').addEventListener('click', closeDeleteArticlesDialog);
     qs('#cancelDeleteArticlesButton').addEventListener('click', closeDeleteArticlesDialog);
 
+    qs('#showMissingFilterLogsButton').addEventListener('click', showMissingFilterLogs);
+    qs('#closeMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
+    qs('#confirmMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
+
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
     qs('#closeNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
@@ -1636,6 +1667,19 @@ function batchExportMapper(batch) {
         'Статус партии': batch.status,
         'Дата внесения': formatCreatedAtWithSource(batch),
     };
+}
+
+function startSchedulerHeartbeat() {
+    const runTick = async () => {
+        try {
+            await api('tick');
+        } catch (error) {
+            console.warn('Не удалось выполнить проверку расписания', error);
+        }
+    };
+
+    runTick();
+    setInterval(runTick, 30000);
 }
 
 function startSchedulerHeartbeat() {

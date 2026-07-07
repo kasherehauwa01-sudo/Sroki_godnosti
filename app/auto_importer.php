@@ -170,8 +170,11 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
     }
 
     $rows = [];
+    $missingFilterCodes = [];
     foreach ($attachments as $attachment) {
-        $rows = array_merge($rows, spreadsheetAttachmentToBatches($attachment['content'], $attachment['filename']));
+        $spreadsheetRows = readSpreadsheetRows($attachment['content'], $attachment['filename']);
+        $missingFilterCodes = array_merge($missingFilterCodes, findMissingExpiryFilterCodes($spreadsheetRows));
+        $rows = array_merge($rows, rowsToBatchPayloads($spreadsheetRows));
     }
 
     if (!$rows) {
@@ -179,6 +182,8 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
     }
 
     $result = bulkCreateBatches($pdo, $rows, false);
+
+    notifyMissingExpiryFilterProducts($pdo, $missingFilterCodes);
 
     markAutoImportMessageSeen(
         $username,
@@ -454,6 +459,81 @@ function readXlsxCellValue(SimpleXMLElement $cell, array $shared): string
     }
 
     return (string)$cell->v;
+}
+
+function findMissingExpiryFilterCodes(array $rows): array
+{
+    $headerInfo = findMissingFilterHeaderRow($rows);
+    if (!$headerInfo) {
+        return [];
+    }
+
+    ['row' => $headerRow, 'code' => $codeIndex, 'filter' => $filterIndex] = $headerInfo;
+    $codes = [];
+    foreach (array_slice($rows, $headerRow + 1) as $row) {
+        $code = trim((string)($row[$codeIndex] ?? ''));
+        $filter = $filterIndex !== null ? trim((string)($row[$filterIndex] ?? '')) : '';
+        if ($code !== '' && $filter === '') {
+            $codes[] = $code;
+        }
+    }
+
+    return array_values(array_unique($codes));
+}
+
+function findMissingFilterHeaderRow(array $rows): ?array
+{
+    foreach (array_slice($rows, 0, 30, true) as $rowIndex => $row) {
+        $headers = array_map('normalizeAutoImportHeader', $row);
+        $codeIndex = findAutoImportColumn($headers, ['код', 'кодтовара']);
+        $filterIndex = findAutoImportColumn($headers, ['характеристикасрокгодности']);
+        if ($codeIndex !== null) {
+            return ['row' => (int)$rowIndex, 'code' => $codeIndex, 'filter' => $filterIndex];
+        }
+    }
+
+    return null;
+}
+
+function notifyMissingExpiryFilterProducts(PDO $pdo, array $codes): void
+{
+    $codes = array_values(array_unique(array_filter(array_map('trim', $codes))));
+    if (!$codes) {
+        return;
+    }
+
+    ensureMissingFilterLogSchema($pdo);
+    $settings = getRawSettings($pdo);
+    $recipients = splitEmails((string)($settings['missing_filter_email'] ?? ''));
+    if (!$recipients) {
+        writeMissingFilterLog($pdo, $codes, [], 'ERROR', 'Не указаны получатели уведомлений о товарах без фильтра.');
+        return;
+    }
+
+    $body = "Следующие товары не имеют заполненного фильтра \"Срок годности\".\n\n"
+        . "Добавить фильтр \"Срок годности\" → Да на товар:\n\n"
+        . implode("\n", $codes);
+
+    try {
+        sendNotificationEmail($pdo, $recipients, 'Товары без фильтра "Срок годности"', $body, $settings);
+        writeMissingFilterLog($pdo, $codes, $recipients, 'SUCCESS', '');
+    } catch (Throwable $error) {
+        writeMissingFilterLog($pdo, $codes, $recipients, 'ERROR', $error->getMessage());
+    }
+}
+
+function writeMissingFilterLog(PDO $pdo, array $codes, array $recipients, string $status, string $error): void
+{
+    $statement = $pdo->prepare(
+        'INSERT INTO notification_missing_filter_logs (codes, recipients, status, error_message)
+         VALUES (:codes, :recipients, :status, :error_message)'
+    );
+    $statement->execute([
+        ':codes' => json_encode(array_values($codes), JSON_UNESCAPED_UNICODE),
+        ':recipients' => json_encode(array_values($recipients), JSON_UNESCAPED_UNICODE),
+        ':status' => $status,
+        ':error_message' => $error !== '' ? $error : null,
+    ]);
 }
 
 function rowsToBatchPayloads(array $rows): array
