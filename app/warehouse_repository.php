@@ -190,6 +190,22 @@ function normalizeWarehouseEmails(string $emails): ?string
     return $items ? implode("\n", $items) : null;
 }
 
+
+function getWarehouseNotificationEmails(PDO $pdo): array
+{
+    $emails = [];
+    $statement = $pdo->query("SELECT email FROM warehouses WHERE is_active = 1 AND email IS NOT NULL AND TRIM(email) <> '' ORDER BY sort_order ASC, name ASC, id ASC");
+    foreach ($statement->fetchAll() as $row) {
+        $items = normalizeWarehouseEmails((string)($row['email'] ?? ''));
+        if ($items === null) {
+            continue;
+        }
+        $emails = array_merge($emails, explode("\n", $items));
+    }
+
+    return array_values(array_unique($emails));
+}
+
 function getWarehouse(PDO $pdo, int $id): array
 {
     $statement = $pdo->prepare('SELECT id, name, sort_order, email, is_active, created_at, updated_at FROM warehouses WHERE id = :id');

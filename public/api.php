@@ -780,11 +780,11 @@ function shouldRunExpiryNotificationsNow(PDO $pdo, DateTimeImmutable $scheduledA
 
 function sendDueExpiryNotifications(PDO $pdo, array $settings): void
 {
-    $emails = splitEmails((string)($settings['notification_email'] ?? ''));
+    $emails = getWarehouseNotificationEmails($pdo);
     if (!$emails) {
         writeLog($pdo, 'expiry_check_skipped', [
             'mode' => 'daily_auto',
-            'reason' => 'Не указаны email-получатели',
+            'reason' => 'Не указаны email складов для уведомлений',
         ]);
         return;
     }
@@ -878,9 +878,9 @@ function sendTestNotification(PDO $pdo, array $payload): array
     assertSettingsPassword($payload);
 
     $settings = getRawSettings($pdo);
-    $emails = splitEmails((string)($settings['notification_email'] ?? ''));
+    $emails = getWarehouseNotificationEmails($pdo);
     if (!$emails) {
-        throw new RuntimeException('Добавьте хотя бы одного получателя перед отправкой тестового уведомления.');
+        throw new RuntimeException('Добавьте хотя бы один email во вкладке «Настройки» → «Склады» перед отправкой тестового уведомления.');
     }
 
     $batch = findNearestExpiringBatch($pdo);

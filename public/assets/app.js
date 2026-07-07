@@ -990,9 +990,14 @@ async function deleteWarehouse(id) {
 }
 
 async function loadSettings() {
-    const result = await api('settings', { settings_password: state.settingsPassword });
-    state.settings = result.settings || { emails: [], rules: [] };
+    const [settingsResult, warehousesResult] = await Promise.all([
+        api('settings', { settings_password: state.settingsPassword }),
+        api('warehouses'),
+    ]);
+    state.settings = settingsResult.settings || { emails: [], rules: [] };
+    state.warehouses = warehousesResult.warehouses || [];
     renderSettings();
+    renderWarehouses();
 }
 
 function switchTab(tabName) {
@@ -1676,13 +1681,6 @@ function bindEvents() {
             openSettingsUnsavedDialog(targetTab);
             return;
         }
-
-        if (targetTab === 'warehouses') {
-            switchTab(targetTab);
-            await loadWarehouses();
-            return;
-        }
-
         if (targetTab === 'settings' && !state.settingsAccessGranted) {
             openSettingsPasswordDialog();
             return;

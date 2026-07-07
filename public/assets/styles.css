@@ -161,3 +161,4 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .stock-table tfoot th { background: #f1f5f9; font-weight: 800; }
 .stock-table-wrap { border: 1px solid var(--border); border-radius: 16px; }
 .warehouse-email-cell { white-space: pre-line; }
+.settings-warehouses-card { grid-column: 1 / -1; }
