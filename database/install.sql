@@ -7,7 +7,9 @@ USE sroki_godnosti;
 CREATE TABLE IF NOT EXISTS batches (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_source VARCHAR(32) NOT NULL DEFAULT 'Ручной',
     article VARCHAR(128) NOT NULL,
+    code VARCHAR(128) NOT NULL DEFAULT '',
     name VARCHAR(255) NOT NULL,
     quantity INT NOT NULL DEFAULT 0,
     expiry_date DATE NOT NULL,
@@ -19,6 +21,7 @@ CREATE TABLE IF NOT EXISTS batches (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     INDEX idx_batches_article (article),
+    INDEX idx_batches_code (code),
     INDEX idx_batches_name (name),
     INDEX idx_batches_status (status),
     INDEX idx_batches_expiry_date (expiry_date),
@@ -54,7 +57,20 @@ CREATE TABLE IF NOT EXISTS settings (
     smtp_from_name VARCHAR(255) NULL,
     notification_time CHAR(5) NOT NULL DEFAULT '09:00',
     auto_import_time CHAR(5) NOT NULL DEFAULT '10:00',
+    missing_filter_email TEXT NULL,
     PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS notification_missing_filter_logs (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    codes TEXT NOT NULL,
+    recipients TEXT NOT NULL,
+    status ENUM('SUCCESS', 'ERROR') NOT NULL,
+    error_message TEXT NULL,
+    PRIMARY KEY (id),
+    INDEX idx_missing_filter_created_at (created_at),
+    INDEX idx_missing_filter_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO settings (
@@ -75,6 +91,7 @@ INSERT INTO settings (
     smtp_from_email,
     smtp_from_name,
     notification_time,
-    auto_import_time
-) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00', '10:00')
+    auto_import_time,
+    missing_filter_email
+) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00', '10:00', NULL)
 ON DUPLICATE KEY UPDATE id = id;
