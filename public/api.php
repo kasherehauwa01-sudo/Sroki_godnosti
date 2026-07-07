@@ -55,6 +55,7 @@ function handleApiRequest(): void
                 'report' => ['ok' => true, 'batches' => reportBatches($pdo, $_GET)],
                 'settings' => getProtectedSettings($pdo, $_GET),
                 'logs' => ['ok' => true, 'logs' => getLogs($pdo)],
+                'tick' => ['ok' => true],
                 default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
             };
         } else {

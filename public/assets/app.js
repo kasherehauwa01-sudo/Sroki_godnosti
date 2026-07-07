@@ -98,7 +98,7 @@ async function copyDeployCommand() {
 }
 
 function getApiMethod(action, data = {}) {
-    const readActions = new Set(['list', 'logs']);
+    const readActions = new Set(['list', 'logs', 'tick']);
     const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'verify_write_off', 'delete_by_articles']);
 
     // Действие settings используется и для чтения, и для сохранения:
@@ -1638,6 +1638,19 @@ function batchExportMapper(batch) {
     };
 }
 
+function startSchedulerHeartbeat() {
+    const runTick = async () => {
+        try {
+            await api('tick');
+        } catch (error) {
+            console.warn('Не удалось выполнить проверку расписания', error);
+        }
+    };
+
+    runTick();
+    setInterval(runTick, 30000);
+}
+
 async function bootstrap() {
     try {
         await Promise.all([loadBatches(), loadHistory()]);
@@ -1651,6 +1664,7 @@ function startApp() {
     bindEvents();
     applyInitialUrlState();
     bootstrap();
+    startSchedulerHeartbeat();
 }
 
 if (document.readyState === 'loading') {
