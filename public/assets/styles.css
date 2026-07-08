@@ -177,3 +177,36 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .unread-stock-notification td { font-weight: 800; }
 .complete-stock-notification td { color: #15803d; }
 #eventsBody tr[data-event-id] { cursor: pointer; }
+
+.events-filter-card {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.filter-label {
+    color: #374151;
+    font-weight: 700;
+}
+
+.write-off-status-panel {
+    align-items: end;
+    border-top: 1px solid #e5e7eb;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    margin-top: 16px;
+    padding-top: 16px;
+}
+
+.write-off-status-panel.hidden {
+    display: none;
+}
+
+@media (max-width: 640px) {
+    .write-off-status-panel {
+        grid-template-columns: 1fr;
+    }
+}
