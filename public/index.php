@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260708-1"></script>
+    <script defer src="assets/app.js?v=20260708-2"></script>
 </head>
 <body>
     <header class="topbar">
@@ -108,7 +108,7 @@ declare(strict_types=1);
             </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Срок годности</th><th>Тип события</th></tr></thead>
+                    <thead><tr><th>Тип события</th><th>Дата события</th><th>Количество партий в событии</th></tr></thead>
                     <tbody id="eventsBody"></tbody>
                 </table>
             </div>
@@ -412,6 +412,25 @@ manager@site.ru"></textarea></label>
             </div>
         </section>
     </main>
+
+    <dialog class="modal" id="eventBatchesDialog">
+        <div class="card form modal-card">
+            <div class="modal-heading">
+                <h2 id="eventBatchesDialogTitle">Партии события</h2>
+                <button class="icon-button" id="closeEventBatchesDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle" id="eventBatchesDialogMeta"></p>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th></tr></thead>
+                    <tbody id="eventBatchesBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmEventBatchesDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
 
     <dialog class="modal batch-modal" id="addBatchesDialog">
         <form class="card form modal-card" id="addBatchesForm" method="dialog">

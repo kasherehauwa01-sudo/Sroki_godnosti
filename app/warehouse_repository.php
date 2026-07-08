@@ -732,13 +732,24 @@ function markStockBatchNotificationViewed(PDO $pdo, int $batchId): array
 
 function listExpiryEvents(PDO $pdo): array
 {
-    $statement = $pdo->prepare(
-        "SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
-         FROM batches
-         WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left <= :max_future_days
-         ORDER BY days_left DESC, expiry_date ASC, article ASC"
+    $eventDays = [180, 90, 60, 30, 1];
+    $selects = [];
+    foreach ($eventDays as $eventDay) {
+        $selects[] = sprintf(
+            "SELECT id, article, code, name, expiry_date, expiry_full_date, %d AS event_type, DATE_SUB(expiry_date, INTERVAL %d DAY) AS event_date, DATEDIFF(DATE_SUB(expiry_date, INTERVAL %d DAY), CURDATE()) AS days_until_event FROM batches",
+            $eventDay,
+            $eventDay,
+            $eventDay
+        );
+    }
+
+    $statement = $pdo->query(
+        'SELECT * FROM (' . implode(' UNION ALL ', $selects) . ") event_batches
+         WHERE event_batches.id IN (
+             SELECT id FROM batches WHERE status = 'В наличии' AND expiry_invalid = 0
+         )
+         ORDER BY days_until_event ASC, event_type ASC, article ASC"
     );
-    $statement->execute([':max_future_days' => 180]);
 
     return array_map(static fn (array $row): array => [
         'id' => (int)$row['id'],
@@ -747,6 +758,8 @@ function listExpiryEvents(PDO $pdo): array
         'name' => (string)($row['name'] ?? ''),
         'expiry_date' => (string)$row['expiry_date'],
         'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
-        'event_type' => (int)$row['days_left'],
+        'event_type' => (int)$row['event_type'],
+        'event_date' => (string)$row['event_date'],
+        'days_until_event' => (int)$row['days_until_event'],
     ], $statement->fetchAll());
 }

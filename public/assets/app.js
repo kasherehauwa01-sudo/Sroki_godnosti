@@ -1049,34 +1049,73 @@ function eventPeriod(days) {
 
 function eventTypeLabel(days) {
     const numericDays = Number(days);
-    if (numericDays < 0) return `Прошло ${Math.abs(numericDays)} дн.`;
-    if (numericDays === 0) return 'Сегодня';
-    return `Через ${numericDays} дн.`;
+    return `${numericDays} ${numericDays === 1 ? 'день' : 'дней'}`;
+}
+
+function formatEventDate(value) {
+    return formatDateRu(value);
+}
+
+function eventGroupKey(event) {
+    return `${event.event_type}|${event.event_date}`;
+}
+
+function groupedEvents() {
+    const groups = new Map();
+    state.events
+        .filter((event) => state.eventPeriodFilters.has(eventPeriod(event.days_until_event)))
+        .forEach((event) => {
+            const key = eventGroupKey(event);
+            if (!groups.has(key)) {
+                groups.set(key, {
+                    key,
+                    eventType: Number(event.event_type),
+                    eventDate: event.event_date,
+                    daysUntilEvent: Number(event.days_until_event),
+                    batches: [],
+                });
+            }
+            groups.get(key).batches.push(event);
+        });
+
+    return [...groups.values()].sort((left, right) => {
+        if (left.daysUntilEvent !== right.daysUntilEvent) return left.daysUntilEvent - right.daysUntilEvent;
+        return left.eventType - right.eventType;
+    });
 }
 
 function renderEvents() {
     const body = qs('#eventsBody');
     if (!body) return;
-    const visibleEvents = state.events.filter((event) => state.eventPeriodFilters.has(eventPeriod(event.event_type)));
-    body.innerHTML = visibleEvents.map((event) => `
-        <tr data-event-id="${event.id}">
+    const groups = groupedEvents();
+    body.innerHTML = groups.map((group) => `
+        <tr data-event-group-key="${escapeHtml(group.key)}">
+            <td>${escapeHtml(eventTypeLabel(group.eventType))}</td>
+            <td>${escapeHtml(formatEventDate(group.eventDate))}</td>
+            <td>${group.batches.length}</td>
+        </tr>
+    `).join('') || '<tr><td colspan="3">Событий нет.</td></tr>';
+    qsa('[data-event-group-key]').forEach((row) => row.addEventListener('click', () => openEventGroupDetails(row.dataset.eventGroupKey)));
+}
+
+function closeEventBatchesDialog() {
+    qs('#eventBatchesDialog').close();
+}
+
+function openEventGroupDetails(groupKey) {
+    const group = groupedEvents().find((item) => item.key === groupKey);
+    if (!group) return;
+
+    qs('#eventBatchesDialogTitle').textContent = `Событие: ${eventTypeLabel(group.eventType)}`;
+    qs('#eventBatchesDialogMeta').textContent = `Дата события: ${formatEventDate(group.eventDate)}. Партий: ${group.batches.length}.`;
+    qs('#eventBatchesBody').innerHTML = group.batches.map((event) => `
+        <tr>
             <td>${escapeHtml(event.article)}</td>
             <td>${escapeHtml(event.code || '')}</td>
             <td>${escapeHtml(event.name || '')}</td>
-            <td>${escapeHtml(formatExpiryMonthRu(event.expiry_date, event.expiry_full_date))}</td>
-            <td>${escapeHtml(eventTypeLabel(event.event_type))}</td>
         </tr>
-    `).join('') || '<tr><td colspan="5">Событий нет.</td></tr>';
-    qsa('[data-event-id]').forEach((row) => row.addEventListener('click', () => openEventDetails(row.dataset.eventId)));
-}
-
-function openEventDetails(id) {
-    const event = state.events.find((item) => String(item.id) === String(id));
-    if (!event) return;
-    showNotificationDialog(
-        `Артикул: ${event.article}\nКод: ${event.code || ''}\nНаименование: ${event.name || ''}\nСрок годности: ${formatExpiryMonthRu(event.expiry_date, event.expiry_full_date)}\nТип события: ${eventTypeLabel(event.event_type)}`,
-        'Событие партии'
-    );
+    `).join('') || '<tr><td colspan="3">Партий нет.</td></tr>';
+    qs('#eventBatchesDialog').showModal();
 }
 
 async function loadStockBatchNotifications() {
@@ -1909,6 +1948,8 @@ function bindEvents() {
     qs('#cancelTestStockFillButton').addEventListener('click', closeTestStockFillDialog);
 
     qs('#closeNotificationDialogButton').addEventListener('click', closeNotificationDialog);
+    qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
+    qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
     qs('#closeBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
     qs('#confirmBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
     qs('#writeOffStockBatchButton').addEventListener('click', writeOffSelectedStockBatch);
