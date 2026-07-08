@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-15"></script>
+    <script defer src="assets/app.js?v=20260708-2"></script>
 </head>
 <body>
     <header class="topbar">
@@ -27,7 +27,6 @@ declare(strict_types=1);
             <button class="tab notification-tab" data-tab="notifications" type="button">Уведомления <span class="notification-dot hidden" id="notificationsUnreadDot"></span></button>
             <button class="tab" data-tab="history" type="button">История</button>
             <button class="tab" data-tab="help" type="button">Помощь</button>
-            <button class="tab" data-tab="warehouses" type="button">Склады</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
         </nav>
 
@@ -99,11 +98,17 @@ declare(strict_types=1);
         <section class="panel" id="tab-events">
             <div class="section-heading">
                 <h2>События</h2>
-                <p>Партии с событиями по сроку годности: 180, 90, 60, 30 и 1 день.</p>
+                <p>Партии с прошедшими, сегодняшними и будущими событиями по сроку годности.</p>
+            </div>
+            <div class="card events-filter-card">
+                <span class="filter-label">Показывать:</span>
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="today" checked> Сегодня</label>
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="past"> Прошедшие</label>
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="future" checked> Будущие</label>
             </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Срок годности</th><th>Тип события</th></tr></thead>
+                    <thead><tr><th>Тип события</th><th>Дата события</th><th>Количество партий в событии</th></tr></thead>
                     <tbody id="eventsBody"></tbody>
                 </table>
             </div>
@@ -116,7 +121,7 @@ declare(strict_types=1);
             </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Остаток</th><th>Статус</th><th>Последнее изменение</th></tr></thead>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Остаток</th><th>Заполнили остатки</th><th>Статус</th><th>Последнее изменение</th></tr></thead>
                     <tbody id="stockBatchNotificationsBody"></tbody>
                 </table>
             </div>
@@ -408,6 +413,25 @@ manager@site.ru"></textarea></label>
         </section>
     </main>
 
+    <dialog class="modal" id="eventBatchesDialog">
+        <div class="card form modal-card">
+            <div class="modal-heading">
+                <h2 id="eventBatchesDialogTitle">Партии события</h2>
+                <button class="icon-button" id="closeEventBatchesDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle" id="eventBatchesDialogMeta"></p>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th></tr></thead>
+                    <tbody id="eventBatchesBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmEventBatchesDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
     <dialog class="modal batch-modal" id="addBatchesDialog">
         <form class="card form modal-card" id="addBatchesForm" method="dialog">
             <div class="modal-heading">
@@ -536,6 +560,16 @@ manager@site.ru"></textarea></label>
                     <tbody id="batchStockBody"></tbody>
                     <tfoot><tr><th>Итого</th><th class="numeric-cell" id="batchStockTotal">0</th></tr></tfoot>
                 </table>
+            </div>
+            <div class="write-off-status-panel hidden" id="writeOffStatusPanel">
+                <label>Статус партии
+                    <select id="writeOffStockBatchStatus">
+                        <option>В наличии</option>
+                        <option>Реализована</option>
+                        <option>Списана</option>
+                    </select>
+                </label>
+                <button class="primary" id="saveWriteOffStockBatchStatusButton" type="button">Сохранить</button>
             </div>
             <div class="modal-actions">
                 <button class="ghost-button danger hidden" id="writeOffStockBatchButton" type="button">Списать</button>
