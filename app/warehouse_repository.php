@@ -677,9 +677,10 @@ function listStockBatchNotifications(PDO $pdo): array
                 COALESCE(active_warehouses.active_count, 0) AS active_warehouse_count,
                 COALESCE(stock_totals.filled_warehouse_count, 0) AS filled_warehouse_count
          FROM (
-             SELECT batch_id, SUM(quantity) AS total_stock, COUNT(DISTINCT warehouse_id) AS filled_warehouse_count, MAX(updated_at) AS last_stock_at
-             FROM batch_stock
-             GROUP BY batch_id
+             SELECT bs.batch_id, SUM(bs.quantity) AS total_stock, COUNT(DISTINCT bs.warehouse_id) AS filled_warehouse_count, MAX(bs.updated_at) AS last_stock_at
+             FROM batch_stock bs
+             INNER JOIN warehouses w ON w.id = bs.warehouse_id AND w.is_active = 1
+             GROUP BY bs.batch_id
          ) stock_totals
          INNER JOIN batches b ON b.id = stock_totals.batch_id
          LEFT JOIN (
@@ -704,6 +705,8 @@ function listStockBatchNotifications(PDO $pdo): array
             'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
             'status' => (string)$row['status'],
             'total_stock' => (int)($row['total_stock'] ?? 0),
+            'active_warehouse_count' => (int)($row['active_warehouse_count'] ?? 0),
+            'filled_warehouse_count' => (int)($row['filled_warehouse_count'] ?? 0),
             'last_stock_at' => $lastStockAt,
             'viewed_at' => $viewedAt,
             'unread' => $viewedAt === '' || ($lastStockAt !== '' && strtotime($lastStockAt) > strtotime($viewedAt)),
@@ -729,15 +732,13 @@ function markStockBatchNotificationViewed(PDO $pdo, int $batchId): array
 
 function listExpiryEvents(PDO $pdo): array
 {
-    $eventDays = [180, 90, 60, 30, 1];
-    $placeholders = implode(',', array_fill(0, count($eventDays), '?'));
     $statement = $pdo->prepare(
         "SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
          FROM batches
-         WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
+         WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left <= :max_future_days
          ORDER BY days_left DESC, expiry_date ASC, article ASC"
     );
-    $statement->execute($eventDays);
+    $statement->execute([':max_future_days' => 180]);
 
     return array_map(static fn (array $row): array => [
         'id' => (int)$row['id'],

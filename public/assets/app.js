@@ -20,6 +20,7 @@ const state = {
     stockBatchNotifications: [],
     selectedStockBatchId: null,
     events: [],
+    eventPeriodFilters: new Set(['today', 'future']),
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -695,6 +696,8 @@ async function openBatchStockDialog(id, options = {}) {
     qs('#batchStockTotal').textContent = '0';
     state.selectedStockBatchId = options.showWriteOff ? String(id) : null;
     qs('#writeOffStockBatchButton').classList.toggle('hidden', !options.showWriteOff);
+    qs('#writeOffStatusPanel').classList.add('hidden');
+    setValueIfPresent('#writeOffStockBatchStatus', batch.status || 'Списана');
     qs('#batchStockDialog').showModal();
 
     try {
@@ -1037,16 +1040,31 @@ async function loadEvents() {
     renderEvents();
 }
 
+function eventPeriod(days) {
+    const numericDays = Number(days);
+    if (numericDays < 0) return 'past';
+    if (numericDays === 0) return 'today';
+    return 'future';
+}
+
+function eventTypeLabel(days) {
+    const numericDays = Number(days);
+    if (numericDays < 0) return `Прошло ${Math.abs(numericDays)} дн.`;
+    if (numericDays === 0) return 'Сегодня';
+    return `Через ${numericDays} дн.`;
+}
+
 function renderEvents() {
     const body = qs('#eventsBody');
     if (!body) return;
-    body.innerHTML = state.events.map((event) => `
+    const visibleEvents = state.events.filter((event) => state.eventPeriodFilters.has(eventPeriod(event.event_type)));
+    body.innerHTML = visibleEvents.map((event) => `
         <tr data-event-id="${event.id}">
             <td>${escapeHtml(event.article)}</td>
             <td>${escapeHtml(event.code || '')}</td>
             <td>${escapeHtml(event.name || '')}</td>
             <td>${escapeHtml(formatExpiryMonthRu(event.expiry_date, event.expiry_full_date))}</td>
-            <td>${Number(event.event_type)} день</td>
+            <td>${escapeHtml(eventTypeLabel(event.event_type))}</td>
         </tr>
     `).join('') || '<tr><td colspan="5">Событий нет.</td></tr>';
     qsa('[data-event-id]').forEach((row) => row.addEventListener('click', () => openEventDetails(row.dataset.eventId)));
@@ -1056,7 +1074,7 @@ function openEventDetails(id) {
     const event = state.events.find((item) => String(item.id) === String(id));
     if (!event) return;
     showNotificationDialog(
-        `Артикул: ${event.article}\nКод: ${event.code || ''}\nНаименование: ${event.name || ''}\nСрок годности: ${formatExpiryMonthRu(event.expiry_date, event.expiry_full_date)}\nТип события: ${event.event_type} день`,
+        `Артикул: ${event.article}\nКод: ${event.code || ''}\nНаименование: ${event.name || ''}\nСрок годности: ${formatExpiryMonthRu(event.expiry_date, event.expiry_full_date)}\nТип события: ${eventTypeLabel(event.event_type)}`,
         'Событие партии'
     );
 }
@@ -1078,14 +1096,25 @@ function renderStockBatchNotifications() {
             <td>${escapeHtml(notification.code || '')}</td>
             <td>${escapeHtml(notification.name || '')}</td>
             <td>${formatQuantity(notification.total_stock || 0)}</td>
+            <td>${Number(notification.filled_warehouse_count || 0)} из ${Number(notification.active_warehouse_count || 0)}</td>
             <td>${escapeHtml(notification.status || '')}</td>
             <td>${escapeHtml(notification.last_stock_at || '—')}</td>
         </tr>
-    `).join('') || '<tr><td colspan="6">Остатков по партиям пока нет.</td></tr>';
+    `).join('') || '<tr><td colspan="7">Остатков по партиям пока нет.</td></tr>';
     qsa('[data-stock-batch-id]').forEach((row) => row.addEventListener('click', () => openBatchStockDialog(row.dataset.stockBatchId, { markViewed: true, showWriteOff: true })));
 }
 
-async function writeOffSelectedStockBatch() {
+function writeOffSelectedStockBatch() {
+    const batch = state.batches.find((item) => String(item.id) === String(state.selectedStockBatchId));
+    if (!batch) {
+        showToast('Партия не найдена в реестре.', true);
+        return;
+    }
+    setValueIfPresent('#writeOffStockBatchStatus', batch.status || 'Списана');
+    qs('#writeOffStatusPanel').classList.remove('hidden');
+}
+
+async function saveSelectedStockBatchStatus() {
     const batch = state.batches.find((item) => String(item.id) === String(state.selectedStockBatchId));
     if (!batch) {
         showToast('Партия не найдена в реестре.', true);
@@ -1096,8 +1125,7 @@ async function writeOffSelectedStockBatch() {
         openWriteOffPasswordDialog();
         return;
     }
-    const status = prompt('Введите новый статус партии: В наличии, Реализована или Списана', batch.status || 'Списана');
-    if (status === null) return;
+    const status = qs('#writeOffStockBatchStatus').value;
     if (!statusOptions.includes(status)) {
         showToast('Недопустимый статус партии.', true);
         return;
@@ -1884,6 +1912,7 @@ function bindEvents() {
     qs('#closeBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
     qs('#confirmBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
     qs('#writeOffStockBatchButton').addEventListener('click', writeOffSelectedStockBatch);
+    qs('#saveWriteOffStockBatchStatusButton').addEventListener('click', saveSelectedStockBatchStatus);
     qs('#openWarehouseDialogButton').addEventListener('click', () => openWarehouseDialog());
     qs('#warehouseForm').addEventListener('submit', submitWarehouseForm);
     qs('#closeWarehouseDialogButton').addEventListener('click', closeWarehouseDialog);
@@ -1939,6 +1968,11 @@ function bindEvents() {
     });
 
     ['#historyDatePreset', '#historyDateFrom', '#historyDateTo', '#historyActionFilter'].forEach((selector) => qs(selector).addEventListener('input', renderHistory));
+
+    qsa('.event-period-filter').forEach((checkbox) => checkbox.addEventListener('change', () => {
+        state.eventPeriodFilters = new Set(qsa('.event-period-filter:checked').map((item) => item.value));
+        renderEvents();
+    }));
 
     qs('#filterSearch').addEventListener('input', renderRegistry);
     qs('#filterSearchColumn').addEventListener('change', renderRegistry);
