@@ -1231,6 +1231,17 @@ async function loadSettings() {
 }
 
 
+function switchHelpTab(tabName) {
+    qsa('.help-subtab').forEach((button) => {
+        button.classList.toggle('active', button.dataset.helpTab === tabName);
+    });
+    qsa('[data-help-panel]').forEach((panel) => {
+        const isActive = panel.dataset.helpPanel === tabName;
+        panel.classList.toggle('active', isActive);
+        panel.hidden = !isActive;
+    });
+}
+
 function switchSettingsTab(tabName) {
     qsa('.settings-subtab').forEach((button) => {
         button.classList.toggle('active', button.dataset.settingsTab === tabName);
@@ -1941,6 +1952,7 @@ function bindEvents() {
     }));
 
     qsa('.settings-subtab').forEach((button) => button.addEventListener('click', () => switchSettingsTab(button.dataset.settingsTab)));
+    qsa('.help-subtab').forEach((button) => button.addEventListener('click', () => switchHelpTab(button.dataset.helpTab)));
 
     qs('#openTestStockFillButton').addEventListener('click', openTestStockFillDialog);
     qs('#testStockFillForm').addEventListener('submit', submitTestStockFillForm);
