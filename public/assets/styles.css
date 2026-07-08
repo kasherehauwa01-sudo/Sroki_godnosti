@@ -28,7 +28,6 @@ h1 { margin: 0; font-size: clamp(28px, 5vw, 46px); }
 .tabs { display: flex; gap: 10px; align-items: center; overflow-x: auto; padding-bottom: 10px; }
 .tab, button { border: 0; border-radius: 14px; cursor: pointer; font-weight: 700; }
 .tab { padding: 12px 18px; background: #e8eef8; color: var(--muted); white-space: nowrap; }
-.nav-action { margin-left: auto; white-space: nowrap; }
 .tab.active { background: var(--primary); color: #fff; }
 .panel { display: none; margin-top: 18px; }
 .panel.active { display: block; }
@@ -154,3 +153,22 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .help-card h3 { margin: 22px 0 8px; }
 .help-card p { color: #475569; }
 .help-card code { background: #eef4ff; border-radius: 6px; padding: 1px 5px; }
+#registryBody tr[data-batch-id] { cursor: pointer; }
+#registryBody tr[data-batch-id]:hover td { filter: brightness(.98); }
+.numeric-cell { text-align: right; font-variant-numeric: tabular-nums; }
+.stock-table { min-width: 100%; }
+.stock-table tfoot th { background: #f1f5f9; font-weight: 800; }
+.stock-table-wrap { border: 1px solid var(--border); border-radius: 16px; }
+.warehouse-email-cell { white-space: pre-line; }
+.settings-warehouses-card { grid-column: 1 / -1; }
+.settings-subtabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.settings-subtab { padding: 10px 16px; background: #e8eef8; color: var(--muted); }
+.settings-subtab.active { background: var(--primary); color: #fff; }
+.settings-subpanel { display: none; }
+.settings-subpanel.active { display: grid; }
+
+.registry-top-actions { margin-bottom: 12px; }
+.settings-stock-fill-card { grid-column: 1 / -1; }
+.public-stock-card { max-width: 1100px; margin: 0 auto; }
+.public-stock-page h1 { color: var(--text); font-size: clamp(26px, 4vw, 36px); }
+[hidden] { display: none !important; }
