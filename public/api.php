@@ -799,6 +799,21 @@ function shouldRunExpiryNotificationsNow(PDO $pdo, DateTimeImmutable $scheduledA
     return $lastRunAt <= $now->modify('-1 hour');
 }
 
+
+function formatStockFormDeadlineRu(string $expiresAt): string
+{
+    $timestamp = strtotime($expiresAt);
+    return $timestamp ? date('d.m.Y H:i', $timestamp) : $expiresAt;
+}
+
+function stockFillInstructionText(array $form): string
+{
+    $deadline = formatStockFormDeadlineRu((string)($form['expires_at'] ?? ''));
+    return "Необходимо заполнить остатки партий.\n\n"
+        . "Для заполнения перейдите по ссылке (доступна до $deadline):\n" . (string)$form['url']
+        . "\n\nЕсли необходимо изменить информацию по остаткам, вы можете сделать это в течение 3 дней по этой же ссылке. Предыдущие значения будут отображены в форме, а новое сохранение перезапишет остаток.";
+}
+
 function sendDueExpiryNotifications(PDO $pdo, array $settings): void
 {
     $emails = getWarehouseNotificationEmails($pdo);
@@ -835,13 +850,7 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
         $subject = expiryNotificationSubject((int)$daysLeft);
         foreach ($warehouses as $warehouse) {
             $form = createStockNotification($pdo, $warehouse, $eventBatches, 'expiry_' . (int)$daysLeft, $subject, publicBaseUrl());
-            $body = expiryNotificationBody($eventBatches, (int)$daysLeft)
-                . "
-
-Необходимо заполнить остатки партий.
-
-Для заполнения перейдите по ссылке:
-" . $form['url'];
+            $body = expiryNotificationBody($eventBatches, (int)$daysLeft) . "\n\n" . stockFillInstructionText($form);
             sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)]);
             $sentEvents[] = [
                 'days_left' => (int)$daysLeft,
@@ -930,12 +939,7 @@ function sendTestNotification(PDO $pdo, array $payload): array
         throw new RuntimeException('Добавьте хотя бы один email во вкладке «Настройки» → «Склады» перед отправкой тестового уведомления.');
     }
     $form = createStockNotification($pdo, $warehouse, [$batch], 'test_expiry_' . $daysLeft, $subject, publicBaseUrl());
-    $body .= "
-
-Необходимо заполнить остатки партий.
-
-Для заполнения перейдите по ссылке:
-" . $form['url'];
+    $body .= "\n\n" . stockFillInstructionText($form);
     try {
         sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings);
         writeLog($pdo, 'test_notification_sent', [
@@ -973,8 +977,7 @@ function sendTestStockFillNotification(PDO $pdo, array $payload): array
     $settings = getRawSettings($pdo);
     $subject = expiryNotificationSubject((int)$event['days_left']);
     $form = createStockNotification($pdo, $warehouse, $event['batches'], 'test_stock_fill_' . (int)$event['days_left'], $subject, publicBaseUrl());
-    $body = expiryNotificationBody($event['batches'], (int)$event['days_left'])
-        . "\n\nНеобходимо заполнить остатки партий.\n\nДля заполнения перейдите по ссылке:\n" . $form['url'];
+    $body = expiryNotificationBody($event['batches'], (int)$event['days_left']) . "\n\n" . stockFillInstructionText($form);
     sendNotificationEmail($pdo, [$email], $subject, $body, $settings);
     writeLog($pdo, 'test_stock_fill_notification_sent', [
         'email' => $email,

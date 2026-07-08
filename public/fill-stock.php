@@ -54,6 +54,12 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
         return json;
     };
     const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+
+    function formatDeadlineRu(value) {
+        const date = new Date(String(value || '').replace(' ', 'T'));
+        if (Number.isNaN(date.getTime())) return value || '';
+        return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    }
     async function loadStockForm() {
         const error = document.querySelector('#stockFormError');
         const form = document.querySelector('#stockFillForm');
@@ -88,9 +94,12 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
             quantities[input.dataset.itemId] = Number(input.value);
         }
         try {
-            await stockApi('save_stock_form', { token: stockToken, quantities }, 'POST');
+            const result = await stockApi('save_stock_form', { token: stockToken, quantities }, 'POST');
+            const deadline = formatDeadlineRu(result.notification?.expires_at);
+            const message = `Настройки сохранены. Вы можете редактировать их до ${deadline}.`;
             document.querySelector('#stockFormError').textContent = '';
-            document.querySelector('#stockFormInfo').textContent = 'Остатки сохранены. Вы можете открыть ссылку повторно и изменить значения до истечения срока действия.';
+            document.querySelector('#stockFormInfo').textContent = message;
+            alert(message);
             await loadStockForm();
         } catch (saveError) {
             document.querySelector('#stockFormError').textContent = saveError.message;

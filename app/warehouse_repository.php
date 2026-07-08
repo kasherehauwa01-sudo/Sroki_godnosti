@@ -362,7 +362,7 @@ function createStockNotification(PDO $pdo, array $warehouse, array $batches, str
 {
     ensureStockNotificationSchema($pdo);
     $token = bin2hex(random_bytes(32));
-    $expiresAt = (new DateTimeImmutable('now'))->modify('+3 days')->format('Y-m-d H:i:s');
+    $expiresAt = (new DateTimeImmutable('today'))->modify('+3 days')->setTime(18, 0)->format('Y-m-d H:i:s');
     $emails = normalizeWarehouseEmails((string)($warehouse['email'] ?? ''));
     if ($emails === null) {
         throw new InvalidArgumentException('У склада не указаны email для уведомления.');
