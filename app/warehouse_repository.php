@@ -490,11 +490,12 @@ function isStockNotificationActive(array $notification): bool
 function getStockNotificationItems(PDO $pdo, int $notificationId, int $warehouseId): array
 {
     $statement = $pdo->prepare(
-        'SELECT i.id, i.batch_id, i.article, i.code, i.name, i.expiry_date, i.expiry_full_date, COALESCE(bs.quantity, 0) AS quantity
+        "SELECT i.id, i.batch_id, i.article, i.code, i.name, i.expiry_date, i.expiry_full_date, COALESCE(bs.quantity, 0) AS quantity
          FROM stock_notification_items i
+         INNER JOIN batches b ON b.id = i.batch_id AND b.status <> 'Списана'
          LEFT JOIN batch_stock bs ON bs.batch_id = i.batch_id AND bs.warehouse_id = :warehouse_id
          WHERE i.notification_id = :notification_id
-         ORDER BY i.sort_order ASC, i.id ASC'
+         ORDER BY i.sort_order ASC, i.id ASC"
     );
     $statement->execute([':warehouse_id' => $warehouseId, ':notification_id' => $notificationId]);
 
@@ -577,11 +578,12 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
 function updateStockNotificationProgress(PDO $pdo, int $notificationId): void
 {
     $statement = $pdo->prepare(
-        'SELECT COUNT(*) AS total, SUM(CASE WHEN bs.id IS NULL THEN 0 ELSE 1 END) AS filled
+        "SELECT COUNT(*) AS total, SUM(CASE WHEN bs.id IS NULL THEN 0 ELSE 1 END) AS filled
          FROM stock_notification_items i
          INNER JOIN stock_notifications n ON n.id = i.notification_id
+         INNER JOIN batches b ON b.id = i.batch_id AND b.status <> 'Списана'
          LEFT JOIN batch_stock bs ON bs.batch_id = i.batch_id AND bs.warehouse_id = n.warehouse_id
-         WHERE i.notification_id = :notification_id'
+         WHERE i.notification_id = :notification_id"
     );
     $statement->execute([':notification_id' => $notificationId]);
     $row = $statement->fetch() ?: ['total' => 0, 'filled' => 0];
@@ -682,7 +684,7 @@ function listStockBatchNotifications(PDO $pdo): array
              INNER JOIN warehouses w ON w.id = bs.warehouse_id AND w.is_active = 1
              GROUP BY bs.batch_id
          ) stock_totals
-         INNER JOIN batches b ON b.id = stock_totals.batch_id
+         INNER JOIN batches b ON b.id = stock_totals.batch_id AND b.status <> 'Списана'
          LEFT JOIN (
              SELECT batch_id, MAX(created_at) AS last_change_at
              FROM stock_change_logs
