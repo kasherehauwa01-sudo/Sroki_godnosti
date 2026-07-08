@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260708-3"></script>
+    <script defer src="assets/app.js?v=20260708-4"></script>
 </head>
 <body>
     <header class="topbar">
@@ -165,13 +165,6 @@ declare(strict_types=1);
                     <label>Время отправки уведомлений
                         <input id="notificationTime" name="notification_time" type="time" value="09:00">
                     </label>
-                </div>
-
-                <div class="card form">
-                    <h3>Получатели уведомлений</h3>
-                    <label>Email получателей<textarea id="notificationEmails" rows="6" placeholder="vr-vk@yandex.ru
-manager@site.ru"></textarea></label>
-                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
                     <div class="settings-actions">
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
                         <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">Логи уведомлений</button>

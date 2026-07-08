@@ -1575,7 +1575,10 @@ function renderNotificationHistory(history) {
 }
 
 function collectSettingsForm() {
-    const emails = qs('#notificationEmails').value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean);
+    const notificationEmailsField = qs('#notificationEmails');
+    const emails = notificationEmailsField
+        ? notificationEmailsField.value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean)
+        : (state.settings?.emails || []);
     const missingFilterEmails = qs('#missingFilterEmails').value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean);
     const notificationTimeInput = qs('#notificationTime');
 
