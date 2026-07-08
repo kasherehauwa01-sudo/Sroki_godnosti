@@ -955,6 +955,83 @@ function sendTestNotification(PDO $pdo, array $payload): array
     return ['ok' => true, 'message' => 'Тестовое уведомление отправлено.'];
 }
 
+
+function sendTestStockFillNotification(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $email = trim((string)($payload['email'] ?? ''));
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Введите корректный email для тестового уведомления.');
+    }
+
+    $warehouse = firstActiveWarehouseForStockTest($pdo);
+    $warehouse['email'] = $email;
+    $event = findStockFillTestEvent($pdo);
+    $settings = getRawSettings($pdo);
+    $subject = expiryNotificationSubject((int)$event['days_left']);
+    $form = createStockNotification($pdo, $warehouse, $event['batches'], 'test_stock_fill_' . (int)$event['days_left'], $subject, publicBaseUrl());
+    $body = expiryNotificationBody($event['batches'], (int)$event['days_left'])
+        . "\n\nНеобходимо заполнить остатки партий.\n\nДля заполнения перейдите по ссылке:\n" . $form['url'];
+    sendNotificationEmail($pdo, [$email], $subject, $body, $settings);
+    writeLog($pdo, 'test_stock_fill_notification_sent', [
+        'email' => $email,
+        'warehouse_id' => (int)$warehouse['id'],
+        'notification_id' => (int)$form['id'],
+        'days_left' => (int)$event['days_left'],
+        'count' => count($event['batches']),
+    ]);
+
+    return ['ok' => true, 'message' => 'Тестовое уведомление отправлено.', 'notification_id' => (int)$form['id']];
+}
+
+function firstActiveWarehouseForStockTest(PDO $pdo): array
+{
+    $warehouses = listWarehouses($pdo, true);
+    if (!$warehouses) {
+        throw new RuntimeException('Добавьте хотя бы один активный склад перед отправкой тестового уведомления.');
+    }
+
+    return $warehouses[0];
+}
+
+function findStockFillTestEvent(PDO $pdo): array
+{
+    $eventDays = array_values(array_unique(array_merge([0], NOTIFICATION_EVENT_DAYS)));
+    $placeholders = implode(',', array_fill(0, count($eventDays), '?'));
+    $statement = $pdo->prepare(
+        "SELECT days_left
+         FROM batches
+         WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
+         ORDER BY ABS(days_left) ASC, days_left ASC
+         LIMIT 1"
+    );
+    $statement->execute($eventDays);
+    $daysLeft = $statement->fetchColumn();
+
+    if ($daysLeft === false) {
+        $daysLeft = $pdo->query(
+            "SELECT days_left
+             FROM batches
+             WHERE status = 'В наличии' AND expiry_invalid = 0
+             ORDER BY CASE WHEN days_left >= 0 THEN 0 ELSE 1 END, ABS(days_left) ASC, expiry_date ASC
+             LIMIT 1"
+        )->fetchColumn();
+    }
+    if ($daysLeft === false) {
+        throw new RuntimeException('В реестре нет партий для тестового уведомления.');
+    }
+
+    $batchStatement = $pdo->prepare(
+        'SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, days_left
+         FROM batches
+         WHERE status = :status AND expiry_invalid = 0 AND days_left = :days_left
+         ORDER BY expiry_date ASC, article ASC'
+    );
+    $batchStatement->execute([':status' => ACTIVE_STATUS, ':days_left' => (int)$daysLeft]);
+
+    return ['days_left' => (int)$daysLeft, 'batches' => $batchStatement->fetchAll()];
+}
+
 function runTestAutoImport(PDO $pdo, array $payload): array
 {
     assertSettingsPassword($payload);

@@ -102,7 +102,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'stock_notifications', 'stock_notification']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -993,6 +993,33 @@ async function deleteWarehouse(id) {
 }
 
 
+
+function openTestStockFillDialog() {
+    qs('#testStockFillEmail').value = '';
+    setTextIfPresent('#testStockFillError', '');
+    qs('#testStockFillDialog').showModal();
+    qs('#testStockFillEmail').focus();
+}
+
+function closeTestStockFillDialog() {
+    qs('#testStockFillDialog').close();
+    qs('#testStockFillForm').reset();
+}
+
+async function submitTestStockFillForm(event) {
+    event.preventDefault();
+    const email = qs('#testStockFillEmail').value.trim();
+    setTextIfPresent('#testStockFillError', '');
+    try {
+        const result = await api('test_stock_fill_notification', { settings_password: state.settingsPassword, email });
+        closeTestStockFillDialog();
+        showToast(result.message || 'Тестовое уведомление отправлено.');
+        await loadStockNotifications();
+    } catch (error) {
+        setTextIfPresent('#testStockFillError', error.message);
+    }
+}
+
 async function loadStockNotifications() {
     const result = await api('stock_notifications');
     state.stockNotifications = result.notifications || [];
@@ -1749,6 +1776,11 @@ function bindEvents() {
     }));
 
     qsa('.settings-subtab').forEach((button) => button.addEventListener('click', () => switchSettingsTab(button.dataset.settingsTab)));
+
+    qs('#openTestStockFillButton').addEventListener('click', openTestStockFillDialog);
+    qs('#testStockFillForm').addEventListener('submit', submitTestStockFillForm);
+    qs('#closeTestStockFillDialogButton').addEventListener('click', closeTestStockFillDialog);
+    qs('#cancelTestStockFillButton').addEventListener('click', closeTestStockFillDialog);
 
     qs('#closeNotificationDialogButton').addEventListener('click', closeNotificationDialog);
     qs('#closeBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);

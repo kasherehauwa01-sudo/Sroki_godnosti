@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-11"></script>
+    <script defer src="assets/app.js?v=20260707-12"></script>
 </head>
 <body>
     <header class="topbar">
@@ -215,6 +215,7 @@ manager@site.ru"></textarea></label>
                             <h3>Заполнение остатков</h3>
                             <p>Отслеживайте формы, отправленные складам для заполнения остатков партий.</p>
                         </div>
+                        <button class="primary" id="openTestStockFillButton" type="button">Тест</button>
                     </div>
                     <div class="table-wrap">
                         <table>
@@ -524,6 +525,23 @@ manager@site.ru"></textarea></label>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelWarehouseButton" type="button">Отмена</button>
                 <button class="primary" type="submit">Сохранить</button>
+            </div>
+        </form>
+    </dialog>
+
+
+    <dialog class="modal" id="testStockFillDialog">
+        <form class="card form modal-card" id="testStockFillForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Тест заполнения остатков</h2>
+                <button class="icon-button" id="closeTestStockFillDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Введите email, на который нужно отправить тестовую ссылку. Если сегодня нет событий, будет использовано ближайшее событие.</p>
+            <label>Email<input id="testStockFillEmail" required autocomplete="email" type="email" placeholder="sklad@example.ru"></label>
+            <p class="field-error" id="testStockFillError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelTestStockFillButton" type="button">Отмена</button>
+                <button class="primary" type="submit">Ок</button>
             </div>
         </form>
     </dialog>
