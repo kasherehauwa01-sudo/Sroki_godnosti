@@ -64,6 +64,7 @@ function handleApiRequest(): void
                 'stock_notifications' => ['ok' => true, 'notifications' => listStockNotifications($pdo)],
                 'stock_notification' => ['ok' => true] + getStockNotificationDetails($pdo, (int)($_GET['id'] ?? 0)),
                 'stock_batch_notifications' => ['ok' => true, 'notifications' => listStockBatchNotifications($pdo)],
+                'events' => ['ok' => true, 'events' => listExpiryEvents($pdo)],
                 'tick' => ['ok' => true],
                 default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
             };

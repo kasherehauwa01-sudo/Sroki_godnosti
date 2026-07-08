@@ -673,9 +673,11 @@ function listStockBatchNotifications(PDO $pdo): array
         "SELECT b.id, b.article, b.code, b.name, b.expiry_date, b.expiry_full_date, b.status,
                 stock_totals.total_stock,
                 GREATEST(stock_totals.last_stock_at, COALESCE(change_totals.last_change_at, stock_totals.last_stock_at)) AS last_stock_at,
-                v.viewed_at
+                v.viewed_at,
+                COALESCE(active_warehouses.active_count, 0) AS active_warehouse_count,
+                COALESCE(stock_totals.filled_warehouse_count, 0) AS filled_warehouse_count
          FROM (
-             SELECT batch_id, SUM(quantity) AS total_stock, MAX(updated_at) AS last_stock_at
+             SELECT batch_id, SUM(quantity) AS total_stock, COUNT(DISTINCT warehouse_id) AS filled_warehouse_count, MAX(updated_at) AS last_stock_at
              FROM batch_stock
              GROUP BY batch_id
          ) stock_totals
@@ -686,6 +688,7 @@ function listStockBatchNotifications(PDO $pdo): array
              GROUP BY batch_id
          ) change_totals ON change_totals.batch_id = b.id
          LEFT JOIN stock_batch_notification_views v ON v.batch_id = b.id
+         CROSS JOIN (SELECT COUNT(*) AS active_count FROM warehouses WHERE is_active = 1) active_warehouses
          ORDER BY last_stock_at DESC, b.id DESC"
     );
 
@@ -704,6 +707,7 @@ function listStockBatchNotifications(PDO $pdo): array
             'last_stock_at' => $lastStockAt,
             'viewed_at' => $viewedAt,
             'unread' => $viewedAt === '' || ($lastStockAt !== '' && strtotime($lastStockAt) > strtotime($viewedAt)),
+            'all_warehouses_reported' => (int)($row['active_warehouse_count'] ?? 0) > 0 && (int)($row['filled_warehouse_count'] ?? 0) >= (int)($row['active_warehouse_count'] ?? 0),
         ];
     }, $statement->fetchAll());
 }
@@ -721,4 +725,27 @@ function markStockBatchNotificationViewed(PDO $pdo, int $batchId): array
     $statement->execute([':batch_id' => $batchId]);
 
     return ['ok' => true];
+}
+
+function listExpiryEvents(PDO $pdo): array
+{
+    $eventDays = [180, 90, 60, 30, 1];
+    $placeholders = implode(',', array_fill(0, count($eventDays), '?'));
+    $statement = $pdo->prepare(
+        "SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
+         FROM batches
+         WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
+         ORDER BY days_left DESC, expiry_date ASC, article ASC"
+    );
+    $statement->execute($eventDays);
+
+    return array_map(static fn (array $row): array => [
+        'id' => (int)$row['id'],
+        'article' => (string)$row['article'],
+        'code' => (string)($row['code'] ?? ''),
+        'name' => (string)($row['name'] ?? ''),
+        'expiry_date' => (string)$row['expiry_date'],
+        'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
+        'event_type' => (int)$row['days_left'],
+    ], $statement->fetchAll());
 }

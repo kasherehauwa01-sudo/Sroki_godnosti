@@ -19,6 +19,7 @@ const state = {
     stockNotifications: [],
     stockBatchNotifications: [],
     selectedStockBatchId: null,
+    events: [],
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -103,7 +104,7 @@ async function copyDeployCommand() {
 }
 
 function getApiMethod(action, data = {}) {
-    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'stock_notifications', 'stock_notification', 'stock_batch_notifications']);
+    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events']);
     const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed']);
 
     // Действие settings используется и для чтения, и для сохранения:
@@ -802,7 +803,7 @@ async function submitAddBatchesForm(event) {
         }
         closeAddBatchesDialog();
         showToast(`Добавлено партий: ${result.added || 0}`);
-        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications()]);
+        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
     } catch (error) {
         showToast(error.message, true);
     }
@@ -845,13 +846,13 @@ async function submitEditForm(event) {
             if (shouldDelete) {
                 await api('delete', { id: batch.id, invalid_duplicate_cleanup: true });
                 showToast('Некорректная строка удалена.');
-                await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications()]);
+                await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
             }
             return;
         }
         closeEditDialog();
         showToast('Партия обновлена.');
-        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications()]);
+        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
     } catch (error) {
         showToast(error.message, true);
     }
@@ -869,7 +870,7 @@ async function deleteBatch(id) {
     try {
         await api('delete', { id, write_off_password: state.writeOffPassword });
         showToast('Партия списана/удалена.');
-        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications()]);
+        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
     } catch (error) {
         showToast(error.message, true);
     }
@@ -888,7 +889,7 @@ async function deleteSelectedBatches() {
         const result = await api('bulk_delete', { ids, write_off_password: state.writeOffPassword });
         state.selectedBatchIds.clear();
         showToast(`Удалено партий: ${result.deleted || ids.length}`);
-        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications()]);
+        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
     } catch (error) {
         showToast(error.message, true);
     }
@@ -1029,6 +1030,37 @@ async function submitTestStockFillForm(event) {
 }
 
 
+
+async function loadEvents() {
+    const result = await api('events');
+    state.events = result.events || [];
+    renderEvents();
+}
+
+function renderEvents() {
+    const body = qs('#eventsBody');
+    if (!body) return;
+    body.innerHTML = state.events.map((event) => `
+        <tr data-event-id="${event.id}">
+            <td>${escapeHtml(event.article)}</td>
+            <td>${escapeHtml(event.code || '')}</td>
+            <td>${escapeHtml(event.name || '')}</td>
+            <td>${escapeHtml(formatExpiryMonthRu(event.expiry_date, event.expiry_full_date))}</td>
+            <td>${Number(event.event_type)} день</td>
+        </tr>
+    `).join('') || '<tr><td colspan="5">Событий нет.</td></tr>';
+    qsa('[data-event-id]').forEach((row) => row.addEventListener('click', () => openEventDetails(row.dataset.eventId)));
+}
+
+function openEventDetails(id) {
+    const event = state.events.find((item) => String(item.id) === String(id));
+    if (!event) return;
+    showNotificationDialog(
+        `Артикул: ${event.article}\nКод: ${event.code || ''}\nНаименование: ${event.name || ''}\nСрок годности: ${formatExpiryMonthRu(event.expiry_date, event.expiry_full_date)}\nТип события: ${event.event_type} день`,
+        'Событие партии'
+    );
+}
+
 async function loadStockBatchNotifications() {
     const result = await api('stock_batch_notifications');
     state.stockBatchNotifications = result.notifications || [];
@@ -1041,7 +1073,7 @@ function renderStockBatchNotifications() {
     const hasUnread = state.stockBatchNotifications.some((notification) => notification.unread);
     qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnread);
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
-        <tr class="${notification.unread ? 'unread-stock-notification' : ''}" data-stock-batch-id="${notification.id}">
+        <tr class="${[notification.unread ? 'unread-stock-notification' : '', notification.all_warehouses_reported ? 'complete-stock-notification' : ''].filter(Boolean).join(' ')}" data-stock-batch-id="${notification.id}">
             <td>${escapeHtml(notification.article)}</td>
             <td>${escapeHtml(notification.code || '')}</td>
             <td>${escapeHtml(notification.name || '')}</td>
@@ -1560,7 +1592,7 @@ async function runTestAutoImport() {
         } else {
             await loadSettings();
         }
-        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications()]);
+        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
         status.textContent = result.message || 'Автозагрузка выполнена.';
         showToast(status.textContent);
         setTimeout(async () => {
@@ -1836,6 +1868,9 @@ function bindEvents() {
         if (targetTab === 'notifications') {
             await loadStockBatchNotifications();
         }
+        if (targetTab === 'events') {
+            await loadEvents();
+        }
     }));
 
     qsa('.settings-subtab').forEach((button) => button.addEventListener('click', () => switchSettingsTab(button.dataset.settingsTab)));
@@ -1897,7 +1932,7 @@ function bindEvents() {
                 showToast(`Загружено строк: ${result.added || 0}`);
             }
             closeXlsImportDialog();
-            await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications()]);
+            await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
         } catch (error) {
             showToast(error.message, true);
         }
@@ -2021,7 +2056,7 @@ function startSchedulerHeartbeat() {
 
 async function bootstrap() {
     try {
-        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications()]);
+        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
         showToast('Данные обновлены.');
     } catch (error) {
         showToast(error.message, true);

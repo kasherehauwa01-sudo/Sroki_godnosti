@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-14"></script>
+    <script defer src="assets/app.js?v=20260707-15"></script>
 </head>
 <body>
     <header class="topbar">
@@ -23,6 +23,7 @@ declare(strict_types=1);
     <main class="layout">
         <nav class="tabs" aria-label="Разделы администратора">
             <button class="tab active" data-tab="registry" type="button">Реестр</button>
+            <button class="tab" data-tab="events" type="button">События</button>
             <button class="tab notification-tab" data-tab="notifications" type="button">Уведомления <span class="notification-dot hidden" id="notificationsUnreadDot"></span></button>
             <button class="tab" data-tab="history" type="button">История</button>
             <button class="tab" data-tab="help" type="button">Помощь</button>
@@ -93,6 +94,20 @@ declare(strict_types=1);
             </div>
         </section>
 
+
+
+        <section class="panel" id="tab-events">
+            <div class="section-heading">
+                <h2>События</h2>
+                <p>Партии с событиями по сроку годности: 180, 90, 60, 30 и 1 день.</p>
+            </div>
+            <div class="table-wrap card">
+                <table>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Срок годности</th><th>Тип события</th></tr></thead>
+                    <tbody id="eventsBody"></tbody>
+                </table>
+            </div>
+        </section>
 
         <section class="panel" id="tab-notifications">
             <div class="section-heading">

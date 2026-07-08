@@ -175,3 +175,5 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .notification-tab { position: relative; }
 .notification-dot { display: inline-block; width: 9px; height: 9px; margin-left: 6px; border-radius: 999px; background: #dc2626; vertical-align: middle; }
 .unread-stock-notification td { font-weight: 800; }
+.complete-stock-notification td { color: #15803d; }
+#eventsBody tr[data-event-id] { cursor: pointer; }
