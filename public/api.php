@@ -144,7 +144,7 @@ function ensureSettingsSchema(PDO $pdo): void
         'smtp_from_email' => "ALTER TABLE settings ADD COLUMN smtp_from_email VARCHAR(255) NULL AFTER smtp_password",
         'smtp_from_name' => "ALTER TABLE settings ADD COLUMN smtp_from_name VARCHAR(255) NULL AFTER smtp_from_email",
         'notification_time' => "ALTER TABLE settings ADD COLUMN notification_time CHAR(5) NOT NULL DEFAULT '09:00' AFTER smtp_from_name",
-        'auto_import_time' => "ALTER TABLE settings ADD COLUMN auto_import_time CHAR(5) NOT NULL DEFAULT '10:00' AFTER notification_time",
+        'auto_import_time' => "ALTER TABLE settings ADD COLUMN auto_import_time CHAR(5) NOT NULL DEFAULT '23:50' AFTER notification_time",
         'missing_filter_email' => "ALTER TABLE settings ADD COLUMN missing_filter_email TEXT NULL AFTER auto_import_time",
     ];
 
@@ -1198,7 +1198,7 @@ function normalizeSettings(array $settings): array
         'smtp_from_email' => (string)($settings['smtp_from_email'] ?? SENDER_EMAIL),
         'smtp_from_name' => (string)($settings['smtp_from_name'] ?? 'Сроки годности'),
         'notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
-        'auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? '10:00'), '10:00'),
+        'auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? '23:50'), '23:50'),
         'auto_import' => getAutoImportInfo($GLOBALS['pdo_for_settings_info'] ?? null),
         'missing_filter_email' => (string)($settings['missing_filter_email'] ?? ''),
         'missing_filter_emails' => splitEmails((string)($settings['missing_filter_email'] ?? '')),
@@ -1252,7 +1252,7 @@ function saveSettings(PDO $pdo, array $settings): array
         ':smtp_from_email' => trim((string)($settings['smtp_from_email'] ?? $current['smtp_from_email'] ?? SENDER_EMAIL)),
         ':smtp_from_name' => trim((string)($settings['smtp_from_name'] ?? $current['smtp_from_name'] ?? 'Сроки годности')),
         ':notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? $current['notification_time'] ?? '09:00')),
-        ':auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? $current['auto_import_time'] ?? '10:00'), '10:00'),
+        ':auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? $current['auto_import_time'] ?? '23:50'), '23:50'),
         ':missing_filter_email' => implode(',', splitEmails((string)($settings['missing_filter_email'] ?? $current['missing_filter_email'] ?? ''))),
     ];
 
@@ -1400,7 +1400,7 @@ function autoImportLogText(string $action, array $payload): string
 {
     if ($action === 'auto_import_started') {
         return ($payload['mode'] ?? '') === 'daily_auto'
-            ? sprintf('Ежедневная автозагрузка запущена по расписанию %s МСК.', (string)($payload['time'] ?? '10:00'))
+            ? sprintf('Ежедневная автозагрузка запущена по расписанию %s МСК.', (string)($payload['time'] ?? '23:50'))
             : 'Ручной тест автозагрузки запущен.';
     }
     if ($action === 'auto_import_completed') {

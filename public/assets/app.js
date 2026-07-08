@@ -1592,7 +1592,7 @@ function collectSettingsForm() {
         notify_7_days: qs('#notify7').checked,
         notify_1_day: qs('#notify1').checked,
         notification_time: notificationTimeInput ? (notificationTimeInput.value || '09:00') : (state.settings && state.settings.notification_time ? state.settings.notification_time : '09:00'),
-        auto_import_time: '10:00',
+        auto_import_time: '23:50',
         emails,
         missing_filter_email: missingFilterEmails.join(','),
     };
