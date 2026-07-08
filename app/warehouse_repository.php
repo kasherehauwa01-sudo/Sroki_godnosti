@@ -331,6 +331,20 @@ function ensureStockNotificationSchema(PDO $pdo): void
     );
 
     ensureStockTokenColumn($pdo);
+    ensureStockBatchNotificationViewsSchema($pdo);
+}
+
+
+function ensureStockBatchNotificationViewsSchema(PDO $pdo): void
+{
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS stock_batch_notification_views (
+            batch_id BIGINT UNSIGNED NOT NULL,
+            viewed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (batch_id),
+            CONSTRAINT fk_stock_batch_views_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
 }
 
 function ensureStockTokenColumn(PDO $pdo): void
@@ -650,4 +664,54 @@ function normalizeStockNotificationRow(array $row, array $items): array
         'total_items' => count($items),
         'filled_items' => count(array_filter($items, static fn (array $item): bool => (int)$item['quantity'] > 0)),
     ];
+}
+
+function listStockBatchNotifications(PDO $pdo): array
+{
+    ensureStockNotificationSchema($pdo);
+    $statement = $pdo->query(
+        "SELECT b.id, b.article, b.code, b.name, b.expiry_date, b.expiry_full_date, b.status,
+                SUM(bs.quantity) AS total_stock,
+                MAX(COALESCE(scl.created_at, bs.updated_at)) AS last_stock_at,
+                v.viewed_at
+         FROM batch_stock bs
+         INNER JOIN batches b ON b.id = bs.batch_id
+         LEFT JOIN stock_change_logs scl ON scl.batch_id = b.id
+         LEFT JOIN stock_batch_notification_views v ON v.batch_id = b.id
+         GROUP BY b.id
+         ORDER BY last_stock_at DESC, b.id DESC"
+    );
+
+    return array_map(static function (array $row): array {
+        $lastStockAt = (string)($row['last_stock_at'] ?? '');
+        $viewedAt = (string)($row['viewed_at'] ?? '');
+        return [
+            'id' => (int)$row['id'],
+            'article' => (string)$row['article'],
+            'code' => (string)($row['code'] ?? ''),
+            'name' => (string)($row['name'] ?? ''),
+            'expiry_date' => (string)$row['expiry_date'],
+            'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
+            'status' => (string)$row['status'],
+            'total_stock' => (int)($row['total_stock'] ?? 0),
+            'last_stock_at' => $lastStockAt,
+            'viewed_at' => $viewedAt,
+            'unread' => $viewedAt === '' || ($lastStockAt !== '' && strtotime($lastStockAt) > strtotime($viewedAt)),
+        ];
+    }, $statement->fetchAll());
+}
+
+function markStockBatchNotificationViewed(PDO $pdo, int $batchId): array
+{
+    ensureStockNotificationSchema($pdo);
+    if ($batchId <= 0) {
+        throw new InvalidArgumentException('Не указана партия для отметки просмотра.');
+    }
+    $statement = $pdo->prepare(
+        'INSERT INTO stock_batch_notification_views (batch_id, viewed_at) VALUES (:batch_id, NOW())
+         ON DUPLICATE KEY UPDATE viewed_at = VALUES(viewed_at)'
+    );
+    $statement->execute([':batch_id' => $batchId]);
+
+    return ['ok' => true];
 }

@@ -63,6 +63,7 @@ function handleApiRequest(): void
                 'stock_form' => ['ok' => true] + loadStockFormByToken($pdo, (string)($_GET['token'] ?? '')),
                 'stock_notifications' => ['ok' => true, 'notifications' => listStockNotifications($pdo)],
                 'stock_notification' => ['ok' => true] + getStockNotificationDetails($pdo, (int)($_GET['id'] ?? 0)),
+                'stock_batch_notifications' => ['ok' => true, 'notifications' => listStockBatchNotifications($pdo)],
                 'tick' => ['ok' => true],
                 default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
             };
@@ -84,6 +85,7 @@ function handleApiRequest(): void
                 'warehouse_update' => updateWarehouse($pdo, $payload),
                 'warehouse_delete' => deleteWarehouse($pdo, $payload),
                 'save_stock_form' => saveStockForm($pdo, (string)($payload['token'] ?? ''), (array)($payload['quantities'] ?? []), clientIp(), (string)($_SERVER['HTTP_USER_AGENT'] ?? '')),
+                'mark_stock_batch_notification_viewed' => markStockBatchNotificationViewed($pdo, (int)($payload['batch_id'] ?? 0)),
                 default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
             };
         }

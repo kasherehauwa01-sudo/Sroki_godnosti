@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-13"></script>
+    <script defer src="assets/app.js?v=20260707-14"></script>
 </head>
 <body>
     <header class="topbar">
@@ -23,6 +23,7 @@ declare(strict_types=1);
     <main class="layout">
         <nav class="tabs" aria-label="Разделы администратора">
             <button class="tab active" data-tab="registry" type="button">Реестр</button>
+            <button class="tab notification-tab" data-tab="notifications" type="button">Уведомления <span class="notification-dot hidden" id="notificationsUnreadDot"></span></button>
             <button class="tab" data-tab="history" type="button">История</button>
             <button class="tab" data-tab="help" type="button">Помощь</button>
             <button class="tab" data-tab="warehouses" type="button">Склады</button>
@@ -88,6 +89,20 @@ declare(strict_types=1);
                 <table>
                     <thead><tr><th class="selection-column hidden" id="selectionHeader"><label class="select-all-row"><input id="selectAllBatches" type="checkbox"> Выделить все</label></th><th><button class="sort-button" data-sort="article" type="button">Артикул <span class="sort-indicator" data-sort-indicator="article"></span></button></th><th>Код</th><th>Наименование</th><th><button class="sort-button" data-sort="expiryDate" type="button">Срок годности <span class="sort-indicator" data-sort-indicator="expiryDate"></span></button></th><th><button class="sort-button" data-sort="daysLeft" type="button">Остаток дней <span class="sort-indicator" data-sort-indicator="daysLeft"></span></button></th><th>Статус</th><th><button class="sort-button" data-sort="createdAt" type="button">Дата внесения <span class="sort-indicator" data-sort-indicator="createdAt"></span></button></th><th>Действия</th></tr></thead>
                     <tbody id="registryBody"></tbody>
+                </table>
+            </div>
+        </section>
+
+
+        <section class="panel" id="tab-notifications">
+            <div class="section-heading">
+                <h2>Уведомления</h2>
+                <p>Партии, по которым склады внесли остатки.</p>
+            </div>
+            <div class="table-wrap card">
+                <table>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Остаток</th><th>Статус</th><th>Последнее изменение</th></tr></thead>
+                    <tbody id="stockBatchNotificationsBody"></tbody>
                 </table>
             </div>
         </section>
@@ -508,6 +523,7 @@ manager@site.ru"></textarea></label>
                 </table>
             </div>
             <div class="modal-actions">
+                <button class="ghost-button danger hidden" id="writeOffStockBatchButton" type="button">Списать</button>
                 <button class="primary" id="confirmBatchStockDialogButton" type="button">Закрыть</button>
             </div>
         </div>
