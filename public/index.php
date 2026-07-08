@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-12"></script>
+    <script defer src="assets/app.js?v=20260707-13"></script>
 </head>
 <body>
     <header class="topbar">
@@ -98,6 +98,24 @@ declare(strict_types=1);
                 <button class="settings-subtab" data-settings-tab="warehouses" type="button">Склады</button>
                 <button class="settings-subtab" data-settings-tab="stock-fill" type="button">Заполнение остатков</button>
             </div>
+            <div class="settings-subpanel" data-settings-panel="warehouses" hidden>
+                <div class="card form settings-warehouses-card">
+                    <div class="section-heading registry-heading">
+                        <div>
+                            <h3>Склады</h3>
+                            <p>Управляйте списком складов и email-адресами для уведомлений по событиям.</p>
+                        </div>
+                        <button class="primary" id="openWarehouseDialogButton" type="button">Добавить склад</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Название</th><th>Порядок</th><th>Email</th><th>Статус</th><th>Действия</th></tr></thead>
+                            <tbody id="warehousesBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <form class="settings-grid settings-subpanel active" data-settings-panel="main" id="settingsForm">
                 <div class="card form">
                     <h3>Уведомления</h3>
@@ -226,23 +244,6 @@ manager@site.ru"></textarea></label>
                 </div>
             </div>
 
-            <div class="settings-subpanel" data-settings-panel="warehouses" hidden>
-                <div class="card form settings-warehouses-card">
-                    <div class="section-heading registry-heading">
-                        <div>
-                            <h3>Склады</h3>
-                            <p>Управляйте списком складов и email-адресами для уведомлений по событиям.</p>
-                        </div>
-                        <button class="primary" id="openWarehouseDialogButton" type="button">Добавить склад</button>
-                    </div>
-                    <div class="table-wrap">
-                        <table>
-                            <thead><tr><th>Название</th><th>Порядок</th><th>Email</th><th>Статус</th><th>Действия</th></tr></thead>
-                            <tbody id="warehousesBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
         </section>
 
 
