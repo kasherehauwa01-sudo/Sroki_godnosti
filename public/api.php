@@ -78,6 +78,7 @@ function handleApiRequest(): void
                 'test_notification' => sendTestNotification($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
                 'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
+                'test_stock_fill_notification' => sendTestStockFillNotification($pdo, $payload),
                 'verify_write_off' => verifyWriteOffPassword($payload),
                 'warehouse_create' => createWarehouse($pdo, $payload),
                 'warehouse_update' => updateWarehouse($pdo, $payload),
