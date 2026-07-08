@@ -401,9 +401,17 @@ function writeOffBaseCodeBatchesForReplacement(PDO $pdo, array $batch): array
     }
 
     $statement = $pdo->prepare(
-        "SELECT id FROM batches WHERE code = :code AND status <> 'Списана' ORDER BY id ASC"
+        "SELECT id
+         FROM batches
+         WHERE code = :code
+           AND expiry_date = :expiry_date
+           AND status <> 'Списана'
+         ORDER BY id ASC"
     );
-    $statement->execute([':code' => $baseCode]);
+    $statement->execute([
+        ':code' => $baseCode,
+        ':expiry_date' => (string)($batch['expiry_date'] ?? ''),
+    ]);
     $ids = array_map('intval', $statement->fetchAll(PDO::FETCH_COLUMN));
     if (!$ids) {
         return [];
