@@ -671,14 +671,21 @@ function listStockBatchNotifications(PDO $pdo): array
     ensureStockNotificationSchema($pdo);
     $statement = $pdo->query(
         "SELECT b.id, b.article, b.code, b.name, b.expiry_date, b.expiry_full_date, b.status,
-                SUM(bs.quantity) AS total_stock,
-                MAX(COALESCE(scl.created_at, bs.updated_at)) AS last_stock_at,
+                stock_totals.total_stock,
+                GREATEST(stock_totals.last_stock_at, COALESCE(change_totals.last_change_at, stock_totals.last_stock_at)) AS last_stock_at,
                 v.viewed_at
-         FROM batch_stock bs
-         INNER JOIN batches b ON b.id = bs.batch_id
-         LEFT JOIN stock_change_logs scl ON scl.batch_id = b.id
+         FROM (
+             SELECT batch_id, SUM(quantity) AS total_stock, MAX(updated_at) AS last_stock_at
+             FROM batch_stock
+             GROUP BY batch_id
+         ) stock_totals
+         INNER JOIN batches b ON b.id = stock_totals.batch_id
+         LEFT JOIN (
+             SELECT batch_id, MAX(created_at) AS last_change_at
+             FROM stock_change_logs
+             GROUP BY batch_id
+         ) change_totals ON change_totals.batch_id = b.id
          LEFT JOIN stock_batch_notification_views v ON v.batch_id = b.id
-         GROUP BY b.id
          ORDER BY last_stock_at DESC, b.id DESC"
     );
 
