@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260708-4"></script>
+    <script defer src="assets/app.js?v=20260708-5"></script>
 </head>
 <body>
     <header class="topbar">
@@ -232,22 +232,6 @@ declare(strict_types=1);
                     <p class="subtitle">Нажмите «Копировать», чтобы скопировать команду обновления в буфер обмена.</p>
                 </div>
 
-
-                <div class="card form settings-warehouses-card">
-                    <div class="section-heading registry-heading">
-                        <div>
-                            <h3>Склады</h3>
-                            <p>Управляйте списком складов и email-адресами для уведомлений по событиям.</p>
-                        </div>
-                        <button class="primary" id="openWarehouseDialogButton" formnovalidate type="button">Добавить склад</button>
-                    </div>
-                    <div class="table-wrap">
-                        <table>
-                            <thead><tr><th>Название</th><th>Порядок</th><th>Email</th><th>Статус</th><th>Действия</th></tr></thead>
-                            <tbody id="warehousesBody"></tbody>
-                        </table>
-                    </div>
-                </div>
 
                 <div class="settings-save-bar">
                     <button class="primary" id="saveSettingsButton" type="submit">Сохранить настройки</button>
