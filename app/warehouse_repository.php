@@ -403,7 +403,7 @@ function createStockNotification(PDO $pdo, array $warehouse, array $batches, str
     return [
         'id' => $notificationId,
         'token' => $token,
-        'url' => rtrim($baseUrl, '/') . '/fill-stock.php/' . $token,
+        'url' => rtrim($baseUrl, '/') . '/fill-stock.php?token=' . rawurlencode($token),
         'expires_at' => $expiresAt,
         'emails' => explode("\n", $emails),
     ];
@@ -646,7 +646,7 @@ function normalizeStockNotificationRow(array $row, array $items): array
         'last_changed_at' => (string)($row['last_changed_at'] ?? ''),
         'completed_at' => (string)($row['completed_at'] ?? ''),
         'expires_at' => (string)($row['expires_at'] ?? ''),
-        'url' => !empty($row['token']) ? publicBaseUrl() . '/fill-stock.php/' . (string)$row['token'] : '',
+        'url' => !empty($row['token']) ? publicBaseUrl() . '/fill-stock.php?token=' . rawurlencode((string)$row['token']) : '',
         'total_items' => count($items),
         'filled_items' => count(array_filter($items, static fn (array $item): bool => (int)$item['quantity'] > 0)),
     ];
