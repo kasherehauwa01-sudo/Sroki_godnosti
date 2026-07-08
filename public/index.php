@@ -25,6 +25,7 @@ declare(strict_types=1);
             <button class="tab active" data-tab="registry" type="button">Реестр</button>
             <button class="tab" data-tab="history" type="button">История</button>
             <button class="tab" data-tab="help" type="button">Помощь</button>
+            <button class="tab" data-tab="warehouses" type="button">Склады</button>
             <button class="tab" data-tab="settings" type="button">Настройки</button>
         </nav>
 
@@ -201,6 +202,23 @@ manager@site.ru"></textarea></label>
                         </div>
                     </label>
                     <p class="subtitle">Нажмите «Копировать», чтобы скопировать команду обновления в буфер обмена.</p>
+                </div>
+
+
+                <div class="card form settings-warehouses-card">
+                    <div class="section-heading registry-heading">
+                        <div>
+                            <h3>Склады</h3>
+                            <p>Управляйте списком складов и email-адресами для уведомлений по событиям.</p>
+                        </div>
+                        <button class="primary" id="openWarehouseDialogButton" formnovalidate type="button">Добавить склад</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Название</th><th>Порядок</th><th>Email</th><th>Статус</th><th>Действия</th></tr></thead>
+                            <tbody id="warehousesBody"></tbody>
+                        </table>
+                    </div>
                 </div>
 
                 <div class="settings-save-bar">
