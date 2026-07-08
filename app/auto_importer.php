@@ -244,6 +244,7 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         'skipped_duplicates' => (int)($result['skipped_duplicates'] ?? 0),
         'batches' => $result['batches'] ?? [],
         'duplicates' => $result['duplicates'] ?? [],
+        'written_off_batches' => $result['written_off_batches'] ?? [],
     ]);
 
     return [
@@ -251,6 +252,7 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         'status' => 'completed',
         'added' => (int)($result['added'] ?? 0),
         'skipped_duplicates' => (int)($result['skipped_duplicates'] ?? 0),
+        'written_off_batches' => $result['written_off_batches'] ?? [],
     ];
 }
 

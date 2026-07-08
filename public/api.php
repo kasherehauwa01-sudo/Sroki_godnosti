@@ -287,13 +287,14 @@ function createBatch(PDO $pdo, array $payload, bool $writeHistory = true): array
         return ['ok' => true, 'duplicate' => true, 'message' => DUPLICATE_BATCH_MESSAGE, 'duplicate_batch' => duplicateBatchInfo($batch)];
     }
 
+    $writtenOffBatches = writeOffBaseCodeBatchesForReplacement($pdo, $batch);
     $id = insertBatch($pdo, $batch);
     $batchInfo = historyBatchInfo($batch, $id);
     if ($writeHistory) {
-        writeLog($pdo, 'create', ['batch' => $batchInfo]);
+        writeLog($pdo, 'create', ['batch' => $batchInfo, 'written_off_batches' => $writtenOffBatches]);
     }
 
-    return ['ok' => true, 'id' => $id, 'duplicate' => false, 'batch' => $batchInfo];
+    return ['ok' => true, 'id' => $id, 'duplicate' => false, 'batch' => $batchInfo, 'written_off_batches' => $writtenOffBatches];
 }
 
 function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true): array
@@ -304,6 +305,7 @@ function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true):
         $skippedDuplicates = 0;
         $duplicates = [];
         $createdBatches = [];
+        $writtenOffBatches = [];
         foreach ($batches as $batch) {
             if (!is_array($batch)) {
                 continue;
@@ -318,6 +320,7 @@ function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true):
 
             $added++;
             $createdBatches[] = $result['batch'];
+            $writtenOffBatches = array_merge($writtenOffBatches, $result['written_off_batches'] ?? []);
         }
         $pdo->commit();
         if ($writeHistory) {
@@ -325,6 +328,7 @@ function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true):
                 'batches' => $createdBatches,
                 'duplicates' => $duplicates,
                 'skipped_duplicates' => $skippedDuplicates,
+                'written_off_batches' => $writtenOffBatches,
             ]);
         }
         return [
@@ -333,6 +337,7 @@ function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true):
             'skipped_duplicates' => $skippedDuplicates,
             'batches' => $createdBatches,
             'duplicates' => $duplicates,
+            'written_off_batches' => $writtenOffBatches,
             'message' => $skippedDuplicates > 0 ? DUPLICATE_BATCH_MESSAGE : '',
         ];
     } catch (Throwable $error) {
@@ -380,6 +385,49 @@ function updateBatch(PDO $pdo, array $payload): array
     ]);
 
     return ['ok' => true];
+}
+
+
+function writeOffBaseCodeBatchesForReplacement(PDO $pdo, array $batch): array
+{
+    $code = trim((string)($batch['code'] ?? ''));
+    if (substr($code, -2) !== '-1') {
+        return [];
+    }
+
+    $baseCode = substr($code, 0, -2);
+    if ($baseCode === '') {
+        return [];
+    }
+
+    $statement = $pdo->prepare(
+        "SELECT id
+         FROM batches
+         WHERE code = :code
+           AND expiry_date = :expiry_date
+           AND status <> 'Списана'
+         ORDER BY id ASC"
+    );
+    $statement->execute([
+        ':code' => $baseCode,
+        ':expiry_date' => (string)($batch['expiry_date'] ?? ''),
+    ]);
+    $ids = array_map('intval', $statement->fetchAll(PDO::FETCH_COLUMN));
+    if (!$ids) {
+        return [];
+    }
+
+    $writtenOff = [];
+    $update = $pdo->prepare("UPDATE batches SET status = 'Списана' WHERE id = :id");
+    foreach ($ids as $id) {
+        $before = findBatchForHistory($pdo, $id);
+        $update->execute([':id' => $id]);
+        $after = $before;
+        $after['status'] = 'Списана';
+        $writtenOff[] = ['before' => $before, 'after' => $after, 'replacement_code' => $code];
+    }
+
+    return $writtenOff;
 }
 
 function buildCreateBatchParams(array $batch): array
