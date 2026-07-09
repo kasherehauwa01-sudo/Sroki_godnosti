@@ -19,6 +19,8 @@ const AUTO_IMPORT_MAIL_HOST = 'imap.yandex.ru';
 const AUTO_IMPORT_MAIL_PORT = 993;
 const AUTO_IMPORT_TIMEZONE = 'Europe/Moscow';
 const AUTO_IMPORT_DEFAULT_TIME = '23:50';
+const AUTO_IMPORT_MAX_ATTEMPTS = 20;
+const AUTO_IMPORT_RETRY_INTERVAL_SECONDS = 1800;
 
 date_default_timezone_set(AUTO_IMPORT_TIMEZONE);
 
@@ -78,7 +80,7 @@ function shouldRunAutoImportNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTi
            AND created_at >= :start"
     );
     $attemptsStatement->execute([':start' => $start]);
-    if ((int)$attemptsStatement->fetchColumn() >= 10) {
+    if ((int)$attemptsStatement->fetchColumn() >= AUTO_IMPORT_MAX_ATTEMPTS) {
         return false;
     }
 
@@ -101,10 +103,10 @@ function shouldRunAutoImportNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTi
         return false;
     }
 
-    // Если письмо ещё не пришло или была временная ошибка, повторяем не чаще одного раза в час.
+    // Если письмо ещё не пришло или была временная ошибка, повторяем каждые 30 минут.
     $lastRunAt = new DateTimeImmutable((string)$lastRun['created_at'], new DateTimeZone(AUTO_IMPORT_TIMEZONE));
 
-    return $lastRunAt <= $now->modify('-1 hour');
+    return $lastRunAt <= $now->modify('-' . AUTO_IMPORT_RETRY_INTERVAL_SECONDS . ' seconds');
 }
 
 function acquireAutoImportLock(PDO $pdo): bool
@@ -133,7 +135,7 @@ function runAutoImport(PDO $pdo, bool $once = false): array
     ensureSettingsSchema($pdo);
     $settings = getRawSettings($pdo);
     $time = AUTO_IMPORT_DEFAULT_TIME;
-    $attempts = $once ? 1 : 10;
+    $attempts = $once ? 1 : AUTO_IMPORT_MAX_ATTEMPTS;
     $lastError = '';
 
     for ($attempt = 1; $attempt <= $attempts; $attempt++) {
@@ -152,7 +154,7 @@ function runAutoImport(PDO $pdo, bool $once = false): array
         }
 
         if ($attempt < $attempts) {
-            sleep(3600);
+            sleep(AUTO_IMPORT_RETRY_INTERVAL_SECONDS);
         }
     }
 
@@ -321,7 +323,6 @@ function fetchAutoImportMessageForDate(string $username, string $password, DateT
                 continue;
             }
 
-            $targetDate = new DateTimeImmutable('today', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
             $ids = $imap->searchUnreadMessagesForDate($targetDate);
             foreach (array_reverse($ids) as $id) {
                 $message = $imap->fetchMessage($id);
@@ -777,7 +778,7 @@ final class SimpleImapClient
         return array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
     }
 
-    public function searchRecentMessages(): array
+    public function fetchMessage(string $id): string
     {
         $response = $this->command('FETCH ' . preg_replace('/[^0-9]/', '', $id) . ' RFC822');
         if (preg_match('/\{(\d+)\}\r?\n/s', $response, $match, PREG_OFFSET_CAPTURE)) {
@@ -790,14 +791,15 @@ final class SimpleImapClient
         return $response;
     }
 
-    public function __destruct()
+    public function markSeen(string $id): void
     {
         $this->command('STORE ' . preg_replace('/[^0-9]/', '', $id) . ' +FLAGS (\Seen)');
     }
 
-    public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
+    public function logout(): void
     {
         if (!is_resource($this->socket)) {
+            $this->socket = null;
             return;
         }
 
@@ -808,23 +810,6 @@ final class SimpleImapClient
         }
 
         fclose($this->socket);
-        $this->socket = null;
-    }
-
-    public function __destruct()
-    {
-        $this->logout();
-    }
-
-    public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
-    {
-        if (!is_resource($this->socket)) {
-            $this->socket = null;
-            return;
-        }
-
-        @fwrite($this->socket, 'A' . $this->counter++ . " LOGOUT\r\n");
-        @fclose($this->socket);
         $this->socket = null;
     }
 

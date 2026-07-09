@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS settings (
     smtp_from_email TEXT NULL,
     smtp_from_name VARCHAR(255) NULL,
     notification_time CHAR(5) NOT NULL DEFAULT '09:00',
-    auto_import_time CHAR(5) NOT NULL DEFAULT '10:00',
+    auto_import_time CHAR(5) NOT NULL DEFAULT '23:50',
     missing_filter_email TEXT NULL,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -93,7 +93,7 @@ INSERT INTO settings (
     notification_time,
     auto_import_time,
     missing_filter_email
-) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00', '10:00', NULL)
+) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00', '23:50', NULL)
 ON DUPLICATE KEY UPDATE id = id;
 
 CREATE TABLE IF NOT EXISTS warehouses (
