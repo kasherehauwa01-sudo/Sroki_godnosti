@@ -435,14 +435,18 @@ declare(strict_types=1);
                     <li>Нажимает сохранение формы.</li>
                     <li>Администратор видит прогресс заполнения во вкладке <code>Уведомления</code>.</li>
                 </ol>
+            </div>
+        </section>
 
+        <!-- Вкладка истории должна быть самостоятельной панелью, а не частью скрытой инструкции. -->
         <section class="panel" id="tab-history">
             <div class="card filters history-filters">
                 <label>Дата
                     <select id="historyDatePreset">
+                        <option selected value="all">Всё время</option>
                         <option value="today">Сегодня</option>
                         <option value="yesterday">Вчера</option>
-                        <option selected value="week">Неделя</option>
+                        <option value="week">Неделя</option>
                         <option value="month">Месяц</option>
                         <option value="year">Год</option>
                         <option value="custom">Произвольная дата</option>
@@ -458,6 +462,11 @@ declare(strict_types=1);
                         <option value="update">Изменение партий</option>
                         <option value="delete">Удаление партий</option>
                         <option value="auto_import_completed">Автозагрузка</option>
+                        <option value="auto_import_failed">Ошибка автозагрузки</option>
+                        <option value="auto_import_not_found">Автозагрузка без файлов</option>
+                        <option value="delete_by_articles">Удаление артикулов</option>
+                        <option value="expiry_notifications_sent">Отправка уведомлений</option>
+                        <option value="expiry_notifications_failed">Ошибка уведомлений</option>
                     </select>
                 </label>
             </div>

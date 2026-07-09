@@ -39,6 +39,7 @@ function handleApiRequest(): void
     try {
         $pdo = getDatabaseConnection();
         ensureBatchesSchema($pdo);
+        ensureLogsSchema($pdo);
         ensureSettingsSchema($pdo);
         ensureMissingFilterLogSchema($pdo);
         ensureWarehouseSchema($pdo);
@@ -167,6 +168,24 @@ function ensureSettingsSchema(PDO $pdo): void
             $pdo->exec($sql);
         }
     }
+}
+
+
+function ensureLogsSchema(PDO $pdo): void
+{
+    // История должна создаваться автоматически даже на базах, которые были
+    // развернуты до появления таблицы logs или без выполнения install.sql.
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS logs (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            action VARCHAR(128) NOT NULL,
+            payload JSON NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            INDEX idx_logs_action (action),
+            INDEX idx_logs_created_at (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
 }
 
 function ensureMissingFilterLogSchema(PDO $pdo): void
