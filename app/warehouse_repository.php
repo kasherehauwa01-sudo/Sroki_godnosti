@@ -677,9 +677,13 @@ function listStockBatchNotifications(PDO $pdo): array
                 COALESCE(active_warehouses.active_count, 0) AS active_warehouse_count,
                 COALESCE(stock_totals.filled_warehouse_count, 0) AS filled_warehouse_count
          FROM (
-             SELECT batch_id, SUM(quantity) AS total_stock, COUNT(DISTINCT warehouse_id) AS filled_warehouse_count, MAX(updated_at) AS last_stock_at
-             FROM batch_stock
-             GROUP BY batch_id
+             SELECT bs.batch_id,
+                    SUM(bs.quantity) AS total_stock,
+                    COUNT(DISTINCT CASE WHEN w.is_active = 1 THEN bs.warehouse_id END) AS filled_warehouse_count,
+                    MAX(bs.updated_at) AS last_stock_at
+             FROM batch_stock bs
+             INNER JOIN warehouses w ON w.id = bs.warehouse_id
+             GROUP BY bs.batch_id
          ) stock_totals
          INNER JOIN batches b ON b.id = stock_totals.batch_id
          LEFT JOIN (
@@ -707,6 +711,8 @@ function listStockBatchNotifications(PDO $pdo): array
             'last_stock_at' => $lastStockAt,
             'viewed_at' => $viewedAt,
             'unread' => $viewedAt === '' || ($lastStockAt !== '' && strtotime($lastStockAt) > strtotime($viewedAt)),
+            'filled_warehouse_count' => (int)($row['filled_warehouse_count'] ?? 0),
+            'active_warehouse_count' => (int)($row['active_warehouse_count'] ?? 0),
             'all_warehouses_reported' => (int)($row['active_warehouse_count'] ?? 0) > 0 && (int)($row['filled_warehouse_count'] ?? 0) >= (int)($row['active_warehouse_count'] ?? 0),
         ];
     }, $statement->fetchAll());
