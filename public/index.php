@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260708-5"></script>
+    <script defer src="assets/app.js?v=20260707-15"></script>
 </head>
 <body>
     <header class="topbar">
@@ -98,17 +98,11 @@ declare(strict_types=1);
         <section class="panel" id="tab-events">
             <div class="section-heading">
                 <h2>События</h2>
-                <p>Партии с прошедшими, сегодняшними и будущими событиями по сроку годности.</p>
-            </div>
-            <div class="card events-filter-card">
-                <span class="filter-label">Показывать:</span>
-                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="today" checked> Сегодня</label>
-                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="past"> Прошедшие</label>
-                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="future" checked> Будущие</label>
+                <p>Партии с событиями по сроку годности: 180, 90, 60, 30 и 1 день.</p>
             </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Тип события</th><th>Дата события</th><th>Количество партий в событии</th></tr></thead>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Срок годности</th><th>Тип события</th></tr></thead>
                     <tbody id="eventsBody"></tbody>
                 </table>
             </div>
@@ -121,7 +115,7 @@ declare(strict_types=1);
             </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Остаток</th><th>Заполнили остатки</th><th>Статус</th><th>Последнее изменение</th></tr></thead>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Остаток</th><th>Статус</th><th>Последнее изменение</th></tr></thead>
                     <tbody id="stockBatchNotificationsBody"></tbody>
                 </table>
             </div>
@@ -442,35 +436,6 @@ declare(strict_types=1);
                     <li>Администратор видит прогресс заполнения во вкладке <code>Уведомления</code>.</li>
                 </ol>
 
-                <h3>7. Управление складами</h3>
-                <ol>
-                    <li>Откройте вкладку <code>Настройки</code>.</li>
-                    <li>Введите пароль.</li>
-                    <li>Перейдите в подкладку <code>Склады</code>.</li>
-                    <li>Добавьте склад или измените существующий.</li>
-                    <li>Укажите email-адреса, на которые склад должен получать уведомления.</li>
-                    <li>Отключите склад, если он не должен участвовать в рассылках и расчете заполнения остатков.</li>
-                </ol>
-
-                <h3>8. Настройка рассылки товаров без фильтров</h3>
-                <ol>
-                    <li>Откройте вкладку <code>Настройки</code>.</li>
-                    <li>В блоке <code>Уведомления «Товар без фильтров»</code> укажите получателей.</li>
-                    <li>Нажмите <code>Тест</code>, чтобы проверить отправку.</li>
-                    <li>Используйте <code>Логи</code>, чтобы посмотреть результат предыдущих отправок.</li>
-                </ol>
-
-                <h3>9. Автозагрузка</h3>
-                <ol>
-                    <li>Заполните SMTP/IMAP-доступы в настройках.</li>
-                    <li>Убедитесь, что ежедневное письмо приходит от нужного отправителя и с нужной темой.</li>
-                    <li>Проверьте работу кнопкой <code>Тест автозагрузки</code>.</li>
-                    <li>Настройте cron для регулярного запуска.</li>
-                    <li>Контролируйте результат в логах автозагрузки.</li>
-                </ol>
-            </div>
-        </section>
-
         <section class="panel" id="tab-history">
             <div class="card filters history-filters">
                 <label>Дата
@@ -652,16 +617,6 @@ declare(strict_types=1);
                     <tbody id="batchStockBody"></tbody>
                     <tfoot><tr><th>Итого</th><th class="numeric-cell" id="batchStockTotal">0</th></tr></tfoot>
                 </table>
-            </div>
-            <div class="write-off-status-panel hidden" id="writeOffStatusPanel">
-                <label>Статус партии
-                    <select id="writeOffStockBatchStatus">
-                        <option>В наличии</option>
-                        <option>Реализована</option>
-                        <option>Списана</option>
-                    </select>
-                </label>
-                <button class="primary" id="saveWriteOffStockBatchStatusButton" type="button">Сохранить</button>
             </div>
             <div class="modal-actions">
                 <button class="ghost-button danger hidden" id="writeOffStockBatchButton" type="button">Списать</button>

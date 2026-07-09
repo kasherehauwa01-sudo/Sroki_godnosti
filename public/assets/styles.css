@@ -153,13 +153,6 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .help-card h3 { margin: 22px 0 8px; }
 .help-card p { color: #475569; }
 .help-card code { background: #eef4ff; border-radius: 6px; padding: 1px 5px; }
-.help-subtabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
-.help-subtab { padding: 10px 16px; background: #e8eef8; color: var(--muted); }
-.help-subtab.active { background: var(--primary); color: #fff; }
-.help-subpanel { display: none; }
-.help-subpanel.active { display: block; }
-.help-card ul, .help-card ol { color: #475569; }
-.help-card li { margin: 6px 0; }
 #registryBody tr[data-batch-id] { cursor: pointer; }
 #registryBody tr[data-batch-id]:hover td { filter: brightness(.98); }
 .numeric-cell { text-align: right; font-variant-numeric: tabular-nums; }
@@ -184,36 +177,3 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .unread-stock-notification td { font-weight: 800; }
 .complete-stock-notification td { color: #15803d; }
 #eventsBody tr[data-event-id] { cursor: pointer; }
-
-.events-filter-card {
-    align-items: center;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    margin-bottom: 16px;
-}
-
-.filter-label {
-    color: #374151;
-    font-weight: 700;
-}
-
-.write-off-status-panel {
-    align-items: end;
-    border-top: 1px solid #e5e7eb;
-    display: grid;
-    gap: 12px;
-    grid-template-columns: minmax(220px, 1fr) auto;
-    margin-top: 16px;
-    padding-top: 16px;
-}
-
-.write-off-status-panel.hidden {
-    display: none;
-}
-
-@media (max-width: 640px) {
-    .write-off-status-panel {
-        grid-template-columns: 1fr;
-    }
-}

@@ -321,6 +321,7 @@ function fetchAutoImportMessageForDate(string $username, string $password, DateT
                 continue;
             }
 
+            $targetDate = new DateTimeImmutable('today', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
             $ids = $imap->searchUnreadMessagesForDate($targetDate);
             foreach (array_reverse($ids) as $id) {
                 $message = $imap->fetchMessage($id);
@@ -763,9 +764,20 @@ final class SimpleImapClient
         $this->command('SELECT "' . addcslashes($folder, "\\\"") . '"');
     }
 
-
-
     public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
+    {
+        // Ищем только непрочитанные письма за конкретный календарный день.
+        // Верхняя граница BEFORE нужна, чтобы IMAP-сервер не вернул письма
+        // следующего дня при повторном запуске автоимпорта.
+        $since = $targetDate->format('d-M-Y');
+        $before = $targetDate->modify('+1 day')->format('d-M-Y');
+        $response = $this->command('SEARCH UNSEEN SINCE ' . $since . ' BEFORE ' . $before);
+        preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
+
+        return array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
+    }
+
+    public function searchRecentMessages(): array
     {
         $response = $this->command('FETCH ' . preg_replace('/[^0-9]/', '', $id) . ' RFC822');
         if (preg_match('/\{(\d+)\}\r?\n/s', $response, $match, PREG_OFFSET_CAPTURE)) {
@@ -806,14 +818,19 @@ final class SimpleImapClient
 
     public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
     {
-        // Ищем без IMAP-фильтра FROM: у разных серверов он может не совпадать
-        // с отображаемым адресом отправителя. Фильтр отправителя выполняется в PHP.
-        $date = $targetDate->setTimezone(new DateTimeZone(AUTO_IMPORT_TIMEZONE))->format('d-M-Y');
-        $nextDate = $targetDate->setTimezone(new DateTimeZone(AUTO_IMPORT_TIMEZONE))->modify('+1 day')->format('d-M-Y');
-        $response = $this->command('SEARCH UNSEEN SINCE ' . $date . ' BEFORE ' . $nextDate);
-        preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
-        $ids = array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
-        return $ids;
+        if (!is_resource($this->socket)) {
+            $this->socket = null;
+            return;
+        }
+
+        @fwrite($this->socket, 'A' . $this->counter++ . " LOGOUT\r\n");
+        @fclose($this->socket);
+        $this->socket = null;
+    }
+
+    public function __destruct()
+    {
+        $this->logout();
     }
 
     private function command(string $command): string
