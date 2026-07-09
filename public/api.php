@@ -39,6 +39,7 @@ function handleApiRequest(): void
     try {
         $pdo = getDatabaseConnection();
         ensureBatchesSchema($pdo);
+        ensureLogsSchema($pdo);
         ensureSettingsSchema($pdo);
         ensureMissingFilterLogSchema($pdo);
         ensureWarehouseSchema($pdo);
@@ -169,6 +170,24 @@ function ensureSettingsSchema(PDO $pdo): void
     }
 }
 
+
+function ensureLogsSchema(PDO $pdo): void
+{
+    // История должна создаваться автоматически даже на базах, которые были
+    // развернуты до появления таблицы logs или без выполнения install.sql.
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS logs (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            action VARCHAR(128) NOT NULL,
+            payload JSON NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            INDEX idx_logs_action (action),
+            INDEX idx_logs_created_at (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+}
+
 function ensureMissingFilterLogSchema(PDO $pdo): void
 {
     $pdo->exec(
@@ -210,7 +229,7 @@ function ensureBatchesSchema(PDO $pdo): void
 function listBatches(PDO $pdo, array $filters): array
 {
     [$where, $params] = buildBatchFilters($filters);
-    $sql = 'SELECT id, created_at, created_source, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status, updated_at FROM batches ' . $where . ' ORDER BY expiry_date ASC, id DESC';
+    $sql = 'SELECT id, created_at, created_source, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status, updated_at FROM batches ' . $where . ' ORDER BY expiry_date ASC, id DESC';
     $statement = $pdo->prepare($sql);
     $statement->execute($params);
 
@@ -378,7 +397,6 @@ function updateBatch(PDO $pdo, array $payload): array
              article = :article,
              code = :code,
              name = :name,
-             quantity = :quantity,
              expiry_date = :expiry_date,
              expiry_full_date = :expiry_full_date,
              expiry_invalid = :expiry_invalid,
@@ -448,7 +466,6 @@ function buildCreateBatchParams(array $batch): array
         'article' => $batch['article'],
         'code' => $batch['code'],
         'name' => $batch['name'],
-        'quantity' => $batch['quantity'],
         'expiry_date' => $batch['expiry_date'],
         'expiry_full_date' => (int)$batch['expiry_full_date'],
         'expiry_invalid' => (int)$batch['expiry_invalid'],
@@ -466,7 +483,6 @@ function buildUpdateBatchParams(array $batch, int $id): array
         'article' => $batch['article'],
         'code' => $batch['code'],
         'name' => $batch['name'],
-        'quantity' => $batch['quantity'],
         'expiry_date' => $batch['expiry_date'],
         'expiry_full_date' => (int)$batch['expiry_full_date'],
         'expiry_invalid' => (int)$batch['expiry_invalid'],
@@ -508,8 +524,8 @@ function duplicateBatchInfo(array $batch): array
 function insertBatch(PDO $pdo, array $batch): int
 {
     $statement = $pdo->prepare(
-        'INSERT INTO batches (created_at, created_source, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status)
-         VALUES (:created_at, :created_source, :article, :code, :name, :quantity, :expiry_date, :expiry_full_date, :expiry_invalid, :expiry_raw, :days_left, :status)'
+        'INSERT INTO batches (created_at, created_source, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status)
+         VALUES (:created_at, :created_source, :article, :code, :name, :expiry_date, :expiry_full_date, :expiry_invalid, :expiry_raw, :days_left, :status)'
     );
     $statement->execute(buildCreateBatchParams($batch));
 
@@ -518,7 +534,7 @@ function insertBatch(PDO $pdo, array $batch): int
 
 function findBatchForHistory(PDO $pdo, int $id): array
 {
-    $statement = $pdo->prepare('SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE id = :id');
+    $statement = $pdo->prepare('SELECT id, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE id = :id');
     $statement->execute([':id' => $id]);
     $row = $statement->fetch();
 
@@ -533,7 +549,6 @@ function historyBatchInfo(array $batch, ?int $id = null): array
         'article' => (string)($batch['article'] ?? ''),
         'code' => (string)($batch['code'] ?? ''),
         'name' => (string)($batch['name'] ?? ''),
-        'quantity' => isset($batch['quantity']) ? (int)$batch['quantity'] : null,
         'expiry_date' => (string)($batch['expiry_date'] ?? ''),
         'expiry_full_date' => (bool)($batch['expiry_full_date'] ?? false),
         'expiry_invalid' => (bool)($batch['expiry_invalid'] ?? false),
@@ -614,7 +629,7 @@ function deleteBatchesByArticles(PDO $pdo, array $payload): array
     }
 
     $placeholders = implode(',', array_fill(0, count($articles), '?'));
-    $select = $pdo->prepare("SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE article IN ($placeholders) ORDER BY article ASC, id ASC");
+    $select = $pdo->prepare("SELECT id, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE article IN ($placeholders) ORDER BY article ASC, id ASC");
     $select->execute($articles);
     $batches = $select->fetchAll();
 
@@ -649,8 +664,6 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
     $code = trim((string)($payload['code'] ?? $payload['Код'] ?? ''));
     $name = trim((string)($payload['name'] ?? $payload['Наименование'] ?? ''));
     $createdSource = normalizeCreatedSource((string)($payload['created_source'] ?? $payload['createdSource'] ?? $payload['Способ'] ?? 'Ручной'));
-    $quantityValue = $payload['quantity'] ?? $payload['Количество в партии'] ?? null;
-    $quantity = (int)($quantityValue ?? 0);
     $expiryInput = (string)($payload['expiry_date'] ?? $payload['expiryDate'] ?? $payload['Срок годности до'] ?? '');
     $expiryRaw = trim((string)($payload['expiry_raw'] ?? $payload['expiryRaw'] ?? $expiryInput));
     $expiryFullDate = array_key_exists('expiry_full_date', $payload) || array_key_exists('expiryFullDate', $payload)
@@ -659,8 +672,8 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
     $expiryInfo = normalizeExpiryDate($expiryInput, $expiryRaw, filter_var($payload['expiry_invalid'] ?? $payload['expiryInvalid'] ?? false, FILTER_VALIDATE_BOOLEAN), $expiryFullDate);
     $expiryDate = $expiryInfo['date'];
     $status = (string)($payload['status'] ?? $payload['Статус партии'] ?? ACTIVE_STATUS);
-    if ($article === '' || $quantityValue === null || trim((string)$quantityValue) === '' || $expiryDate === '') {
-        throw new InvalidArgumentException('Заполните артикул, количество и срок годности.');
+    if ($article === '' || $expiryDate === '') {
+        throw new InvalidArgumentException('Заполните артикул и срок годности.');
     }
     if (!in_array($status, array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES), true)) {
         throw new InvalidArgumentException('Недопустимый статус партии.');
@@ -672,7 +685,6 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
         'article' => $article,
         'code' => $code,
         'name' => $name,
-        'quantity' => $quantity,
         'expiry_date' => $expiryDate,
         'expiry_full_date' => $expiryInfo['full'],
         'expiry_invalid' => $expiryInfo['invalid'],
@@ -783,7 +795,6 @@ function normalizeBatchRow(array $row): array
         'article' => $row['article'],
         'code' => (string)($row['code'] ?? ''),
         'name' => $row['name'],
-        'quantity' => (int)$row['quantity'],
         'expiryDate' => $row['expiry_date'],
         'expiry_date' => $row['expiry_date'],
         'expiryFullDate' => (bool)($row['expiry_full_date'] ?? false),
@@ -887,7 +898,7 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
     $notificationDays = NOTIFICATION_EVENT_DAYS;
     $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
     $statement = $pdo->prepare(
-        "SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, days_left
+        "SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
          ORDER BY days_left ASC, expiry_date ASC, article ASC"
@@ -1087,7 +1098,7 @@ function findStockFillTestEvent(PDO $pdo): array
     }
 
     $batchStatement = $pdo->prepare(
-        'SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, days_left
+        'SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
          FROM batches
          WHERE status = :status AND expiry_invalid = 0 AND days_left = :days_left
          ORDER BY expiry_date ASC, article ASC'

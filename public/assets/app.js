@@ -20,6 +20,7 @@ const state = {
     stockBatchNotifications: [],
     selectedStockBatchId: null,
     events: [],
+    eventPeriodFilters: new Set(['today', 'future']),
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -444,7 +445,6 @@ function normalizeSpreadsheetRowEncoding(row) {
 function normalizeBatch(row) {
     const codeRaw = getRowValue(row, ['code', 'Код', 'Код товара']);
     const nameRaw = getRowValue(row, ['name', 'Наименование', 'Название']);
-    const quantityRaw = getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']);
     const expiryRawValue = getRowValue(row, ['expiryRaw', 'expiry_raw', 'expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности до.', 'Срок годности', 'Годен до', 'Срокгодностидо']);
     const expiryInfo = expiryDateInfo(expiryRawValue);
     const serverInvalid = row.expiryInvalid ?? row.expiry_invalid;
@@ -460,8 +460,6 @@ function normalizeBatch(row) {
         article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара', 'Артикул.'])).trim(),
         code: String(codeRaw || '').trim(),
         name: String(nameRaw || '').trim(),
-        quantity: Number(quantityRaw || 0),
-        hasQuantity: String(quantityRaw).trim() !== '',
         expiryDate: toExpiryDateValue(expiryRawValue),
         expiryFullDate,
         expiryRaw: String(getRowValue(row, ['expiryRaw', 'expiry_raw']) || (expiryInvalid ? expiryInfo.raw : '') || '').trim(),
@@ -645,9 +643,6 @@ function sortRegistryRows() {
         if (field === 'article') {
             return String(left.article || '').localeCompare(String(right.article || ''), 'ru', { numeric: true }) * multiplier;
         }
-        if (field === 'quantity') {
-            return (Number(left.quantity || 0) - Number(right.quantity || 0)) * multiplier;
-        }
 
         return toDateInputValue(left[field]).localeCompare(toDateInputValue(right[field])) * multiplier;
     });
@@ -694,6 +689,7 @@ async function openBatchStockDialog(id, options = {}) {
     qs('#batchStockBody').innerHTML = '<tr><td colspan="2">Загрузка...</td></tr>';
     qs('#batchStockTotal').textContent = '0';
     state.selectedStockBatchId = options.showWriteOff ? String(id) : null;
+    resetBatchStockStatusControls(batch.status);
     qs('#writeOffStockBatchButton').classList.toggle('hidden', !options.showWriteOff);
     qs('#batchStockDialog').showModal();
 
@@ -715,7 +711,33 @@ async function openBatchStockDialog(id, options = {}) {
 }
 
 function closeBatchStockDialog() {
+    resetBatchStockStatusControls();
     qs('#batchStockDialog').close();
+}
+
+function resetBatchStockStatusControls(status = '') {
+    setValueIfPresent('#batchStockStatusSelect', statusOptions.includes(status) ? status : statusOptions[0]);
+    const actions = qs('#stockStatusActions');
+    if (actions) actions.hidden = true;
+}
+
+function showBatchStockStatusControls() {
+    const batch = state.batches.find((item) => String(item.id) === String(state.selectedStockBatchId));
+    if (!batch) {
+        showToast('Партия не найдена в реестре.', true);
+        return;
+    }
+    if (!state.writeOffAccessGranted) {
+        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        openWriteOffPasswordDialog();
+        return;
+    }
+
+    // Пользователь выбирает новый статус прямо в окне остатков, без ручного ввода через prompt.
+    setValueIfPresent('#batchStockStatusSelect', batch.status || statusOptions[0]);
+    const actions = qs('#stockStatusActions');
+    if (actions) actions.hidden = false;
+    focusIfPresent('#batchStockStatusSelect');
 }
 
 function formatQuantity(value) {
@@ -731,7 +753,6 @@ function openEditDialog(id) {
     qs('#editArticle').value = batch.article;
     qs('#editCode').value = batch.code || '';
     qs('#editName').value = batch.name || '';
-    qs('#editQuantity').value = batch.quantity;
     qs('#editExpiryDate').value = batch.expiryInvalid ? (batch.expiryRaw || formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate)) : formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate);
     qs('#editStatus').value = batch.status;
     qs('#editCreatedAt').value = batch.createdAt;
@@ -750,7 +771,6 @@ function createBatchRow(values = {}) {
         <label>Артикул<input class="batch-row-article" required autocomplete="off" value="${escapeHtml(values.article || '')}"></label>
         <label>Код<input class="batch-row-code" autocomplete="off" value="${escapeHtml(values.code || '')}"></label>
         <label>Наименование<input class="batch-row-name" autocomplete="off" value="${escapeHtml(values.name || '')}"></label>
-        <label>Количество в партии<input class="batch-row-quantity" required min="0" step="1" type="number" value="${escapeHtml(values.quantity ?? '')}"></label>
         <label>Срок годности<input class="batch-row-expiry" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10" value="${escapeHtml(values.expiryDate || '')}"></label>
         <button class="small-button danger remove-batch-row-button" type="button" aria-label="Удалить строку">🗑️</button>
     `;
@@ -788,7 +808,6 @@ function collectBatchRows() {
         code: row.querySelector('.batch-row-code').value,
         name: row.querySelector('.batch-row-name').value,
         createdSource: 'Ручной',
-        quantity: row.querySelector('.batch-row-quantity').value,
         expiryDate: row.querySelector('.batch-row-expiry').value,
     }));
 }
@@ -1037,28 +1056,51 @@ async function loadEvents() {
     renderEvents();
 }
 
+function eventPeriod(eventDate) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const date = new Date(`${eventDate}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return 'future';
+    if (date < today) return 'past';
+    if (date > today) return 'future';
+    return 'today';
+}
+
+function filteredEvents() {
+    return state.events.filter((event) => state.eventPeriodFilters.has(eventPeriod(event.event_date)));
+}
+
 function renderEvents() {
     const body = qs('#eventsBody');
     if (!body) return;
-    body.innerHTML = state.events.map((event) => `
-        <tr data-event-id="${event.id}">
-            <td>${escapeHtml(event.article)}</td>
-            <td>${escapeHtml(event.code || '')}</td>
-            <td>${escapeHtml(event.name || '')}</td>
-            <td>${escapeHtml(formatExpiryMonthRu(event.expiry_date, event.expiry_full_date))}</td>
+    const events = filteredEvents();
+    body.innerHTML = events.map((event) => `
+        <tr data-event-id="${escapeHtml(event.id)}">
             <td>${Number(event.event_type)} день</td>
+            <td>${escapeHtml(formatDateRu(event.event_date))}</td>
+            <td>${Number(event.batch_count || 0)}</td>
         </tr>
-    `).join('') || '<tr><td colspan="5">Событий нет.</td></tr>';
+    `).join('') || '<tr><td colspan="3">Событий нет.</td></tr>';
     qsa('[data-event-id]').forEach((row) => row.addEventListener('click', () => openEventDetails(row.dataset.eventId)));
 }
 
 function openEventDetails(id) {
     const event = state.events.find((item) => String(item.id) === String(id));
     if (!event) return;
-    showNotificationDialog(
-        `Артикул: ${event.article}\nКод: ${event.code || ''}\nНаименование: ${event.name || ''}\nСрок годности: ${formatExpiryMonthRu(event.expiry_date, event.expiry_full_date)}\nТип события: ${event.event_type} день`,
-        'Событие партии'
-    );
+    qs('#eventBatchesDialogTitle').textContent = `${Number(event.event_type)} день — ${formatDateRu(event.event_date)}`;
+    qs('#eventBatchesDialogMeta').textContent = `Партий в событии: ${Number(event.batch_count || 0)}`;
+    qs('#eventBatchesBody').innerHTML = (event.batches || []).map((batch) => `
+        <tr>
+            <td>${escapeHtml(batch.article || '')}</td>
+            <td>${escapeHtml(batch.code || '')}</td>
+            <td>${escapeHtml(batch.name || '')}</td>
+        </tr>
+    `).join('') || '<tr><td colspan="3">Партий нет.</td></tr>';
+    qs('#eventBatchesDialog').showModal();
+}
+
+function closeEventBatchesDialog() {
+    qs('#eventBatchesDialog').close();
 }
 
 async function loadStockBatchNotifications() {
@@ -1078,14 +1120,15 @@ function renderStockBatchNotifications() {
             <td>${escapeHtml(notification.code || '')}</td>
             <td>${escapeHtml(notification.name || '')}</td>
             <td>${formatQuantity(notification.total_stock || 0)}</td>
+            <td>${Number(notification.filled_warehouse_count || 0)} из ${Number(notification.active_warehouse_count || 0)}</td>
             <td>${escapeHtml(notification.status || '')}</td>
             <td>${escapeHtml(notification.last_stock_at || '—')}</td>
         </tr>
-    `).join('') || '<tr><td colspan="6">Остатков по партиям пока нет.</td></tr>';
+    `).join('') || '<tr><td colspan="7">Остатков по партиям пока нет.</td></tr>';
     qsa('[data-stock-batch-id]').forEach((row) => row.addEventListener('click', () => openBatchStockDialog(row.dataset.stockBatchId, { markViewed: true, showWriteOff: true })));
 }
 
-async function writeOffSelectedStockBatch() {
+async function saveSelectedStockBatchStatus() {
     const batch = state.batches.find((item) => String(item.id) === String(state.selectedStockBatchId));
     if (!batch) {
         showToast('Партия не найдена в реестре.', true);
@@ -1096,8 +1139,7 @@ async function writeOffSelectedStockBatch() {
         openWriteOffPasswordDialog();
         return;
     }
-    const status = prompt('Введите новый статус партии: В наличии, Реализована или Списана', batch.status || 'Списана');
-    if (status === null) return;
+    const status = qs('#batchStockStatusSelect').value;
     if (!statusOptions.includes(status)) {
         showToast('Недопустимый статус партии.', true);
         return;
@@ -1105,7 +1147,7 @@ async function writeOffSelectedStockBatch() {
     try {
         await api('update', { ...batch, status, write_off_password: state.writeOffPassword });
         showToast('Статус партии обновлен.');
-        qs('#batchStockDialog').close();
+        closeBatchStockDialog();
         await Promise.all([loadBatches(), loadStockBatchNotifications(), loadHistory()]);
     } catch (error) {
         showToast(error.message, true);
@@ -1313,10 +1355,9 @@ function formatHistoryBatch(batch) {
     const expiry = batch.expiry_date || batch.expiryDate
         ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate, batch.expiry_full_date || batch.expiryFullDate)}`
         : 'без указанного срока годности';
-    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
     const status = batch.status ? `, статус «${batch.status}»` : '';
 
-    return `партия ${article}${code}${name} ${expiry}${quantity}${status}`;
+    return `партия ${article}${code}${name} ${expiry}${status}`;
 }
 
 function formatHistoryBatchList(batches) {
@@ -1332,9 +1373,6 @@ function formatChangedFields(before, after) {
     }
     if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
         changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date, before.expiry_full_date)} на ${formatExpiryMonthRu(after.expiry_date, after.expiry_full_date)}`);
-    }
-    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
-        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
     }
     if (before.status && after.status && before.status !== after.status) {
         changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
@@ -1382,6 +1420,24 @@ function formatHistoryDetails(action, payload) {
         return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
     }
 
+    if (action === 'delete_by_articles') {
+        const articles = (parsed.articles || []).join(', ') || 'не указаны';
+        return `Удаление по артикулам: ${articles}. Удалено партий: ${Number(parsed.deleted || 0)}.`;
+    }
+
+    if (action === 'delete_by_articles_no_matches') {
+        const articles = (parsed.articles || []).join(', ') || 'не указаны';
+        return `Удаление по артикулам: ${articles}. Совпадений не найдено.`;
+    }
+
+    if (action === 'expiry_notifications_sent') {
+        return `Уведомления отправлены. Получатели: ${(parsed.recipients || []).join(', ') || 'не указаны'}. Партий: ${Number(parsed.count || parsed.batches?.length || 0)}.`;
+    }
+
+    if (action === 'expiry_notifications_failed') {
+        return `Ошибка отправки уведомлений. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
+
     if (parsed.text) return parsed.text;
 
     // Запасной вариант нужен для старых записей истории со служебными полями.
@@ -1390,12 +1446,16 @@ function formatHistoryDetails(action, payload) {
 
 async function loadHistory() {
     const result = await api('logs');
-    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found']);
+    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'delete_by_articles', 'delete_by_articles_no_matches', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found', 'expiry_notifications_sent', 'expiry_notifications_failed', 'expiry_check_no_matches', 'expiry_check_skipped']);
     state.allHistory = (result.logs || []).filter((log) => registryActions.has(log.event || log.action));
     renderHistory();
 }
 
 function getDateRangeByPreset(preset) {
+    if (preset === 'all') {
+        return { start: null, end: null };
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const start = new Date(today);
@@ -1732,7 +1792,6 @@ function downloadTemplateXlsx() {
             Артикул: '12345',
             Код: 'K-001',
             Наименование: 'Товар',
-            Количество: 10,
             'Срок годности до': '31.12.2026',
         },
     ]);
@@ -1769,16 +1828,16 @@ function readXlsx(file) {
             const decodedRows = rawRows.map(normalizeSpreadsheetRowEncoding);
             const detectedHeaders = decodedRows[0] ? Object.keys(decodedRows[0]).join(', ') : 'не найдены';
             const normalizedRows = decodedRows.map((row) => ({ ...normalizeBatch(row), createdSource: 'Импорт xls' }));
-            state.importRows = normalizedRows.filter((row) => row.article && row.hasQuantity && row.expiryDate);
+            state.importRows = normalizedRows.filter((row) => row.article && row.expiryDate);
             const skipped = normalizedRows.length - state.importRows.length;
-            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.code || 'без кода'} — ${row.name || 'без наименования'} — ${row.quantity} — ${row.expiryInvalid ? `${row.expiryRaw} (некорректная дата)` : formatExpiryMonthRu(row.expiryDate, row.expiryFullDate)}`).join('\n');
+            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.code || 'без кода'} — ${row.name || 'без наименования'} — ${row.expiryInvalid ? `${row.expiryRaw} (некорректная дата)` : formatExpiryMonthRu(row.expiryDate, row.expiryFullDate)}`).join('\n');
             qs('#importPreview').textContent = [
                 `Файл: ${file.name}`,
                 `Найдено строк: ${rawRows.length}`,
                 `Готово к загрузке: ${state.importRows.length}`,
-                skipped > 0 ? `Пропущено строк без артикула, количества или срока годности: ${skipped}` : '',
+                skipped > 0 ? `Пропущено строк без артикула или срока годности: ${skipped}` : '',
                 `Распознанные заголовки: ${detectedHeaders}`,
-                exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте, что первая строка — это заголовки: Артикул, Количество, Срок годности до.',
+                exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте, что первая строка — это заголовки: Артикул, Срок годности до.',
             ].filter(Boolean).join('\n');
             qs('#importButton').disabled = state.importRows.length === 0;
         } catch (error) {
@@ -1886,7 +1945,9 @@ function bindEvents() {
     qs('#closeNotificationDialogButton').addEventListener('click', closeNotificationDialog);
     qs('#closeBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
     qs('#confirmBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
-    qs('#writeOffStockBatchButton').addEventListener('click', writeOffSelectedStockBatch);
+    qs('#writeOffStockBatchButton').addEventListener('click', showBatchStockStatusControls);
+    qs('#cancelBatchStockStatusButton').addEventListener('click', () => resetBatchStockStatusControls());
+    qs('#saveBatchStockStatusButton').addEventListener('click', saveSelectedStockBatchStatus);
     qs('#openWarehouseDialogButton').addEventListener('click', () => openWarehouseDialog());
     qs('#warehouseForm').addEventListener('submit', submitWarehouseForm);
     qs('#closeWarehouseDialogButton').addEventListener('click', closeWarehouseDialog);
@@ -1947,6 +2008,8 @@ function bindEvents() {
         state.eventPeriodFilters = new Set(qsa('.event-period-filter:checked').map((item) => item.value));
         renderEvents();
     }));
+    qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
+    qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
 
     qs('#filterSearch').addEventListener('input', renderRegistry);
     qs('#filterSearchColumn').addEventListener('change', renderRegistry);
