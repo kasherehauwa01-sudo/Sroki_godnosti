@@ -310,7 +310,7 @@ declare(strict_types=1);
                     <li>Если склад добавлен, удален или деактивирован, значение <code>y</code> пересчитывается по текущему списку активных складов.</li>
                     <li>Партии со статусом <code>Списана</code> не попадают в формы заполнения остатков и в список складских уведомлений.</li>
                     <li>Из вкладки <code>Уведомления</code> можно открыть партию и посмотреть остатки по активным складам.</li>
-                    <li>В окне остатков доступна кнопка <code>Списать</code>: после нажатия появляется выбор статуса, пользователь выбирает статус и нажимает <code>Сохранить</code>. Статус партии обновляется в реестре.</li>
+                    <li>В окне остатков доступна кнопка <code>Сменить статус</code>: после нажатия появляется выбор статуса, пользователь выбирает статус и нажимает <code>Сохранить</code>. Статус партии обновляется в реестре.</li>
                 </ul>
 
                 <h3>Склады</h3>
@@ -628,7 +628,18 @@ declare(strict_types=1);
                 </table>
             </div>
             <div class="modal-actions">
-                <button class="ghost-button danger hidden" id="writeOffStockBatchButton" type="button">Списать</button>
+                <button class="ghost-button" id="writeOffStockBatchButton" type="button">Сменить статус</button>
+                <div class="stock-status-actions" id="stockStatusActions" hidden>
+                    <label>Новый статус
+                        <select id="batchStockStatusSelect">
+                            <option>В наличии</option>
+                            <option>Реализована</option>
+                            <option>Списана</option>
+                        </select>
+                    </label>
+                    <button class="ghost-button" id="cancelBatchStockStatusButton" type="button">Отмена</button>
+                    <button class="primary" id="saveBatchStockStatusButton" type="button">Сохранить</button>
+                </div>
                 <button class="primary" id="confirmBatchStockDialogButton" type="button">Закрыть</button>
             </div>
         </div>
