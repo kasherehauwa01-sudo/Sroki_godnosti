@@ -765,7 +765,7 @@ final class SimpleImapClient
 
 
 
-    public function fetchMessage(string $id): string
+    public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
     {
         $response = $this->command('FETCH ' . preg_replace('/[^0-9]/', '', $id) . ' RFC822');
         if (preg_match('/\{(\d+)\}\r?\n/s', $response, $match, PREG_OFFSET_CAPTURE)) {
@@ -778,12 +778,12 @@ final class SimpleImapClient
         return $response;
     }
 
-    public function markSeen(string $id): void
+    public function __destruct()
     {
         $this->command('STORE ' . preg_replace('/[^0-9]/', '', $id) . ' +FLAGS (\Seen)');
     }
 
-    public function logout(): void
+    public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
     {
         if (!is_resource($this->socket)) {
             return;
