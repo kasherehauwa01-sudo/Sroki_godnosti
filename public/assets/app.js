@@ -1497,7 +1497,10 @@ function renderNotificationHistory(history) {
 }
 
 function collectSettingsForm() {
-    const emails = qs('#notificationEmails').value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean);
+    const notificationEmailsField = qs('#notificationEmails');
+    const emails = notificationEmailsField
+        ? notificationEmailsField.value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean)
+        : (state.settings?.emails || []);
     const missingFilterEmails = qs('#missingFilterEmails').value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean);
     const notificationTimeInput = qs('#notificationTime');
 
@@ -1511,7 +1514,7 @@ function collectSettingsForm() {
         notify_7_days: qs('#notify7').checked,
         notify_1_day: qs('#notify1').checked,
         notification_time: notificationTimeInput ? (notificationTimeInput.value || '09:00') : (state.settings && state.settings.notification_time ? state.settings.notification_time : '09:00'),
-        auto_import_time: '10:00',
+        auto_import_time: '23:50',
         emails,
         missing_filter_email: missingFilterEmails.join(','),
     };
@@ -1939,6 +1942,11 @@ function bindEvents() {
     });
 
     ['#historyDatePreset', '#historyDateFrom', '#historyDateTo', '#historyActionFilter'].forEach((selector) => qs(selector).addEventListener('input', renderHistory));
+
+    qsa('.event-period-filter').forEach((checkbox) => checkbox.addEventListener('change', () => {
+        state.eventPeriodFilters = new Set(qsa('.event-period-filter:checked').map((item) => item.value));
+        renderEvents();
+    }));
 
     qs('#filterSearch').addEventListener('input', renderRegistry);
     qs('#filterSearchColumn').addEventListener('change', renderRegistry);
