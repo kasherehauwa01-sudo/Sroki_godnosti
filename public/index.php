@@ -100,9 +100,14 @@ declare(strict_types=1);
                 <h2>События</h2>
                 <p>Партии с событиями по сроку годности: 180, 90, 60, 30 и 1 день.</p>
             </div>
+            <div class="card event-periods" aria-label="Фильтр событий по периоду">
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="past"> Прошедшие</label>
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="today" checked> Сегодня</label>
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="future" checked> Будущие</label>
+            </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Срок годности</th><th>Тип события</th></tr></thead>
+                    <thead><tr><th>Тип события</th><th>Дата события</th><th>Количество партий</th></tr></thead>
                     <tbody id="eventsBody"></tbody>
                 </table>
             </div>
@@ -115,7 +120,7 @@ declare(strict_types=1);
             </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Остаток</th><th>Статус</th><th>Последнее изменение</th></tr></thead>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Остаток</th><th>Заполнены остатки</th><th>Статус</th><th>Последнее изменение</th></tr></thead>
                     <tbody id="stockBatchNotificationsBody"></tbody>
                 </table>
             </div>
@@ -310,7 +315,7 @@ declare(strict_types=1);
                     <li>Если склад добавлен, удален или деактивирован, значение <code>y</code> пересчитывается по текущему списку активных складов.</li>
                     <li>Партии со статусом <code>Списана</code> не попадают в формы заполнения остатков и в список складских уведомлений.</li>
                     <li>Из вкладки <code>Уведомления</code> можно открыть партию и посмотреть остатки по активным складам.</li>
-                    <li>В окне остатков доступна кнопка <code>Списать</code>: после нажатия появляется выбор статуса, пользователь выбирает статус и нажимает <code>Сохранить</code>. Статус партии обновляется в реестре.</li>
+                    <li>В окне остатков доступна кнопка <code>Сменить статус</code>: после нажатия появляется выбор статуса, пользователь выбирает статус и нажимает <code>Сохранить</code>. Статус партии обновляется в реестре.</li>
                 </ul>
 
                 <h3>Склады</h3>
@@ -435,14 +440,18 @@ declare(strict_types=1);
                     <li>Нажимает сохранение формы.</li>
                     <li>Администратор видит прогресс заполнения во вкладке <code>Уведомления</code>.</li>
                 </ol>
+            </div>
+        </section>
 
+        <!-- Вкладка истории должна быть самостоятельной панелью, а не частью скрытой инструкции. -->
         <section class="panel" id="tab-history">
             <div class="card filters history-filters">
                 <label>Дата
                     <select id="historyDatePreset">
+                        <option selected value="all">Всё время</option>
                         <option value="today">Сегодня</option>
                         <option value="yesterday">Вчера</option>
-                        <option selected value="week">Неделя</option>
+                        <option value="week">Неделя</option>
                         <option value="month">Месяц</option>
                         <option value="year">Год</option>
                         <option value="custom">Произвольная дата</option>
@@ -458,6 +467,11 @@ declare(strict_types=1);
                         <option value="update">Изменение партий</option>
                         <option value="delete">Удаление партий</option>
                         <option value="auto_import_completed">Автозагрузка</option>
+                        <option value="auto_import_failed">Ошибка автозагрузки</option>
+                        <option value="auto_import_not_found">Автозагрузка без файлов</option>
+                        <option value="delete_by_articles">Удаление артикулов</option>
+                        <option value="expiry_notifications_sent">Отправка уведомлений</option>
+                        <option value="expiry_notifications_failed">Ошибка уведомлений</option>
                     </select>
                 </label>
             </div>
@@ -619,7 +633,18 @@ declare(strict_types=1);
                 </table>
             </div>
             <div class="modal-actions">
-                <button class="ghost-button danger hidden" id="writeOffStockBatchButton" type="button">Списать</button>
+                <button class="ghost-button" id="writeOffStockBatchButton" type="button">Сменить статус</button>
+                <div class="stock-status-actions" id="stockStatusActions" hidden>
+                    <label>Новый статус
+                        <select id="batchStockStatusSelect">
+                            <option>В наличии</option>
+                            <option>Реализована</option>
+                            <option>Списана</option>
+                        </select>
+                    </label>
+                    <button class="ghost-button" id="cancelBatchStockStatusButton" type="button">Отмена</button>
+                    <button class="primary" id="saveBatchStockStatusButton" type="button">Сохранить</button>
+                </div>
                 <button class="primary" id="confirmBatchStockDialogButton" type="button">Закрыть</button>
             </div>
         </div>
