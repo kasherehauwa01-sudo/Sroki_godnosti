@@ -20,6 +20,7 @@ const state = {
     stockBatchNotifications: [],
     selectedStockBatchId: null,
     events: [],
+    eventPeriodFilters: new Set(['today', 'future']),
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана'];
@@ -1064,28 +1065,51 @@ async function loadEvents() {
     renderEvents();
 }
 
+function eventPeriod(eventDate) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const date = new Date(`${eventDate}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return 'future';
+    if (date < today) return 'past';
+    if (date > today) return 'future';
+    return 'today';
+}
+
+function filteredEvents() {
+    return state.events.filter((event) => state.eventPeriodFilters.has(eventPeriod(event.event_date)));
+}
+
 function renderEvents() {
     const body = qs('#eventsBody');
     if (!body) return;
-    body.innerHTML = state.events.map((event) => `
-        <tr data-event-id="${event.id}">
-            <td>${escapeHtml(event.article)}</td>
-            <td>${escapeHtml(event.code || '')}</td>
-            <td>${escapeHtml(event.name || '')}</td>
-            <td>${escapeHtml(formatExpiryMonthRu(event.expiry_date, event.expiry_full_date))}</td>
+    const events = filteredEvents();
+    body.innerHTML = events.map((event) => `
+        <tr data-event-id="${escapeHtml(event.id)}">
             <td>${Number(event.event_type)} день</td>
+            <td>${escapeHtml(formatDateRu(event.event_date))}</td>
+            <td>${Number(event.batch_count || 0)}</td>
         </tr>
-    `).join('') || '<tr><td colspan="5">Событий нет.</td></tr>';
+    `).join('') || '<tr><td colspan="3">Событий нет.</td></tr>';
     qsa('[data-event-id]').forEach((row) => row.addEventListener('click', () => openEventDetails(row.dataset.eventId)));
 }
 
 function openEventDetails(id) {
     const event = state.events.find((item) => String(item.id) === String(id));
     if (!event) return;
-    showNotificationDialog(
-        `Артикул: ${event.article}\nКод: ${event.code || ''}\nНаименование: ${event.name || ''}\nСрок годности: ${formatExpiryMonthRu(event.expiry_date, event.expiry_full_date)}\nТип события: ${event.event_type} день`,
-        'Событие партии'
-    );
+    qs('#eventBatchesDialogTitle').textContent = `${Number(event.event_type)} день — ${formatDateRu(event.event_date)}`;
+    qs('#eventBatchesDialogMeta').textContent = `Партий в событии: ${Number(event.batch_count || 0)}`;
+    qs('#eventBatchesBody').innerHTML = (event.batches || []).map((batch) => `
+        <tr>
+            <td>${escapeHtml(batch.article || '')}</td>
+            <td>${escapeHtml(batch.code || '')}</td>
+            <td>${escapeHtml(batch.name || '')}</td>
+        </tr>
+    `).join('') || '<tr><td colspan="3">Партий нет.</td></tr>';
+    qs('#eventBatchesDialog').showModal();
+}
+
+function closeEventBatchesDialog() {
+    qs('#eventBatchesDialog').close();
 }
 
 async function loadStockBatchNotifications() {
@@ -1998,6 +2022,8 @@ function bindEvents() {
         state.eventPeriodFilters = new Set(qsa('.event-period-filter:checked').map((item) => item.value));
         renderEvents();
     }));
+    qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
+    qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
 
     qs('#filterSearch').addEventListener('input', renderRegistry);
     qs('#filterSearchColumn').addEventListener('change', renderRegistry);

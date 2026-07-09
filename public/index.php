@@ -100,9 +100,14 @@ declare(strict_types=1);
                 <h2>События</h2>
                 <p>Партии с событиями по сроку годности: 180, 90, 60, 30 и 1 день.</p>
             </div>
+            <div class="card event-periods" aria-label="Фильтр событий по периоду">
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="past"> Прошедшие</label>
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="today" checked> Сегодня</label>
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="future" checked> Будущие</label>
+            </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Срок годности</th><th>Тип события</th></tr></thead>
+                    <thead><tr><th>Тип события</th><th>Дата события</th><th>Количество партий</th></tr></thead>
                     <tbody id="eventsBody"></tbody>
                 </table>
             </div>
