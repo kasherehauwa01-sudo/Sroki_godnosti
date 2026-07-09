@@ -435,7 +435,10 @@ declare(strict_types=1);
                     <li>Нажимает сохранение формы.</li>
                     <li>Администратор видит прогресс заполнения во вкладке <code>Уведомления</code>.</li>
                 </ol>
+            </div>
+        </section>
 
+        <!-- Вкладка истории должна быть самостоятельной панелью, а не частью скрытой инструкции. -->
         <section class="panel" id="tab-history">
             <div class="card filters history-filters">
                 <label>Дата
