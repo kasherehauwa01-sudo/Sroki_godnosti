@@ -765,7 +765,7 @@ final class SimpleImapClient
 
 
 
-    public function fetchMessage(string $id): string
+    public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
     {
         $response = $this->command('FETCH ' . preg_replace('/[^0-9]/', '', $id) . ' RFC822');
         if (preg_match('/\{(\d+)\}\r?\n/s', $response, $match, PREG_OFFSET_CAPTURE)) {

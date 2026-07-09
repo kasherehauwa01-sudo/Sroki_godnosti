@@ -33,6 +33,9 @@ if (basename((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === 'api.php') {
 
 function handleApiRequest(): void
 {
+    $outputBufferLevel = ob_get_level();
+    ob_start();
+
     try {
         $pdo = getDatabaseConnection();
         ensureBatchesSchema($pdo);
@@ -91,8 +94,15 @@ function handleApiRequest(): void
             };
         }
 
-        echo json_encode($result, JSON_UNESCAPED_UNICODE);
+        $json = json_encode($result, JSON_UNESCAPED_UNICODE);
+        while (ob_get_level() > $outputBufferLevel) {
+            ob_end_clean();
+        }
+        echo $json;
     } catch (Throwable $error) {
+        while (ob_get_level() > $outputBufferLevel) {
+            ob_end_clean();
+        }
         http_response_code(500);
         echo json_encode(['ok' => false, 'error' => $error->getMessage()], JSON_UNESCAPED_UNICODE);
     }
