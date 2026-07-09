@@ -778,12 +778,12 @@ final class SimpleImapClient
         return $response;
     }
 
-    public function markSeen(string $id): void
+    public function __destruct()
     {
         $this->command('STORE ' . preg_replace('/[^0-9]/', '', $id) . ' +FLAGS (\Seen)');
     }
 
-    public function logout(): void
+    public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
     {
         if (!is_resource($this->socket)) {
             return;
