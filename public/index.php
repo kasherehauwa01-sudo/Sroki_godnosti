@@ -272,7 +272,7 @@ declare(strict_types=1);
 
                 <h3>Реестр партий</h3>
                 <ul>
-                    <li>Хранение партий товаров с артикулом, кодом, наименованием, количеством, сроком годности, датой внесения, источником создания и статусом.</li>
+                    <li>Хранение партий товаров с артикулом, кодом, наименованием, сроком годности, датой внесения, источником создания и статусом.</li>
                     <li>Поддержка статусов <code>В наличии</code>, <code>Реализована</code>, <code>Списана</code>.</li>
                     <li>Поиск по артикулу, коду или наименованию.</li>
                     <li>Фильтры по статусу, остатку дней до срока годности и событию по сроку годности.</li>
@@ -404,7 +404,6 @@ declare(strict_types=1);
                 <p>Обязательные колонки файла:</p>
                 <ul>
                     <li><code>Артикул</code>;</li>
-                    <li><code>Количество</code> или <code>Количество в партии</code>;</li>
                     <li><code>Срок годности до</code>, <code>Срок годности</code> или похожий заголовок.</li>
                 </ul>
                 <p>Необязательные колонки:</p>
@@ -599,7 +598,6 @@ declare(strict_types=1);
             <label>Артикул<input id="editArticle" name="article" required autocomplete="off"></label>
             <label>Код<input id="editCode" name="code" autocomplete="off"></label>
             <label>Наименование<input id="editName" name="name" autocomplete="off"></label>
-            <label>Количество в партии<input id="editQuantity" name="quantity" required min="0" step="1" type="number"></label>
             <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10"></label>
             <label>Статус
                 <select id="editStatus" name="status" required>
