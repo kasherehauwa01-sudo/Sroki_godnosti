@@ -1078,10 +1078,11 @@ function renderStockBatchNotifications() {
             <td>${escapeHtml(notification.code || '')}</td>
             <td>${escapeHtml(notification.name || '')}</td>
             <td>${formatQuantity(notification.total_stock || 0)}</td>
+            <td>${Number(notification.filled_warehouse_count || 0)} из ${Number(notification.active_warehouse_count || 0)}</td>
             <td>${escapeHtml(notification.status || '')}</td>
             <td>${escapeHtml(notification.last_stock_at || '—')}</td>
         </tr>
-    `).join('') || '<tr><td colspan="6">Остатков по партиям пока нет.</td></tr>';
+    `).join('') || '<tr><td colspan="7">Остатков по партиям пока нет.</td></tr>';
     qsa('[data-stock-batch-id]').forEach((row) => row.addEventListener('click', () => openBatchStockDialog(row.dataset.stockBatchId, { markViewed: true, showWriteOff: true })));
 }
 
@@ -1382,6 +1383,24 @@ function formatHistoryDetails(action, payload) {
         return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
     }
 
+    if (action === 'delete_by_articles') {
+        const articles = (parsed.articles || []).join(', ') || 'не указаны';
+        return `Удаление по артикулам: ${articles}. Удалено партий: ${Number(parsed.deleted || 0)}.`;
+    }
+
+    if (action === 'delete_by_articles_no_matches') {
+        const articles = (parsed.articles || []).join(', ') || 'не указаны';
+        return `Удаление по артикулам: ${articles}. Совпадений не найдено.`;
+    }
+
+    if (action === 'expiry_notifications_sent') {
+        return `Уведомления отправлены. Получатели: ${(parsed.recipients || []).join(', ') || 'не указаны'}. Партий: ${Number(parsed.count || parsed.batches?.length || 0)}.`;
+    }
+
+    if (action === 'expiry_notifications_failed') {
+        return `Ошибка отправки уведомлений. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
+
     if (parsed.text) return parsed.text;
 
     // Запасной вариант нужен для старых записей истории со служебными полями.
@@ -1390,12 +1409,16 @@ function formatHistoryDetails(action, payload) {
 
 async function loadHistory() {
     const result = await api('logs');
-    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found']);
+    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'delete_by_articles', 'delete_by_articles_no_matches', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found', 'expiry_notifications_sent', 'expiry_notifications_failed', 'expiry_check_no_matches', 'expiry_check_skipped']);
     state.allHistory = (result.logs || []).filter((log) => registryActions.has(log.event || log.action));
     renderHistory();
 }
 
 function getDateRangeByPreset(preset) {
+    if (preset === 'all') {
+        return { start: null, end: null };
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const start = new Date(today);
