@@ -763,6 +763,28 @@ final class SimpleImapClient
         $this->command('SELECT "' . addcslashes($folder, "\\\"") . '"');
     }
 
+
+    public function logout(): void
+    {
+        if (!is_resource($this->socket)) {
+            return;
+        }
+
+        try {
+            $this->command('LOGOUT');
+        } catch (Throwable) {
+            // Ошибка закрытия IMAP-сессии не должна маскировать результат автозагрузки.
+        }
+
+        fclose($this->socket);
+        $this->socket = null;
+    }
+
+    public function __destruct()
+    {
+        $this->logout();
+    }
+
     public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
     {
         // Ищем без IMAP-фильтра FROM: у разных серверов он может не совпадать
