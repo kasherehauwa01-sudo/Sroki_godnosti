@@ -18,6 +18,7 @@ const AUTO_IMPORT_SUBJECT = 'Сроки годности. Ежедневная �
 const AUTO_IMPORT_MAIL_HOST = 'imap.yandex.ru';
 const AUTO_IMPORT_MAIL_PORT = 993;
 const AUTO_IMPORT_TIMEZONE = 'Europe/Moscow';
+const AUTO_IMPORT_DEFAULT_TIME = '23:50';
 
 date_default_timezone_set(AUTO_IMPORT_TIMEZONE);
 
@@ -27,11 +28,11 @@ function runDueAutoImport(PDO $pdo): void
     ensureSettingsSchema($pdo);
 
     $settings = getRawSettings($pdo);
-    $time = normalizeNotificationTime((string)($settings['auto_import_time'] ?? '10:00'), '10:00');
+    $time = AUTO_IMPORT_DEFAULT_TIME;
     $now = new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
-    $scheduledAt = new DateTimeImmutable($now->format('Y-m-d') . ' ' . $time, new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+    $scheduledAt = autoImportScheduledAt($now, $time);
 
-    if ($now < $scheduledAt || $now > $scheduledAt->modify('+10 hours')) {
+    if ($now < $scheduledAt) {
         return;
     }
 
@@ -60,9 +61,27 @@ function runDueAutoImport(PDO $pdo): void
     }
 }
 
+function autoImportScheduledAt(DateTimeImmutable $now, string $time): DateTimeImmutable
+{
+    $scheduledAt = new DateTimeImmutable($now->format('Y-m-d') . ' ' . $time, new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+
+    return $now < $scheduledAt ? $scheduledAt->modify('-1 day') : $scheduledAt;
+}
+
 function shouldRunAutoImportNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTimeImmutable $now): bool
 {
     $start = $scheduledAt->format('Y-m-d H:i:s');
+    $attemptsStatement = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM logs
+         WHERE action = 'auto_import_started'
+           AND created_at >= :start"
+    );
+    $attemptsStatement->execute([':start' => $start]);
+    if ((int)$attemptsStatement->fetchColumn() >= 10) {
+        return false;
+    }
+
     $statement = $pdo->prepare(
         "SELECT action, created_at
          FROM logs
@@ -113,7 +132,7 @@ function runAutoImport(PDO $pdo, bool $once = false): array
     ensureBatchesSchema($pdo);
     ensureSettingsSchema($pdo);
     $settings = getRawSettings($pdo);
-    $time = normalizeNotificationTime((string)($settings['auto_import_time'] ?? '10:00'), '10:00');
+    $time = AUTO_IMPORT_DEFAULT_TIME;
     $attempts = $once ? 1 : 10;
     $lastError = '';
 
@@ -155,7 +174,7 @@ function runMissingExpiryFilterNotificationTest(PDO $pdo): array
         throw new RuntimeException('Для проверки заполните SMTP логин и пароль в настройках.');
     }
 
-    $mail = fetchTodayAutoImportMessage($username, $password);
+    $mail = fetchAutoImportMessageForDate($username, $password, new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE)));
     if (!$mail) {
         return ['ok' => true, 'message' => 'Письмо текущей даты не найдено. Уведомление не отправлено.'];
     }
@@ -196,17 +215,20 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         throw new RuntimeException('Для автозагрузки заполните SMTP логин и пароль в настройках.');
     }
 
-    $mail = fetchTodayAutoImportMessage($username, $password);
+    $targetDates = autoImportTargetDatesForAttempt($time);
+    $mail = fetchAutoImportMessageForDates($username, $password, $targetDates);
     if (!$mail) {
         writeLog($pdo, 'auto_import_not_found', [
             'attempt' => $attempt,
             'time' => $time,
+            'target_dates' => array_map(static fn (DateTimeImmutable $date): string => $date->format('Y-m-d'), $targetDates),
             'from' => AUTO_IMPORT_FROM,
             'subject' => AUTO_IMPORT_SUBJECT,
-            'message' => 'Письмо текущей даты не найдено.',
+            'message' => 'Непрочитанное письмо за даты выгрузки не найдено.',
         ]);
-        return ['ok' => false, 'status' => 'not_found', 'message' => 'Письмо текущей даты не найдено.'];
+        return ['ok' => false, 'status' => 'not_found', 'message' => 'Непрочитанное письмо за даты выгрузки не найдено.'];
     }
+    $targetDate = new DateTimeImmutable((string)$mail['target_date'], new DateTimeZone(AUTO_IMPORT_TIMEZONE));
 
     $attachments = extractSpreadsheetAttachments($mail['message']);
     if (!$attachments) {
@@ -240,21 +262,54 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
         'attempt' => $attempt,
         'folder' => (string)$mail['folder'],
         'filename' => implode(', ', array_column($attachments, 'filename')),
+        'target_date' => $targetDate->format('Y-m-d'),
         'added' => (int)($result['added'] ?? 0),
         'skipped_duplicates' => (int)($result['skipped_duplicates'] ?? 0),
         'batches' => $result['batches'] ?? [],
         'duplicates' => $result['duplicates'] ?? [],
+        'written_off_batches' => $result['written_off_batches'] ?? [],
     ]);
 
     return [
         'ok' => true,
         'status' => 'completed',
+        'target_date' => $targetDate->format('Y-m-d'),
         'added' => (int)($result['added'] ?? 0),
         'skipped_duplicates' => (int)($result['skipped_duplicates'] ?? 0),
+        'written_off_batches' => $result['written_off_batches'] ?? [],
     ];
 }
 
+function autoImportTargetDatesForAttempt(string $time): array
+{
+    $now = new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+    $scheduledAt = autoImportScheduledAt($now, $time);
+    $dates = [$scheduledAt];
+    if ($scheduledAt->format('Y-m-d') !== $now->format('Y-m-d')) {
+        $dates[] = $now;
+    }
+
+    return $dates;
+}
+
 function fetchTodayAutoImportMessage(string $username, string $password): ?array
+{
+    return fetchAutoImportMessageForDate($username, $password, new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE)));
+}
+
+function fetchAutoImportMessageForDates(string $username, string $password, array $targetDates): ?array
+{
+    foreach ($targetDates as $targetDate) {
+        $mail = fetchAutoImportMessageForDate($username, $password, $targetDate);
+        if ($mail) {
+            return $mail;
+        }
+    }
+
+    return null;
+}
+
+function fetchAutoImportMessageForDate(string $username, string $password, DateTimeImmutable $targetDate): ?array
 {
     $imap = new SimpleImapClient(AUTO_IMPORT_MAIL_HOST, AUTO_IMPORT_MAIL_PORT);
     try {
@@ -266,7 +321,7 @@ function fetchTodayAutoImportMessage(string $username, string $password): ?array
                 continue;
             }
 
-            $ids = $imap->searchRecentMessages();
+            $ids = $imap->searchUnreadMessagesForDate($targetDate);
             foreach (array_reverse($ids) as $id) {
                 $message = $imap->fetchMessage($id);
                 $headers = parseMailHeaders($message);
@@ -275,7 +330,7 @@ function fetchTodayAutoImportMessage(string $username, string $password): ?array
                     autoImportSenderMatches($headers)
                     && autoImportSubjectMatches($subject)
                 ) {
-                    return ['message' => $message, 'folder' => $folder, 'id' => $id];
+                    return ['message' => $message, 'folder' => $folder, 'id' => $id, 'target_date' => $targetDate->format('Y-m-d')];
                 }
             }
         }
@@ -708,49 +763,38 @@ final class SimpleImapClient
         $this->command('SELECT "' . addcslashes($folder, "\\\"") . '"');
     }
 
-    public function searchRecentMessages(): array
-    {
-        // Ищем без IMAP-фильтра FROM: у разных серверов он может не совпадать
-        // с отображаемым адресом отправителя. Фильтр отправителя выполняется в PHP.
-        $date = (new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE)))
-            ->modify('-1 day')
-            ->format('d-M-Y');
-        $response = $this->command('SEARCH SINCE ' . $date);
-        preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
-        $ids = array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
-        if ($ids) {
-            return $ids;
-        }
-
-        // Запасной вариант нужен для серверов, где SEARCH SINCE работает
-        // нестандартно: берём последние письма и фильтруем их в PHP.
-        $response = $this->command('SEARCH ALL');
-        preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
-        $allIds = array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
-
-        return array_slice($allIds, -100);
-    }
-
-    public function fetchMessage(string $id): string
-    {
-        $response = $this->command('FETCH ' . (int)$id . ' RFC822');
-        $start = strpos($response, "\r\n");
-        $end = strrpos($response, "\r\nA");
-        return $start !== false && $end !== false ? substr($response, $start + 2, $end - $start - 2) : $response;
-    }
-
-    public function markSeen(string $id): void
-    {
-        $this->command('STORE ' . (int)$id . ' +FLAGS (\\Seen)');
-    }
 
     public function logout(): void
     {
-        if ($this->socket) {
-            @fwrite($this->socket, 'A' . $this->counter++ . " LOGOUT\r\n");
-            @fclose($this->socket);
-            $this->socket = null;
+        if (!is_resource($this->socket)) {
+            return;
         }
+
+        try {
+            $this->command('LOGOUT');
+        } catch (Throwable) {
+            // Ошибка закрытия IMAP-сессии не должна маскировать результат автозагрузки.
+        }
+
+        fclose($this->socket);
+        $this->socket = null;
+    }
+
+    public function __destruct()
+    {
+        $this->logout();
+    }
+
+    public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
+    {
+        // Ищем без IMAP-фильтра FROM: у разных серверов он может не совпадать
+        // с отображаемым адресом отправителя. Фильтр отправителя выполняется в PHP.
+        $date = $targetDate->setTimezone(new DateTimeZone(AUTO_IMPORT_TIMEZONE))->format('d-M-Y');
+        $nextDate = $targetDate->setTimezone(new DateTimeZone(AUTO_IMPORT_TIMEZONE))->modify('+1 day')->format('d-M-Y');
+        $response = $this->command('SEARCH UNSEEN SINCE ' . $date . ' BEFORE ' . $nextDate);
+        preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
+        $ids = array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
+        return $ids;
     }
 
     private function command(string $command): string
