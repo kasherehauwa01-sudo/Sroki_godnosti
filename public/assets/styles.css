@@ -163,11 +163,12 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .stock-table-wrap { border: 1px solid var(--border); border-radius: 16px; }
 .warehouse-email-cell { white-space: pre-line; }
 .settings-warehouses-card { grid-column: 1 / -1; }
-.settings-subtabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
-.settings-subtab { padding: 10px 16px; background: #e8eef8; color: var(--muted); }
-.settings-subtab.active { background: var(--primary); color: #fff; }
-.settings-subpanel { display: none; }
+.settings-subtabs, .help-subtabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.settings-subtab, .help-subtab { padding: 10px 16px; background: #e8eef8; color: var(--muted); }
+.settings-subtab.active, .help-subtab.active { background: var(--primary); color: #fff; }
+.settings-subpanel, .help-subpanel { display: none; }
 .settings-subpanel.active { display: grid; }
+.help-subpanel.active { display: block; }
 
 .registry-top-actions { margin-bottom: 12px; }
 .event-periods { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }

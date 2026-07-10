@@ -23,7 +23,7 @@ const state = {
     eventPeriodFilters: new Set(['today', 'future']),
 };
 
-const statusOptions = ['В наличии', 'Реализована', 'Списана'];
+const statusOptions = ['В наличии', 'Реализована', 'Списана', 'Нет в наличии'];
 
 const qs = (selector) => document.querySelector(selector);
 const qsa = (selector) => [...document.querySelectorAll(selector)];
@@ -628,11 +628,16 @@ function sortRegistryRows() {
 
     const multiplier = direction === 'desc' ? -1 : 1;
     state.filteredBatches.sort((left, right) => {
-        const leftWrittenOff = left.status === 'Списана';
-        const rightWrittenOff = right.status === 'Списана';
-        if (leftWrittenOff !== rightWrittenOff) {
-            // Списанные партии всегда показываем в конце реестра независимо от выбранной сортировки.
-            return leftWrittenOff ? 1 : -1;
+        const terminalStatusRank = (status) => {
+            if (status === 'Нет в наличии') return 2;
+            if (status === 'Списана') return 1;
+            return 0;
+        };
+        const leftStatusRank = terminalStatusRank(left.status);
+        const rightStatusRank = terminalStatusRank(right.status);
+        if (leftStatusRank !== rightStatusRank) {
+            // Партии без наличия и списанные партии всегда показываем в конце реестра независимо от выбранной сортировки.
+            return leftStatusRank - rightStatusRank;
         }
 
         if (field === 'daysLeft') {
@@ -1212,6 +1217,17 @@ function switchSettingsTab(tabName) {
     });
     qsa('[data-settings-panel]').forEach((panel) => {
         const isActive = panel.dataset.settingsPanel === tabName;
+        panel.classList.toggle('active', isActive);
+        panel.hidden = !isActive;
+    });
+}
+
+function switchHelpTab(tabName) {
+    qsa('.help-subtab').forEach((button) => {
+        button.classList.toggle('active', button.dataset.helpTab === tabName);
+    });
+    qsa('[data-help-panel]').forEach((panel) => {
+        const isActive = panel.dataset.helpPanel === tabName;
         panel.classList.toggle('active', isActive);
         panel.hidden = !isActive;
     });
@@ -1936,6 +1952,7 @@ function bindEvents() {
     }));
 
     qsa('.settings-subtab').forEach((button) => button.addEventListener('click', () => switchSettingsTab(button.dataset.settingsTab)));
+    qsa('.help-subtab').forEach((button) => button.addEventListener('click', () => switchHelpTab(button.dataset.helpTab)));
 
     qs('#openTestStockFillButton').addEventListener('click', openTestStockFillDialog);
     qs('#testStockFillForm').addEventListener('submit', submitTestStockFillForm);

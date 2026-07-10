@@ -490,7 +490,7 @@ function isStockNotificationActive(array $notification): bool
 function getStockNotificationItems(PDO $pdo, int $notificationId, int $warehouseId): array
 {
     $statement = $pdo->prepare(
-        'SELECT i.id, i.batch_id, i.article, i.code, i.name, i.expiry_date, i.expiry_full_date, COALESCE(bs.quantity, 0) AS quantity
+        'SELECT i.id, i.batch_id, i.article, i.code, i.name, i.expiry_date, i.expiry_full_date, bs.id AS stock_id, bs.quantity
          FROM stock_notification_items i
          LEFT JOIN batch_stock bs ON bs.batch_id = i.batch_id AND bs.warehouse_id = :warehouse_id
          WHERE i.notification_id = :notification_id
@@ -506,7 +506,7 @@ function getStockNotificationItems(PDO $pdo, int $notificationId, int $warehouse
         'name' => (string)$row['name'],
         'expiry_date' => (string)($row['expiry_date'] ?? ''),
         'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
-        'quantity' => (int)$row['quantity'],
+        'quantity' => $row['stock_id'] === null ? null : (int)$row['quantity'],
     ], $statement->fetchAll());
 }
 
@@ -521,6 +521,10 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
     $itemsById = [];
     foreach ($form['items'] as $item) {
         $itemsById[(int)$item['id']] = $item;
+    }
+    $submittedItemIds = array_map('intval', array_keys($quantities));
+    if (array_diff(array_keys($itemsById), $submittedItemIds)) {
+        throw new InvalidArgumentException('Заполните остатки по всем партиям. Если остатка нет, укажите 0.');
     }
 
     $pdo->beginTransaction();
@@ -539,12 +543,12 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
             if (!isset($itemsById[$itemId]) || empty($itemsById[$itemId]['batch_id'])) {
                 continue;
             }
-            if (!is_int($quantity) && !ctype_digit((string)$quantity)) {
-                throw new InvalidArgumentException('Остаток должен быть целым числом больше или равным 0.');
+            if ((!is_int($quantity) && !ctype_digit((string)$quantity)) || trim((string)$quantity) === '') {
+                throw new InvalidArgumentException('Заполните остатки по всем партиям целыми числами больше или равными 0.');
             }
             $newQuantity = (int)$quantity;
             if ($newQuantity < 0) {
-                throw new InvalidArgumentException('Остаток должен быть целым числом больше или равным 0.');
+                throw new InvalidArgumentException('Заполните остатки по всем партиям целыми числами больше или равными 0.');
             }
             $oldQuantity = (int)$itemsById[$itemId]['quantity'];
             $upsert->execute([

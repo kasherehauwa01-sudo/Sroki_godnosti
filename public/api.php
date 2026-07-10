@@ -20,7 +20,8 @@ require_once __DIR__ . '/../app/auto_importer.php';
 require_once __DIR__ . '/../app/warehouse_repository.php';
 
 const ACTIVE_STATUS = 'В наличии';
-const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
+const UNAVAILABLE_STATUS = 'Нет в наличии';
+const ARCHIVED_STATUSES = ['Реализована', 'Списана', UNAVAILABLE_STATUS];
 const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта партия товара';
 const SENDER_EMAIL = 'vr-vk@yandex.ru';
 const SETTINGS_PASSWORD_HASH = 'ff10705eafbaa3ff925fb0429d4b3f10379a4dd9dc1725654bbe0a5c9ce1a10f';
@@ -223,6 +224,14 @@ function ensureBatchesSchema(PDO $pdo): void
         if ((int)$statement->fetchColumn() === 0) {
             $pdo->exec($sql);
         }
+    }
+
+    $statusColumn = $pdo->prepare(
+        'SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+    );
+    $statusColumn->execute([':table' => 'batches', ':column' => 'status']);
+    if (!str_contains((string)$statusColumn->fetchColumn(), UNAVAILABLE_STATUS)) {
+        $pdo->exec("ALTER TABLE batches MODIFY COLUMN status ENUM('В наличии', 'Реализована', 'Списана', 'Нет в наличии') NOT NULL DEFAULT 'В наличии'");
     }
 }
 

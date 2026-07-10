@@ -52,6 +52,7 @@ declare(strict_types=1);
                         <option>В наличии</option>
                         <option>Реализована</option>
                         <option>Списана</option>
+                        <option>Нет в наличии</option>
                     </select>
                 </label>
                 <label>Остаток дней до
@@ -273,7 +274,7 @@ declare(strict_types=1);
                 <h3>Реестр партий</h3>
                 <ul>
                     <li>Хранение партий товаров с артикулом, кодом, наименованием, сроком годности, датой внесения, источником создания и статусом.</li>
-                    <li>Поддержка статусов <code>В наличии</code>, <code>Реализована</code>, <code>Списана</code>.</li>
+                    <li>Поддержка статусов <code>В наличии</code>, <code>Реализована</code>, <code>Списана</code>, <code>Нет в наличии</code>.</li>
                     <li>Поиск по артикулу, коду или наименованию.</li>
                     <li>Фильтры по статусу, остатку дней до срока годности и событию по сроку годности.</li>
                     <li>Сортировка по артикулу, сроку годности, остатку дней и дате внесения.</li>
@@ -604,6 +605,7 @@ declare(strict_types=1);
                     <option>В наличии</option>
                     <option>Реализована</option>
                     <option>Списана</option>
+                    <option>Нет в наличии</option>
                 </select>
             </label>
             <label>Дата внесения<input id="editCreatedAt" name="createdAt" required type="date"></label>
@@ -638,6 +640,7 @@ declare(strict_types=1);
                             <option>В наличии</option>
                             <option>Реализована</option>
                             <option>Списана</option>
+                            <option>Нет в наличии</option>
                         </select>
                     </label>
                     <button class="ghost-button" id="cancelBatchStockStatusButton" type="button">Отмена</button>
