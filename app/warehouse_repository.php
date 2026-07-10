@@ -490,7 +490,7 @@ function isStockNotificationActive(array $notification): bool
 function getStockNotificationItems(PDO $pdo, int $notificationId, int $warehouseId): array
 {
     $statement = $pdo->prepare(
-        'SELECT i.id, i.batch_id, i.article, i.code, i.name, i.expiry_date, i.expiry_full_date, COALESCE(bs.quantity, 0) AS quantity
+        'SELECT i.id, i.batch_id, i.article, i.code, i.name, i.expiry_date, i.expiry_full_date, bs.id AS stock_id, bs.quantity
          FROM stock_notification_items i
          LEFT JOIN batch_stock bs ON bs.batch_id = i.batch_id AND bs.warehouse_id = :warehouse_id
          WHERE i.notification_id = :notification_id
@@ -506,7 +506,7 @@ function getStockNotificationItems(PDO $pdo, int $notificationId, int $warehouse
         'name' => (string)$row['name'],
         'expiry_date' => (string)($row['expiry_date'] ?? ''),
         'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
-        'quantity' => (int)$row['quantity'],
+        'quantity' => $row['stock_id'] === null ? null : (int)$row['quantity'],
     ], $statement->fetchAll());
 }
 
@@ -521,6 +521,10 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
     $itemsById = [];
     foreach ($form['items'] as $item) {
         $itemsById[(int)$item['id']] = $item;
+    }
+    $submittedItemIds = array_map('intval', array_keys($quantities));
+    if (array_diff(array_keys($itemsById), $submittedItemIds)) {
+        throw new InvalidArgumentException('Заполните остатки по всем партиям. Если остатка нет, укажите 0.');
     }
 
     $pdo->beginTransaction();
@@ -539,12 +543,12 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
             if (!isset($itemsById[$itemId]) || empty($itemsById[$itemId]['batch_id'])) {
                 continue;
             }
-            if (!is_int($quantity) && !ctype_digit((string)$quantity)) {
-                throw new InvalidArgumentException('Остаток должен быть целым числом больше или равным 0.');
+            if ((!is_int($quantity) && !ctype_digit((string)$quantity)) || trim((string)$quantity) === '') {
+                throw new InvalidArgumentException('Заполните остатки по всем партиям целыми числами больше или равными 0.');
             }
             $newQuantity = (int)$quantity;
             if ($newQuantity < 0) {
-                throw new InvalidArgumentException('Остаток должен быть целым числом больше или равным 0.');
+                throw new InvalidArgumentException('Заполните остатки по всем партиям целыми числами больше или равными 0.');
             }
             $oldQuantity = (int)$itemsById[$itemId]['quantity'];
             $upsert->execute([
@@ -677,9 +681,13 @@ function listStockBatchNotifications(PDO $pdo): array
                 COALESCE(active_warehouses.active_count, 0) AS active_warehouse_count,
                 COALESCE(stock_totals.filled_warehouse_count, 0) AS filled_warehouse_count
          FROM (
-             SELECT batch_id, SUM(quantity) AS total_stock, COUNT(DISTINCT warehouse_id) AS filled_warehouse_count, MAX(updated_at) AS last_stock_at
-             FROM batch_stock
-             GROUP BY batch_id
+             SELECT bs.batch_id,
+                    SUM(bs.quantity) AS total_stock,
+                    COUNT(DISTINCT CASE WHEN w.is_active = 1 THEN bs.warehouse_id END) AS filled_warehouse_count,
+                    MAX(bs.updated_at) AS last_stock_at
+             FROM batch_stock bs
+             INNER JOIN warehouses w ON w.id = bs.warehouse_id
+             GROUP BY bs.batch_id
          ) stock_totals
          INNER JOIN batches b ON b.id = stock_totals.batch_id
          LEFT JOIN (
@@ -707,6 +715,8 @@ function listStockBatchNotifications(PDO $pdo): array
             'last_stock_at' => $lastStockAt,
             'viewed_at' => $viewedAt,
             'unread' => $viewedAt === '' || ($lastStockAt !== '' && strtotime($lastStockAt) > strtotime($viewedAt)),
+            'filled_warehouse_count' => (int)($row['filled_warehouse_count'] ?? 0),
+            'active_warehouse_count' => (int)($row['active_warehouse_count'] ?? 0),
             'all_warehouses_reported' => (int)($row['active_warehouse_count'] ?? 0) > 0 && (int)($row['filled_warehouse_count'] ?? 0) >= (int)($row['active_warehouse_count'] ?? 0),
         ];
     }, $statement->fetchAll());
@@ -730,22 +740,52 @@ function markStockBatchNotificationViewed(PDO $pdo, int $batchId): array
 function listExpiryEvents(PDO $pdo): array
 {
     $eventDays = [180, 90, 60, 30, 1];
-    $placeholders = implode(',', array_fill(0, count($eventDays), '?'));
-    $statement = $pdo->prepare(
-        "SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
+    $statement = $pdo->query(
+        "SELECT id, article, code, name, expiry_date, expiry_full_date
          FROM batches
-         WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
-         ORDER BY days_left DESC, expiry_date ASC, article ASC"
+         WHERE status = 'В наличии' AND expiry_invalid = 0
+         ORDER BY expiry_date ASC, article ASC, id ASC"
     );
-    $statement->execute($eventDays);
 
-    return array_map(static fn (array $row): array => [
-        'id' => (int)$row['id'],
-        'article' => (string)$row['article'],
-        'code' => (string)($row['code'] ?? ''),
-        'name' => (string)($row['name'] ?? ''),
-        'expiry_date' => (string)$row['expiry_date'],
-        'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
-        'event_type' => (int)$row['days_left'],
-    ], $statement->fetchAll());
+    $events = [];
+    foreach ($statement->fetchAll() as $row) {
+        try {
+            $expiryDate = new DateTimeImmutable((string)$row['expiry_date']);
+        } catch (Throwable) {
+            continue;
+        }
+
+        foreach ($eventDays as $eventDay) {
+            // Событие наступает за заданное количество дней до срока годности партии.
+            $eventDate = $expiryDate->modify('-' . $eventDay . ' days')->format('Y-m-d');
+            $key = $eventDay . '|' . $eventDate;
+            if (!isset($events[$key])) {
+                $events[$key] = [
+                    'id' => $key,
+                    'event_type' => $eventDay,
+                    'event_date' => $eventDate,
+                    'batch_count' => 0,
+                    'batches' => [],
+                ];
+            }
+
+            $events[$key]['batch_count']++;
+            $events[$key]['batches'][] = [
+                'id' => (int)$row['id'],
+                'article' => (string)$row['article'],
+                'code' => (string)($row['code'] ?? ''),
+                'name' => (string)($row['name'] ?? ''),
+                'expiry_date' => (string)$row['expiry_date'],
+                'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
+            ];
+        }
+    }
+
+    $result = array_values($events);
+    usort($result, static fn (array $left, array $right): int =>
+        strcmp((string)$left['event_date'], (string)$right['event_date'])
+            ?: ((int)$right['event_type'] <=> (int)$left['event_type'])
+    );
+
+    return $result;
 }
