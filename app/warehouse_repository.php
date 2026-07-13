@@ -230,7 +230,7 @@ function warehouseHasStock(PDO $pdo, int $id): bool
 function getBatchStockByWarehouses(PDO $pdo, int $batchId): array
 {
     $statement = $pdo->prepare(
-        'SELECT w.id AS warehouse_id, w.name, w.sort_order, w.email, COALESCE(bs.quantity, 0) AS quantity
+        'SELECT w.id AS warehouse_id, w.name, w.sort_order, w.email, bs.id AS stock_id, bs.quantity
          FROM warehouses w
          LEFT JOIN batch_stock bs ON bs.warehouse_id = w.id AND bs.batch_id = :batch_id
          WHERE w.is_active = 1
@@ -244,10 +244,10 @@ function getBatchStockByWarehouses(PDO $pdo, int $batchId): array
         'name' => (string)$row['name'],
         'sort_order' => (int)$row['sort_order'],
         'email' => (string)($row['email'] ?? ''),
-        'quantity' => (float)$row['quantity'],
+        'quantity' => $row['stock_id'] === null ? null : (float)$row['quantity'],
     ], $rows);
 
-    return ['items' => $items, 'total' => array_sum(array_column($items, 'quantity'))];
+    return ['items' => $items, 'total' => array_sum(array_map(static fn (array $item): float => (float)($item['quantity'] ?? 0), $items))];
 }
 
 function ensureStockNotificationSchema(PDO $pdo): void

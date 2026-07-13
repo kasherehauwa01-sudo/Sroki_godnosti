@@ -703,7 +703,7 @@ async function openBatchStockDialog(id, options = {}) {
         const items = result.stock?.items || [];
         const total = Number(result.stock?.total || 0);
         qs('#batchStockBody').innerHTML = items.map((item) => `
-            <tr><td>${escapeHtml(item.name)}</td><td class="numeric-cell">${formatQuantity(item.quantity)}</td></tr>
+            <tr><td>${escapeHtml(item.name)}</td><td class="numeric-cell">${formatOptionalQuantity(item.quantity)}</td></tr>
         `).join('') || '<tr><td colspan="2">Активные склады не найдены.</td></tr>';
         qs('#batchStockTotal').textContent = formatQuantity(total);
         if (options.markViewed) {
@@ -748,6 +748,10 @@ function showBatchStockStatusControls() {
 function formatQuantity(value) {
     const number = Number(value || 0);
     return Number.isInteger(number) ? String(number) : number.toLocaleString('ru-RU', { maximumFractionDigits: 3 });
+}
+
+function formatOptionalQuantity(value) {
+    return value === null || value === undefined || value === '' ? '—' : formatQuantity(value);
 }
 
 function openEditDialog(id) {
