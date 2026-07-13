@@ -645,6 +645,9 @@ function normalizeStockNotificationSummary(array $row): array
         'status' => (string)$row['status'],
         'last_changed_at' => (string)($row['last_changed_at'] ?? ''),
         'created_at' => (string)$row['created_at'],
+        'sent_at' => (string)($row['sent_at'] ?? ''),
+        'event_key' => (string)($row['event_key'] ?? ''),
+        'subject' => (string)($row['subject'] ?? ''),
     ];
 }
 

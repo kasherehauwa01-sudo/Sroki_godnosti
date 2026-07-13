@@ -17,6 +17,7 @@ const state = {
     warehouses: [],
     editingWarehouseId: null,
     stockNotifications: [],
+    expandedStockNotificationGroups: new Set(),
     stockBatchNotifications: [],
     selectedStockBatchId: null,
     events: [],
@@ -1169,20 +1170,77 @@ async function loadStockNotifications() {
     renderStockNotifications();
 }
 
+function stockNotificationEventType(notification) {
+    const match = String(notification.event_key || '').match(/expiry_(\d+)/);
+    if (match) return `${match[1]} день`;
+    return notification.subject || 'Событие не указано';
+}
+
+function stockNotificationSentAt(notification) {
+    return notification.sent_at || notification.created_at || '';
+}
+
+function stockNotificationGroupKey(notification) {
+    const sentAt = stockNotificationSentAt(notification).slice(0, 16);
+    return `${sentAt}|${notification.event_key || notification.subject || ''}`;
+}
+
+function groupedStockNotifications() {
+    const groups = new Map();
+    state.stockNotifications.forEach((notification) => {
+        const key = stockNotificationGroupKey(notification);
+        if (!groups.has(key)) {
+            groups.set(key, {
+                key,
+                sentAt: stockNotificationSentAt(notification),
+                eventType: stockNotificationEventType(notification),
+                notifications: [],
+            });
+        }
+        groups.get(key).notifications.push(notification);
+    });
+    return [...groups.values()];
+}
+
 function renderStockNotifications() {
     const body = qs('#stockNotificationsBody');
     if (!body) return;
-    body.innerHTML = state.stockNotifications.map((notification) => `
-        <tr>
-            <td>${escapeHtml(notification.warehouse)}</td>
-            <td>${Number(notification.total_items || 0)} партий</td>
-            <td>${Number(notification.filled_items || 0)} заполнено</td>
-            <td>${escapeHtml(notification.status)}</td>
-            <td>${escapeHtml(notification.last_changed_at || '—')}</td>
-            <td><button class="small-button stock-notification-details-button" data-id="${notification.id}" type="button">Открыть</button></td>
-        </tr>
-    `).join('') || '<tr><td colspan="6">Уведомлений по заполнению остатков пока нет.</td></tr>';
+    const groups = groupedStockNotifications();
+    body.innerHTML = groups.map((group) => {
+        const expanded = state.expandedStockNotificationGroups.has(group.key);
+        const warehouses = group.notifications.map((notification) => `
+            <tr class="stock-notification-child-row">
+                <td></td>
+                <td></td>
+                <td>${escapeHtml(notification.warehouse)}</td>
+                <td>${Number(notification.total_items || 0)} партий</td>
+                <td>${Number(notification.filled_items || 0)} заполнено</td>
+                <td>${escapeHtml(notification.status)}</td>
+                <td>${escapeHtml(notification.last_changed_at || '—')}</td>
+                <td><button class="small-button stock-notification-details-button" data-id="${notification.id}" type="button">Открыть</button></td>
+            </tr>
+        `).join('');
+        return `
+            <tr class="stock-notification-group-row">
+                <td>${escapeHtml(formatDateTimeRu(group.sentAt))}</td>
+                <td>${escapeHtml(group.eventType)}</td>
+                <td colspan="5">Складов: ${group.notifications.length}</td>
+                <td><button class="small-button stock-notification-group-toggle" data-group-key="${escapeHtml(group.key)}" type="button">${expanded ? 'Свернуть' : 'Развернуть'}</button></td>
+            </tr>
+            ${expanded ? warehouses : ''}
+        `;
+    }).join('') || '<tr><td colspan="8">Уведомлений по заполнению остатков пока нет.</td></tr>';
+    qsa('.stock-notification-group-toggle').forEach((button) => button.addEventListener('click', () => toggleStockNotificationGroup(button.dataset.groupKey)));
     qsa('.stock-notification-details-button').forEach((button) => button.addEventListener('click', () => openStockNotificationDetails(button.dataset.id)));
+}
+
+function toggleStockNotificationGroup(groupKey) {
+    if (state.expandedStockNotificationGroups.has(groupKey)) {
+        state.expandedStockNotificationGroups.delete(groupKey);
+    } else {
+        state.expandedStockNotificationGroups.add(groupKey);
+    }
+    renderStockNotifications();
 }
 
 async function openStockNotificationDetails(id) {

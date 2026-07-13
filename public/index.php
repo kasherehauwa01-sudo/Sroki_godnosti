@@ -249,7 +249,7 @@ declare(strict_types=1);
                     </div>
                     <div class="table-wrap">
                         <table>
-                            <thead><tr><th>Склад</th><th>Партий</th><th>Заполнено</th><th>Статус</th><th>Последнее изменение</th><th>Действия</th></tr></thead>
+                            <thead><tr><th>Дата отправки</th><th>Тип события</th><th>Склад</th><th>Партий</th><th>Заполнено</th><th>Статус</th><th>Последнее изменение</th><th>Действия</th></tr></thead>
                             <tbody id="stockNotificationsBody"></tbody>
                         </table>
                     </div>
