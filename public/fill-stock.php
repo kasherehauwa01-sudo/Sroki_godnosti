@@ -75,7 +75,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
                 <tr>
                     <td>${escapeHtml(item.article)}</td>
                     <td>${escapeHtml(item.name || item.code || '')}</td>
-                    <td><input name="quantity_${item.id}" data-item-id="${item.id}" min="0" step="1" type="number" value="${Number(item.quantity || 0)}" required></td>
+                    <td><input name="quantity_${item.id}" data-item-id="${item.id}" min="0" step="1" type="number" value="${item.quantity === null || item.quantity === undefined ? '' : Number(item.quantity)}" required></td>
                 </tr>
             `).join('');
             form.classList.remove('hidden');
@@ -87,8 +87,9 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
         event.preventDefault();
         const quantities = {};
         for (const input of document.querySelectorAll('[data-item-id]')) {
-            if (!/^\d+$/.test(input.value) || Number(input.value) < 0) {
-                document.querySelector('#stockFormError').textContent = 'Остаток должен быть целым числом больше или равным 0.';
+            if (input.value.trim() === '' || !/^\d+$/.test(input.value) || Number(input.value) < 0) {
+                document.querySelector('#stockFormError').textContent = 'Заполните остатки по всем партиям. Если остатка нет, укажите 0.';
+                input.focus();
                 return;
             }
             quantities[input.dataset.itemId] = Number(input.value);
