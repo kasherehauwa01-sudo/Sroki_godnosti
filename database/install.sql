@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS batches (
     expiry_invalid TINYINT(1) NOT NULL DEFAULT 0,
     expiry_raw VARCHAR(32) NULL,
     days_left INT NOT NULL DEFAULT 0,
-    status ENUM('В наличии', 'Реализована', 'Списана') NOT NULL DEFAULT 'В наличии',
+    status ENUM('В наличии', 'Реализована', 'Списана', 'Нет в наличии') NOT NULL DEFAULT 'В наличии',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     INDEX idx_batches_article (article),
