@@ -618,7 +618,14 @@ function notifyMissingExpiryFilterProducts(PDO $pdo, array $codes): array
         . implode("\n", $codes);
 
     try {
-        sendNotificationEmail($pdo, $recipients, 'Товары без фильтра "Срок годности"', $body, $settings);
+        sendNotificationEmail(
+            $pdo,
+            $recipients,
+            'Товары без фильтра "Срок годности"',
+            $body,
+            $settings,
+            [missingExpiryFilterCodesXlsAttachment($codes)]
+        );
         writeMissingFilterLog($pdo, $codes, $recipients, 'SUCCESS', '');
 
         return ['status' => 'sent', 'count' => count($codes), 'recipients' => $recipients];
@@ -627,6 +634,19 @@ function notifyMissingExpiryFilterProducts(PDO $pdo, array $codes): array
 
         return ['status' => 'error', 'count' => count($codes), 'message' => $error->getMessage()];
     }
+}
+
+function missingExpiryFilterCodesXlsAttachment(array $codes): array
+{
+    $rows = array_map(static function (string $code): string {
+        return '<tr><td>' . htmlspecialchars($code, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td></tr>';
+    }, array_values($codes));
+
+    return [
+        'filename' => 'xls для 1с.xls',
+        'content_type' => 'application/vnd.ms-excel; charset=UTF-8',
+        'content' => "<html><head><meta charset=\"UTF-8\"></head><body><table><tr><td></td></tr>" . implode('', $rows) . "</table></body></html>",
+    ];
 }
 
 function writeMissingFilterLog(PDO $pdo, array $codes, array $recipients, string $status, string $error): void
