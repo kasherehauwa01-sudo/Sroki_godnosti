@@ -1634,7 +1634,8 @@ function renderPurchaseRecipients() {
     qsa('.delete-purchase-recipient-button').forEach((button) => button.addEventListener('click', () => deletePurchaseRecipient(button.dataset.id)));
 }
 
-function openPurchaseRecipientDialog() {
+function openPurchaseRecipientDialog(event = null) {
+    event?.preventDefault();
     setValueIfPresent('#purchaseRecipientName', '');
     setValueIfPresent('#purchaseRecipientEmail', '');
     setTextIfPresent('#purchaseRecipientError', '');
@@ -1666,6 +1667,16 @@ async function submitPurchaseRecipient(event) {
     } catch (error) {
         setTextIfPresent('#purchaseRecipientError', error.message);
     }
+}
+
+function bindPurchaseRecipientEvents() {
+    const openButton = qs('#openPurchaseRecipientButton');
+    if (!openButton || openButton.dataset.purchaseRecipientBound === '1') return;
+    openButton.dataset.purchaseRecipientBound = '1';
+    openButton.addEventListener('click', openPurchaseRecipientDialog);
+    qs('#purchaseRecipientForm')?.addEventListener('submit', submitPurchaseRecipient);
+    qs('#closePurchaseRecipientDialogButton')?.addEventListener('click', closePurchaseRecipientDialog);
+    qs('#cancelPurchaseRecipientButton')?.addEventListener('click', closePurchaseRecipientDialog);
 }
 
 async function deletePurchaseRecipient(id) {
@@ -2056,6 +2067,8 @@ async function importRowsInChunks(rows, chunkSize = 100) {
 }
 
 function bindEvents() {
+    bindPurchaseRecipientEvents();
+
     qsa('.tab').forEach((button) => button.addEventListener('click', async () => {
         const targetTab = button.dataset.tab;
         const currentTab = document.body.dataset.activeTab;
