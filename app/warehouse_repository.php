@@ -538,6 +538,7 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
             'INSERT INTO stock_change_logs (notification_id, warehouse_id, batch_id, old_quantity, new_quantity, ip, user_agent)
              VALUES (:notification_id, :warehouse_id, :batch_id, :old_quantity, :new_quantity, :ip, :user_agent)'
         );
+        $submittedBatchIds = [];
         foreach ($quantities as $itemId => $quantity) {
             $itemId = (int)$itemId;
             if (!isset($itemsById[$itemId]) || empty($itemsById[$itemId]['batch_id'])) {
@@ -551,11 +552,13 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
                 throw new InvalidArgumentException('Заполните остатки по всем партиям целыми числами больше или равными 0.');
             }
             $oldQuantity = (int)$itemsById[$itemId]['quantity'];
+            $batchId = (int)$itemsById[$itemId]['batch_id'];
             $upsert->execute([
-                ':batch_id' => (int)$itemsById[$itemId]['batch_id'],
+                ':batch_id' => $batchId,
                 ':warehouse_id' => (int)$notification['warehouse_id'],
                 ':quantity' => $newQuantity,
             ]);
+            $submittedBatchIds[] = $batchId;
             if ($oldQuantity !== $newQuantity) {
                 $log->execute([
                     ':notification_id' => (int)$notification['id'],
@@ -569,6 +572,9 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
             }
         }
         updateStockNotificationProgress($pdo, (int)$notification['id']);
+        if (function_exists('maybeSendPurchaseNotifications')) {
+            maybeSendPurchaseNotifications($pdo, $notification, $submittedBatchIds);
+        }
         $pdo->commit();
     } catch (Throwable $error) {
         $pdo->rollBack();

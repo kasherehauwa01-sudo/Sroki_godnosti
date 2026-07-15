@@ -214,3 +214,29 @@ CREATE TABLE IF NOT EXISTS stock_batch_notification_views (
     PRIMARY KEY (batch_id),
     CONSTRAINT fk_stock_batch_views_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_notification_recipients (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    full_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_purchase_recipient_email (email),
+    INDEX idx_purchase_recipient_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_notification_log (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    batch_id BIGINT UNSIGNED NOT NULL,
+    event_days INT NOT NULL,
+    sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    recipients JSON NULL,
+    status ENUM('SUCCESS', 'ERROR') NOT NULL,
+    error_message TEXT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_purchase_batch_event (batch_id, event_days),
+    INDEX idx_purchase_log_status (status),
+    CONSTRAINT fk_purchase_log_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -177,6 +177,12 @@ declare(strict_types=1);
                     <div class="notification-history-list" id="notificationHistoryList" aria-live="polite">Уведомления пока не отправлялись.</div>
                 </div>
 
+                <div class="card form purchase-recipients-card">
+                    <h3>Настройка уведомлений Отделу закупок</h3>
+                    <div class="notification-history-list" id="purchaseRecipientsList" aria-live="polite">Получатели пока не добавлены.</div>
+                    <button class="ghost-button" id="openPurchaseRecipientButton" formnovalidate type="button">Добавить получателя</button>
+                </div>
+
                 <div class="card form missing-filter-card">
                     <h3>Уведомления «Товар без фильтров»</h3>
                     <label>Получатели<textarea id="missingFilterEmails" rows="5" placeholder="ivan@mail.ru&#10;petrov@mail.ru"></textarea></label>
@@ -633,6 +639,7 @@ declare(strict_types=1);
                 </table>
             </div>
             <div class="modal-actions">
+                <button class="ghost-button" id="downloadBatchStockXlsxButton" type="button">Скачать XLS</button>
                 <button class="ghost-button" id="writeOffStockBatchButton" type="button">Сменить статус</button>
                 <div class="stock-status-actions" id="stockStatusActions" hidden>
                     <label>Новый статус
@@ -697,6 +704,23 @@ declare(strict_types=1);
                 <button class="primary" id="confirmNotificationDialogButton" type="button">Закрыть</button>
             </div>
         </div>
+    </dialog>
+
+
+    <dialog class="modal" id="purchaseRecipientDialog">
+        <form class="card form modal-card" id="purchaseRecipientForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Получатель отдела закупок</h2>
+                <button class="icon-button" id="closePurchaseRecipientDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <label>ФИО<input id="purchaseRecipientName" required autocomplete="name"></label>
+            <label>Email<input id="purchaseRecipientEmail" required autocomplete="email" type="email"></label>
+            <p class="field-error" id="purchaseRecipientError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelPurchaseRecipientButton" type="button">Отмена</button>
+                <button class="primary" type="submit">ОК</button>
+            </div>
+        </form>
     </dialog>
 
     <dialog class="modal" id="deleteArticlesDialog">

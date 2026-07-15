@@ -2,7 +2,7 @@ const state = {
     batches: [],
     filteredBatches: [],
     importRows: [],
-    settings: { emails: [], rules: [] },
+    settings: { emails: [], rules: [], purchase_recipients: [] },
     history: [],
     allHistory: [],
     notificationDetails: '',
@@ -106,8 +106,8 @@ async function copyDeployCommand() {
 }
 
 function getApiMethod(action, data = {}) {
-    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed']);
+    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_delete']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -694,7 +694,7 @@ async function openBatchStockDialog(id, options = {}) {
     qs('#batchStockMeta').textContent = `${batch.code ? `Код: ${batch.code}. ` : ''}${batch.name || ''}`;
     qs('#batchStockBody').innerHTML = '<tr><td colspan="2">Загрузка...</td></tr>';
     qs('#batchStockTotal').textContent = '0';
-    state.selectedStockBatchId = options.showWriteOff ? String(id) : null;
+    state.selectedStockBatchId = String(id);
     resetBatchStockStatusControls(batch.status);
     qs('#writeOffStockBatchButton').classList.toggle('hidden', !options.showWriteOff);
     qs('#batchStockDialog').showModal();
@@ -1603,6 +1603,7 @@ function renderSettings() {
     setValueIfPresent('#notificationTime', settings.notification_time || '09:00');
     setValueIfPresent('#missingFilterEmails', (settings.missing_filter_emails || []).join('\n'));
     renderNotificationHistory(settings.notification_history || []);
+    renderPurchaseRecipients();
 
     const autoImport = settings.auto_import || {};
     setTextIfPresent('#autoImportLastDate', autoImport.last_date || 'Не выполнялось');
@@ -1616,6 +1617,73 @@ function renderSettings() {
     setTextIfPresent('#systemLastSent', system.last_sent || 'Не выполнялось');
     setTextIfPresent('#systemSmtpStatus', system.smtp_status || 'Не выполнялось');
     state.settingsDirty = false;
+}
+
+
+function renderPurchaseRecipients() {
+    const container = qs('#purchaseRecipientsList');
+    if (!container) return;
+    const recipients = state.settings?.purchase_recipients || [];
+    container.innerHTML = recipients.map((recipient) => `
+        <article class="notification-history-item purchase-recipient-item">
+            <p><strong>${escapeHtml(recipient.full_name)}</strong></p>
+            <p>${escapeHtml(recipient.email)}</p>
+            <button class="small-button danger delete-purchase-recipient-button" data-id="${recipient.id}" type="button">Удалить</button>
+        </article>
+    `).join('') || 'Получатели пока не добавлены.';
+    qsa('.delete-purchase-recipient-button').forEach((button) => button.addEventListener('click', () => deletePurchaseRecipient(button.dataset.id)));
+}
+
+function openPurchaseRecipientDialog() {
+    setValueIfPresent('#purchaseRecipientName', '');
+    setValueIfPresent('#purchaseRecipientEmail', '');
+    setTextIfPresent('#purchaseRecipientError', '');
+    qs('#purchaseRecipientDialog').showModal();
+    focusIfPresent('#purchaseRecipientName');
+}
+
+function closePurchaseRecipientDialog() {
+    qs('#purchaseRecipientDialog').close();
+}
+
+async function submitPurchaseRecipient(event) {
+    event.preventDefault();
+    const fullName = qs('#purchaseRecipientName').value.trim();
+    const email = qs('#purchaseRecipientEmail').value.trim();
+    if (!fullName || !email) {
+        setTextIfPresent('#purchaseRecipientError', 'Заполните ФИО и email.');
+        return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setTextIfPresent('#purchaseRecipientError', 'Укажите корректный email.');
+        return;
+    }
+    try {
+        const result = await api('purchase_recipient_create', { settings_password: state.settingsPassword, full_name: fullName, email });
+        state.settings.purchase_recipients = result.recipients || [];
+        renderPurchaseRecipients();
+        closePurchaseRecipientDialog();
+    } catch (error) {
+        setTextIfPresent('#purchaseRecipientError', error.message);
+    }
+}
+
+async function deletePurchaseRecipient(id) {
+    try {
+        const result = await api('purchase_recipient_delete', { settings_password: state.settingsPassword, id });
+        state.settings.purchase_recipients = result.recipients || [];
+        renderPurchaseRecipients();
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+function downloadBatchStockXlsx() {
+    if (!state.selectedStockBatchId) return;
+    const url = new URL('api.php', window.location.href);
+    url.searchParams.set('action', 'batch_stock_xlsx');
+    url.searchParams.set('batch_id', state.selectedStockBatchId);
+    window.location.href = url.toString();
 }
 
 function renderNotificationHistory(history) {
@@ -2017,6 +2085,10 @@ function bindEvents() {
     qsa('.help-subtab').forEach((button) => button.addEventListener('click', () => switchHelpTab(button.dataset.helpTab)));
 
     qs('#openTestStockFillButton').addEventListener('click', openTestStockFillDialog);
+    qs('#openPurchaseRecipientButton').addEventListener('click', openPurchaseRecipientDialog);
+    qs('#purchaseRecipientForm').addEventListener('submit', submitPurchaseRecipient);
+    qs('#closePurchaseRecipientDialogButton').addEventListener('click', closePurchaseRecipientDialog);
+    qs('#cancelPurchaseRecipientButton').addEventListener('click', closePurchaseRecipientDialog);
     qs('#testStockFillForm').addEventListener('submit', submitTestStockFillForm);
     qs('#closeTestStockFillDialogButton').addEventListener('click', closeTestStockFillDialog);
     qs('#cancelTestStockFillButton').addEventListener('click', closeTestStockFillDialog);
@@ -2027,6 +2099,7 @@ function bindEvents() {
     qs('#writeOffStockBatchButton').addEventListener('click', showBatchStockStatusControls);
     qs('#cancelBatchStockStatusButton').addEventListener('click', () => resetBatchStockStatusControls());
     qs('#saveBatchStockStatusButton').addEventListener('click', saveSelectedStockBatchStatus);
+    qs('#downloadBatchStockXlsxButton').addEventListener('click', downloadBatchStockXlsx);
     qs('#openWarehouseDialogButton').addEventListener('click', () => openWarehouseDialog());
     qs('#warehouseForm').addEventListener('submit', submitWarehouseForm);
     qs('#closeWarehouseDialogButton').addEventListener('click', closeWarehouseDialog);
@@ -2207,6 +2280,8 @@ function startSchedulerHeartbeat() {
 async function bootstrap() {
     try {
         await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
+        const batchId = new URLSearchParams(window.location.search).get('batch_id');
+        if (batchId) openBatchStockDialog(batchId, { showWriteOff: true });
         showToast('Данные обновлены.');
     } catch (error) {
         showToast(error.message, true);
