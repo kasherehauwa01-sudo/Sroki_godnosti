@@ -2,7 +2,7 @@ const state = {
     batches: [],
     filteredBatches: [],
     importRows: [],
-    settings: { emails: [], rules: [] },
+    settings: { emails: [], rules: [], purchase_recipients: [] },
     history: [],
     allHistory: [],
     notificationDetails: '',
@@ -17,12 +17,14 @@ const state = {
     warehouses: [],
     editingWarehouseId: null,
     stockNotifications: [],
+    expandedStockNotificationGroups: new Set(),
     stockBatchNotifications: [],
     selectedStockBatchId: null,
     events: [],
+    eventPeriodFilters: new Set(['today', 'future']),
 };
 
-const statusOptions = ['В наличии', 'Реализована', 'Списана'];
+const statusOptions = ['В наличии', 'Реализована', 'Списана', 'Нет в наличии'];
 
 const qs = (selector) => document.querySelector(selector);
 const qsa = (selector) => [...document.querySelectorAll(selector)];
@@ -104,8 +106,8 @@ async function copyDeployCommand() {
 }
 
 function getApiMethod(action, data = {}) {
-    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed']);
+    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_delete']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -444,7 +446,6 @@ function normalizeSpreadsheetRowEncoding(row) {
 function normalizeBatch(row) {
     const codeRaw = getRowValue(row, ['code', 'Код', 'Код товара']);
     const nameRaw = getRowValue(row, ['name', 'Наименование', 'Название']);
-    const quantityRaw = getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']);
     const expiryRawValue = getRowValue(row, ['expiryRaw', 'expiry_raw', 'expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности до.', 'Срок годности', 'Годен до', 'Срокгодностидо']);
     const expiryInfo = expiryDateInfo(expiryRawValue);
     const serverInvalid = row.expiryInvalid ?? row.expiry_invalid;
@@ -460,8 +461,6 @@ function normalizeBatch(row) {
         article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара', 'Артикул.'])).trim(),
         code: String(codeRaw || '').trim(),
         name: String(nameRaw || '').trim(),
-        quantity: Number(quantityRaw || 0),
-        hasQuantity: String(quantityRaw).trim() !== '',
         expiryDate: toExpiryDateValue(expiryRawValue),
         expiryFullDate,
         expiryRaw: String(getRowValue(row, ['expiryRaw', 'expiry_raw']) || (expiryInvalid ? expiryInfo.raw : '') || '').trim(),
@@ -630,11 +629,16 @@ function sortRegistryRows() {
 
     const multiplier = direction === 'desc' ? -1 : 1;
     state.filteredBatches.sort((left, right) => {
-        const leftWrittenOff = left.status === 'Списана';
-        const rightWrittenOff = right.status === 'Списана';
-        if (leftWrittenOff !== rightWrittenOff) {
-            // Списанные партии всегда показываем в конце реестра независимо от выбранной сортировки.
-            return leftWrittenOff ? 1 : -1;
+        const terminalStatusRank = (status) => {
+            if (status === 'Нет в наличии') return 2;
+            if (status === 'Списана') return 1;
+            return 0;
+        };
+        const leftStatusRank = terminalStatusRank(left.status);
+        const rightStatusRank = terminalStatusRank(right.status);
+        if (leftStatusRank !== rightStatusRank) {
+            // Партии без наличия и списанные партии всегда показываем в конце реестра независимо от выбранной сортировки.
+            return leftStatusRank - rightStatusRank;
         }
 
         if (field === 'daysLeft') {
@@ -644,9 +648,6 @@ function sortRegistryRows() {
         }
         if (field === 'article') {
             return String(left.article || '').localeCompare(String(right.article || ''), 'ru', { numeric: true }) * multiplier;
-        }
-        if (field === 'quantity') {
-            return (Number(left.quantity || 0) - Number(right.quantity || 0)) * multiplier;
         }
 
         return toDateInputValue(left[field]).localeCompare(toDateInputValue(right[field])) * multiplier;
@@ -693,7 +694,8 @@ async function openBatchStockDialog(id, options = {}) {
     qs('#batchStockMeta').textContent = `${batch.code ? `Код: ${batch.code}. ` : ''}${batch.name || ''}`;
     qs('#batchStockBody').innerHTML = '<tr><td colspan="2">Загрузка...</td></tr>';
     qs('#batchStockTotal').textContent = '0';
-    state.selectedStockBatchId = options.showWriteOff ? String(id) : null;
+    state.selectedStockBatchId = String(id);
+    resetBatchStockStatusControls(batch.status);
     qs('#writeOffStockBatchButton').classList.toggle('hidden', !options.showWriteOff);
     qs('#batchStockDialog').showModal();
 
@@ -702,7 +704,7 @@ async function openBatchStockDialog(id, options = {}) {
         const items = result.stock?.items || [];
         const total = Number(result.stock?.total || 0);
         qs('#batchStockBody').innerHTML = items.map((item) => `
-            <tr><td>${escapeHtml(item.name)}</td><td class="numeric-cell">${formatQuantity(item.quantity)}</td></tr>
+            <tr><td>${escapeHtml(item.name)}</td><td class="numeric-cell">${formatOptionalQuantity(item.quantity)}</td></tr>
         `).join('') || '<tr><td colspan="2">Активные склады не найдены.</td></tr>';
         qs('#batchStockTotal').textContent = formatQuantity(total);
         if (options.markViewed) {
@@ -715,12 +717,42 @@ async function openBatchStockDialog(id, options = {}) {
 }
 
 function closeBatchStockDialog() {
+    resetBatchStockStatusControls();
     qs('#batchStockDialog').close();
+}
+
+function resetBatchStockStatusControls(status = '') {
+    setValueIfPresent('#batchStockStatusSelect', statusOptions.includes(status) ? status : statusOptions[0]);
+    const actions = qs('#stockStatusActions');
+    if (actions) actions.hidden = true;
+}
+
+function showBatchStockStatusControls() {
+    const batch = state.batches.find((item) => String(item.id) === String(state.selectedStockBatchId));
+    if (!batch) {
+        showToast('Партия не найдена в реестре.', true);
+        return;
+    }
+    if (!state.writeOffAccessGranted) {
+        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        openWriteOffPasswordDialog();
+        return;
+    }
+
+    // Пользователь выбирает новый статус прямо в окне остатков, без ручного ввода через prompt.
+    setValueIfPresent('#batchStockStatusSelect', batch.status || statusOptions[0]);
+    const actions = qs('#stockStatusActions');
+    if (actions) actions.hidden = false;
+    focusIfPresent('#batchStockStatusSelect');
 }
 
 function formatQuantity(value) {
     const number = Number(value || 0);
     return Number.isInteger(number) ? String(number) : number.toLocaleString('ru-RU', { maximumFractionDigits: 3 });
+}
+
+function formatOptionalQuantity(value) {
+    return value === null || value === undefined || value === '' ? '—' : formatQuantity(value);
 }
 
 function openEditDialog(id) {
@@ -731,7 +763,6 @@ function openEditDialog(id) {
     qs('#editArticle').value = batch.article;
     qs('#editCode').value = batch.code || '';
     qs('#editName').value = batch.name || '';
-    qs('#editQuantity').value = batch.quantity;
     qs('#editExpiryDate').value = batch.expiryInvalid ? (batch.expiryRaw || formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate)) : formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate);
     qs('#editStatus').value = batch.status;
     qs('#editCreatedAt').value = batch.createdAt;
@@ -750,7 +781,6 @@ function createBatchRow(values = {}) {
         <label>Артикул<input class="batch-row-article" required autocomplete="off" value="${escapeHtml(values.article || '')}"></label>
         <label>Код<input class="batch-row-code" autocomplete="off" value="${escapeHtml(values.code || '')}"></label>
         <label>Наименование<input class="batch-row-name" autocomplete="off" value="${escapeHtml(values.name || '')}"></label>
-        <label>Количество в партии<input class="batch-row-quantity" required min="0" step="1" type="number" value="${escapeHtml(values.quantity ?? '')}"></label>
         <label>Срок годности<input class="batch-row-expiry" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10" value="${escapeHtml(values.expiryDate || '')}"></label>
         <button class="small-button danger remove-batch-row-button" type="button" aria-label="Удалить строку">🗑️</button>
     `;
@@ -788,7 +818,6 @@ function collectBatchRows() {
         code: row.querySelector('.batch-row-code').value,
         name: row.querySelector('.batch-row-name').value,
         createdSource: 'Ручной',
-        quantity: row.querySelector('.batch-row-quantity').value,
         expiryDate: row.querySelector('.batch-row-expiry').value,
     }));
 }
@@ -1037,28 +1066,51 @@ async function loadEvents() {
     renderEvents();
 }
 
+function eventPeriod(eventDate) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const date = new Date(`${eventDate}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return 'future';
+    if (date < today) return 'past';
+    if (date > today) return 'future';
+    return 'today';
+}
+
+function filteredEvents() {
+    return state.events.filter((event) => state.eventPeriodFilters.has(eventPeriod(event.event_date)));
+}
+
 function renderEvents() {
     const body = qs('#eventsBody');
     if (!body) return;
-    body.innerHTML = state.events.map((event) => `
-        <tr data-event-id="${event.id}">
-            <td>${escapeHtml(event.article)}</td>
-            <td>${escapeHtml(event.code || '')}</td>
-            <td>${escapeHtml(event.name || '')}</td>
-            <td>${escapeHtml(formatExpiryMonthRu(event.expiry_date, event.expiry_full_date))}</td>
+    const events = filteredEvents();
+    body.innerHTML = events.map((event) => `
+        <tr data-event-id="${escapeHtml(event.id)}">
             <td>${Number(event.event_type)} день</td>
+            <td>${escapeHtml(formatDateRu(event.event_date))}</td>
+            <td>${Number(event.batch_count || 0)}</td>
         </tr>
-    `).join('') || '<tr><td colspan="5">Событий нет.</td></tr>';
+    `).join('') || '<tr><td colspan="3">Событий нет.</td></tr>';
     qsa('[data-event-id]').forEach((row) => row.addEventListener('click', () => openEventDetails(row.dataset.eventId)));
 }
 
 function openEventDetails(id) {
     const event = state.events.find((item) => String(item.id) === String(id));
     if (!event) return;
-    showNotificationDialog(
-        `Артикул: ${event.article}\nКод: ${event.code || ''}\nНаименование: ${event.name || ''}\nСрок годности: ${formatExpiryMonthRu(event.expiry_date, event.expiry_full_date)}\nТип события: ${event.event_type} день`,
-        'Событие партии'
-    );
+    qs('#eventBatchesDialogTitle').textContent = `${Number(event.event_type)} день — ${formatDateRu(event.event_date)}`;
+    qs('#eventBatchesDialogMeta').textContent = `Партий в событии: ${Number(event.batch_count || 0)}`;
+    qs('#eventBatchesBody').innerHTML = (event.batches || []).map((batch) => `
+        <tr>
+            <td>${escapeHtml(batch.article || '')}</td>
+            <td>${escapeHtml(batch.code || '')}</td>
+            <td>${escapeHtml(batch.name || '')}</td>
+        </tr>
+    `).join('') || '<tr><td colspan="3">Партий нет.</td></tr>';
+    qs('#eventBatchesDialog').showModal();
+}
+
+function closeEventBatchesDialog() {
+    qs('#eventBatchesDialog').close();
 }
 
 async function loadStockBatchNotifications() {
@@ -1078,14 +1130,15 @@ function renderStockBatchNotifications() {
             <td>${escapeHtml(notification.code || '')}</td>
             <td>${escapeHtml(notification.name || '')}</td>
             <td>${formatQuantity(notification.total_stock || 0)}</td>
+            <td>${Number(notification.filled_warehouse_count || 0)} из ${Number(notification.active_warehouse_count || 0)}</td>
             <td>${escapeHtml(notification.status || '')}</td>
             <td>${escapeHtml(notification.last_stock_at || '—')}</td>
         </tr>
-    `).join('') || '<tr><td colspan="6">Остатков по партиям пока нет.</td></tr>';
+    `).join('') || '<tr><td colspan="7">Остатков по партиям пока нет.</td></tr>';
     qsa('[data-stock-batch-id]').forEach((row) => row.addEventListener('click', () => openBatchStockDialog(row.dataset.stockBatchId, { markViewed: true, showWriteOff: true })));
 }
 
-async function writeOffSelectedStockBatch() {
+async function saveSelectedStockBatchStatus() {
     const batch = state.batches.find((item) => String(item.id) === String(state.selectedStockBatchId));
     if (!batch) {
         showToast('Партия не найдена в реестре.', true);
@@ -1096,8 +1149,7 @@ async function writeOffSelectedStockBatch() {
         openWriteOffPasswordDialog();
         return;
     }
-    const status = prompt('Введите новый статус партии: В наличии, Реализована или Списана', batch.status || 'Списана');
-    if (status === null) return;
+    const status = qs('#batchStockStatusSelect').value;
     if (!statusOptions.includes(status)) {
         showToast('Недопустимый статус партии.', true);
         return;
@@ -1105,7 +1157,7 @@ async function writeOffSelectedStockBatch() {
     try {
         await api('update', { ...batch, status, write_off_password: state.writeOffPassword });
         showToast('Статус партии обновлен.');
-        qs('#batchStockDialog').close();
+        closeBatchStockDialog();
         await Promise.all([loadBatches(), loadStockBatchNotifications(), loadHistory()]);
     } catch (error) {
         showToast(error.message, true);
@@ -1118,20 +1170,77 @@ async function loadStockNotifications() {
     renderStockNotifications();
 }
 
+function stockNotificationEventType(notification) {
+    const match = String(notification.event_key || '').match(/expiry_(\d+)/);
+    if (match) return `${match[1]} день`;
+    return notification.subject || 'Событие не указано';
+}
+
+function stockNotificationSentAt(notification) {
+    return notification.sent_at || notification.created_at || '';
+}
+
+function stockNotificationGroupKey(notification) {
+    const sentAt = stockNotificationSentAt(notification).slice(0, 16);
+    return `${sentAt}|${notification.event_key || notification.subject || ''}`;
+}
+
+function groupedStockNotifications() {
+    const groups = new Map();
+    state.stockNotifications.forEach((notification) => {
+        const key = stockNotificationGroupKey(notification);
+        if (!groups.has(key)) {
+            groups.set(key, {
+                key,
+                sentAt: stockNotificationSentAt(notification),
+                eventType: stockNotificationEventType(notification),
+                notifications: [],
+            });
+        }
+        groups.get(key).notifications.push(notification);
+    });
+    return [...groups.values()];
+}
+
 function renderStockNotifications() {
     const body = qs('#stockNotificationsBody');
     if (!body) return;
-    body.innerHTML = state.stockNotifications.map((notification) => `
-        <tr>
-            <td>${escapeHtml(notification.warehouse)}</td>
-            <td>${Number(notification.total_items || 0)} партий</td>
-            <td>${Number(notification.filled_items || 0)} заполнено</td>
-            <td>${escapeHtml(notification.status)}</td>
-            <td>${escapeHtml(notification.last_changed_at || '—')}</td>
-            <td><button class="small-button stock-notification-details-button" data-id="${notification.id}" type="button">Открыть</button></td>
-        </tr>
-    `).join('') || '<tr><td colspan="6">Уведомлений по заполнению остатков пока нет.</td></tr>';
+    const groups = groupedStockNotifications();
+    body.innerHTML = groups.map((group) => {
+        const expanded = state.expandedStockNotificationGroups.has(group.key);
+        const warehouses = group.notifications.map((notification) => `
+            <tr class="stock-notification-child-row">
+                <td></td>
+                <td></td>
+                <td>${escapeHtml(notification.warehouse)}</td>
+                <td>${Number(notification.total_items || 0)} партий</td>
+                <td>${Number(notification.filled_items || 0)} заполнено</td>
+                <td>${escapeHtml(notification.status)}</td>
+                <td>${escapeHtml(notification.last_changed_at || '—')}</td>
+                <td><button class="small-button stock-notification-details-button" data-id="${notification.id}" type="button">Открыть</button></td>
+            </tr>
+        `).join('');
+        return `
+            <tr class="stock-notification-group-row">
+                <td>${escapeHtml(formatDateTimeRu(group.sentAt))}</td>
+                <td>${escapeHtml(group.eventType)}</td>
+                <td colspan="5">Складов: ${group.notifications.length}</td>
+                <td><button class="small-button stock-notification-group-toggle" data-group-key="${escapeHtml(group.key)}" type="button">${expanded ? 'Свернуть' : 'Развернуть'}</button></td>
+            </tr>
+            ${expanded ? warehouses : ''}
+        `;
+    }).join('') || '<tr><td colspan="8">Уведомлений по заполнению остатков пока нет.</td></tr>';
+    qsa('.stock-notification-group-toggle').forEach((button) => button.addEventListener('click', () => toggleStockNotificationGroup(button.dataset.groupKey)));
     qsa('.stock-notification-details-button').forEach((button) => button.addEventListener('click', () => openStockNotificationDetails(button.dataset.id)));
+}
+
+function toggleStockNotificationGroup(groupKey) {
+    if (state.expandedStockNotificationGroups.has(groupKey)) {
+        state.expandedStockNotificationGroups.delete(groupKey);
+    } else {
+        state.expandedStockNotificationGroups.add(groupKey);
+    }
+    renderStockNotifications();
 }
 
 async function openStockNotificationDetails(id) {
@@ -1170,6 +1279,17 @@ function switchSettingsTab(tabName) {
     });
     qsa('[data-settings-panel]').forEach((panel) => {
         const isActive = panel.dataset.settingsPanel === tabName;
+        panel.classList.toggle('active', isActive);
+        panel.hidden = !isActive;
+    });
+}
+
+function switchHelpTab(tabName) {
+    qsa('.help-subtab').forEach((button) => {
+        button.classList.toggle('active', button.dataset.helpTab === tabName);
+    });
+    qsa('[data-help-panel]').forEach((panel) => {
+        const isActive = panel.dataset.helpPanel === tabName;
         panel.classList.toggle('active', isActive);
         panel.hidden = !isActive;
     });
@@ -1313,10 +1433,9 @@ function formatHistoryBatch(batch) {
     const expiry = batch.expiry_date || batch.expiryDate
         ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate, batch.expiry_full_date || batch.expiryFullDate)}`
         : 'без указанного срока годности';
-    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
     const status = batch.status ? `, статус «${batch.status}»` : '';
 
-    return `партия ${article}${code}${name} ${expiry}${quantity}${status}`;
+    return `партия ${article}${code}${name} ${expiry}${status}`;
 }
 
 function formatHistoryBatchList(batches) {
@@ -1332,9 +1451,6 @@ function formatChangedFields(before, after) {
     }
     if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
         changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date, before.expiry_full_date)} на ${formatExpiryMonthRu(after.expiry_date, after.expiry_full_date)}`);
-    }
-    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
-        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
     }
     if (before.status && after.status && before.status !== after.status) {
         changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
@@ -1382,6 +1498,24 @@ function formatHistoryDetails(action, payload) {
         return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
     }
 
+    if (action === 'delete_by_articles') {
+        const articles = (parsed.articles || []).join(', ') || 'не указаны';
+        return `Удаление по артикулам: ${articles}. Удалено партий: ${Number(parsed.deleted || 0)}.`;
+    }
+
+    if (action === 'delete_by_articles_no_matches') {
+        const articles = (parsed.articles || []).join(', ') || 'не указаны';
+        return `Удаление по артикулам: ${articles}. Совпадений не найдено.`;
+    }
+
+    if (action === 'expiry_notifications_sent') {
+        return `Уведомления отправлены. Получатели: ${(parsed.recipients || []).join(', ') || 'не указаны'}. Партий: ${Number(parsed.count || parsed.batches?.length || 0)}.`;
+    }
+
+    if (action === 'expiry_notifications_failed') {
+        return `Ошибка отправки уведомлений. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
+
     if (parsed.text) return parsed.text;
 
     // Запасной вариант нужен для старых записей истории со служебными полями.
@@ -1390,12 +1524,16 @@ function formatHistoryDetails(action, payload) {
 
 async function loadHistory() {
     const result = await api('logs');
-    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found']);
+    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'delete_by_articles', 'delete_by_articles_no_matches', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found', 'expiry_notifications_sent', 'expiry_notifications_failed', 'expiry_check_no_matches', 'expiry_check_skipped']);
     state.allHistory = (result.logs || []).filter((log) => registryActions.has(log.event || log.action));
     renderHistory();
 }
 
 function getDateRangeByPreset(preset) {
+    if (preset === 'all') {
+        return { start: null, end: null };
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const start = new Date(today);
@@ -1465,6 +1603,7 @@ function renderSettings() {
     setValueIfPresent('#notificationTime', settings.notification_time || '09:00');
     setValueIfPresent('#missingFilterEmails', (settings.missing_filter_emails || []).join('\n'));
     renderNotificationHistory(settings.notification_history || []);
+    renderPurchaseRecipients();
 
     const autoImport = settings.auto_import || {};
     setTextIfPresent('#autoImportLastDate', autoImport.last_date || 'Не выполнялось');
@@ -1478,6 +1617,73 @@ function renderSettings() {
     setTextIfPresent('#systemLastSent', system.last_sent || 'Не выполнялось');
     setTextIfPresent('#systemSmtpStatus', system.smtp_status || 'Не выполнялось');
     state.settingsDirty = false;
+}
+
+
+function renderPurchaseRecipients() {
+    const container = qs('#purchaseRecipientsList');
+    if (!container) return;
+    const recipients = state.settings?.purchase_recipients || [];
+    container.innerHTML = recipients.map((recipient) => `
+        <article class="notification-history-item purchase-recipient-item">
+            <p><strong>${escapeHtml(recipient.full_name)}</strong></p>
+            <p>${escapeHtml(recipient.email)}</p>
+            <button class="small-button danger delete-purchase-recipient-button" data-id="${recipient.id}" type="button">Удалить</button>
+        </article>
+    `).join('') || 'Получатели пока не добавлены.';
+    qsa('.delete-purchase-recipient-button').forEach((button) => button.addEventListener('click', () => deletePurchaseRecipient(button.dataset.id)));
+}
+
+function openPurchaseRecipientDialog() {
+    setValueIfPresent('#purchaseRecipientName', '');
+    setValueIfPresent('#purchaseRecipientEmail', '');
+    setTextIfPresent('#purchaseRecipientError', '');
+    qs('#purchaseRecipientDialog').showModal();
+    focusIfPresent('#purchaseRecipientName');
+}
+
+function closePurchaseRecipientDialog() {
+    qs('#purchaseRecipientDialog').close();
+}
+
+async function submitPurchaseRecipient(event) {
+    event.preventDefault();
+    const fullName = qs('#purchaseRecipientName').value.trim();
+    const email = qs('#purchaseRecipientEmail').value.trim();
+    if (!fullName || !email) {
+        setTextIfPresent('#purchaseRecipientError', 'Заполните ФИО и email.');
+        return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setTextIfPresent('#purchaseRecipientError', 'Укажите корректный email.');
+        return;
+    }
+    try {
+        const result = await api('purchase_recipient_create', { settings_password: state.settingsPassword, full_name: fullName, email });
+        state.settings.purchase_recipients = result.recipients || [];
+        renderPurchaseRecipients();
+        closePurchaseRecipientDialog();
+    } catch (error) {
+        setTextIfPresent('#purchaseRecipientError', error.message);
+    }
+}
+
+async function deletePurchaseRecipient(id) {
+    try {
+        const result = await api('purchase_recipient_delete', { settings_password: state.settingsPassword, id });
+        state.settings.purchase_recipients = result.recipients || [];
+        renderPurchaseRecipients();
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+function downloadBatchStockXlsx() {
+    if (!state.selectedStockBatchId) return;
+    const url = new URL('api.php', window.location.href);
+    url.searchParams.set('action', 'batch_stock_xlsx');
+    url.searchParams.set('batch_id', state.selectedStockBatchId);
+    window.location.href = url.toString();
 }
 
 function renderNotificationHistory(history) {
@@ -1732,7 +1938,6 @@ function downloadTemplateXlsx() {
             Артикул: '12345',
             Код: 'K-001',
             Наименование: 'Товар',
-            Количество: 10,
             'Срок годности до': '31.12.2026',
         },
     ]);
@@ -1769,16 +1974,16 @@ function readXlsx(file) {
             const decodedRows = rawRows.map(normalizeSpreadsheetRowEncoding);
             const detectedHeaders = decodedRows[0] ? Object.keys(decodedRows[0]).join(', ') : 'не найдены';
             const normalizedRows = decodedRows.map((row) => ({ ...normalizeBatch(row), createdSource: 'Импорт xls' }));
-            state.importRows = normalizedRows.filter((row) => row.article && row.hasQuantity && row.expiryDate);
+            state.importRows = normalizedRows.filter((row) => row.article && row.expiryDate);
             const skipped = normalizedRows.length - state.importRows.length;
-            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.code || 'без кода'} — ${row.name || 'без наименования'} — ${row.quantity} — ${row.expiryInvalid ? `${row.expiryRaw} (некорректная дата)` : formatExpiryMonthRu(row.expiryDate, row.expiryFullDate)}`).join('\n');
+            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.code || 'без кода'} — ${row.name || 'без наименования'} — ${row.expiryInvalid ? `${row.expiryRaw} (некорректная дата)` : formatExpiryMonthRu(row.expiryDate, row.expiryFullDate)}`).join('\n');
             qs('#importPreview').textContent = [
                 `Файл: ${file.name}`,
                 `Найдено строк: ${rawRows.length}`,
                 `Готово к загрузке: ${state.importRows.length}`,
-                skipped > 0 ? `Пропущено строк без артикула, количества или срока годности: ${skipped}` : '',
+                skipped > 0 ? `Пропущено строк без артикула или срока годности: ${skipped}` : '',
                 `Распознанные заголовки: ${detectedHeaders}`,
-                exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте, что первая строка — это заголовки: Артикул, Количество, Срок годности до.',
+                exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте, что первая строка — это заголовки: Артикул, Срок годности до.',
             ].filter(Boolean).join('\n');
             qs('#importButton').disabled = state.importRows.length === 0;
         } catch (error) {
@@ -1877,8 +2082,13 @@ function bindEvents() {
     }));
 
     qsa('.settings-subtab').forEach((button) => button.addEventListener('click', () => switchSettingsTab(button.dataset.settingsTab)));
+    qsa('.help-subtab').forEach((button) => button.addEventListener('click', () => switchHelpTab(button.dataset.helpTab)));
 
     qs('#openTestStockFillButton').addEventListener('click', openTestStockFillDialog);
+    qs('#openPurchaseRecipientButton').addEventListener('click', openPurchaseRecipientDialog);
+    qs('#purchaseRecipientForm').addEventListener('submit', submitPurchaseRecipient);
+    qs('#closePurchaseRecipientDialogButton').addEventListener('click', closePurchaseRecipientDialog);
+    qs('#cancelPurchaseRecipientButton').addEventListener('click', closePurchaseRecipientDialog);
     qs('#testStockFillForm').addEventListener('submit', submitTestStockFillForm);
     qs('#closeTestStockFillDialogButton').addEventListener('click', closeTestStockFillDialog);
     qs('#cancelTestStockFillButton').addEventListener('click', closeTestStockFillDialog);
@@ -1886,7 +2096,10 @@ function bindEvents() {
     qs('#closeNotificationDialogButton').addEventListener('click', closeNotificationDialog);
     qs('#closeBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
     qs('#confirmBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
-    qs('#writeOffStockBatchButton').addEventListener('click', writeOffSelectedStockBatch);
+    qs('#writeOffStockBatchButton').addEventListener('click', showBatchStockStatusControls);
+    qs('#cancelBatchStockStatusButton').addEventListener('click', () => resetBatchStockStatusControls());
+    qs('#saveBatchStockStatusButton').addEventListener('click', saveSelectedStockBatchStatus);
+    qs('#downloadBatchStockXlsxButton').addEventListener('click', downloadBatchStockXlsx);
     qs('#openWarehouseDialogButton').addEventListener('click', () => openWarehouseDialog());
     qs('#warehouseForm').addEventListener('submit', submitWarehouseForm);
     qs('#closeWarehouseDialogButton').addEventListener('click', closeWarehouseDialog);
@@ -1947,6 +2160,8 @@ function bindEvents() {
         state.eventPeriodFilters = new Set(qsa('.event-period-filter:checked').map((item) => item.value));
         renderEvents();
     }));
+    qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
+    qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
 
     qs('#filterSearch').addEventListener('input', renderRegistry);
     qs('#filterSearchColumn').addEventListener('change', renderRegistry);
@@ -2065,6 +2280,8 @@ function startSchedulerHeartbeat() {
 async function bootstrap() {
     try {
         await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
+        const batchId = new URLSearchParams(window.location.search).get('batch_id');
+        if (batchId) openBatchStockDialog(batchId, { showWriteOff: true });
         showToast('Данные обновлены.');
     } catch (error) {
         showToast(error.message, true);
