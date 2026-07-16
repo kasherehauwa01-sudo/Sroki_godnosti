@@ -1357,7 +1357,7 @@ function sendPurchaseNotificationForBatch(PDO $pdo, int $batchId, int $eventDays
 
 function findBatchForPurchaseNotification(PDO $pdo, int $batchId): ?array
 {
-    $statement = $pdo->prepare('SELECT id, article, code, name, days_left FROM batches WHERE id = :id');
+    $statement = $pdo->prepare('SELECT id, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left FROM batches WHERE id = :id');
     $statement->execute([':id' => $batchId]);
     $row = $statement->fetch();
     return $row ?: null;
@@ -1374,8 +1374,8 @@ function downloadBatchStockXlsx(PDO $pdo, int $batchId): array
     }
     $stock = getBatchStockByWarehouses($pdo, $batchId);
     $code = trim((string)($batch['code'] ?? '')) ?: (string)$batch['article'];
-    $days = (int)($batch['days_left'] ?? 0);
-    $filename = sanitizeDownloadFilename($code . ', ' . $days . ' дней.xlsx');
+    $expiry = formatBatchExpiryForFilename($batch);
+    $filename = sanitizeDownloadFilename($code . ' до ' . $expiry . '.xlsx');
     $rows = [['Склад', 'Количество']];
     foreach ($stock['items'] as $item) {
         $rows[] = [(string)$item['name'], $item['quantity'] === null ? '' : (string)$item['quantity']];
@@ -1383,10 +1383,29 @@ function downloadBatchStockXlsx(PDO $pdo, int $batchId): array
     $content = buildBatchStockXlsxContent($rows);
     header_remove('Content-Type');
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"');
+    header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
     header('Content-Length: ' . strlen($content));
     echo $content;
     exit;
+}
+
+
+function formatBatchExpiryForFilename(array $batch): string
+{
+    if (!empty($batch['expiry_invalid'])) {
+        $raw = trim((string)($batch['expiry_raw'] ?? ''));
+        return $raw !== '' ? $raw : 'не указан';
+    }
+
+    $expiryDate = trim((string)($batch['expiry_date'] ?? ''));
+    if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $expiryDate, $matches)) {
+        return 'не указан';
+    }
+
+    [, $year, $month, $day] = $matches;
+    return !empty($batch['expiry_full_date']) || $day !== '01'
+        ? $day . '.' . $month . '.' . $year
+        : $month . '.' . $year;
 }
 
 function sanitizeDownloadFilename(string $filename): string
