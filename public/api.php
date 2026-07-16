@@ -1405,7 +1405,8 @@ function buildBatchStockXlsxContent(array $rows): string
         $sheet = $spreadsheet->getActiveSheet();
         foreach ($rows as $rowIndex => $row) {
             foreach (array_values($row) as $columnIndex => $value) {
-                $sheet->setCellValueByColumnAndRow($columnIndex + 1, $rowIndex + 1, $value);
+                $cell = xlsxColumnName($columnIndex + 1) . (string)($rowIndex + 1);
+                $sheet->setCellValue($cell, $value);
             }
         }
         $tmp = tempnam(sys_get_temp_dir(), 'purchase-stock-');
@@ -1417,6 +1418,19 @@ function buildBatchStockXlsxContent(array $rows): string
     }
 
     return buildSimpleXlsx($rows);
+}
+
+
+function xlsxColumnName(int $columnIndex): string
+{
+    $name = '';
+    while ($columnIndex > 0) {
+        $columnIndex--;
+        $name = chr(65 + ($columnIndex % 26)) . $name;
+        $columnIndex = intdiv($columnIndex, 26);
+    }
+
+    return $name;
 }
 
 function buildSimpleXlsx(array $rows): string

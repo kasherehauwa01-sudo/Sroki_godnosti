@@ -690,8 +690,13 @@ async function openBatchStockDialog(id, options = {}) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
 
+    const expiryText = batch.expiryInvalid
+        ? (batch.expiryRaw || 'не указан')
+        : (formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate) || 'не указан');
+    const numericDays = batch.expiryInvalid ? null : (batch.daysLeft ?? (batch.expiryDate ? daysLeft(batch.expiryDate) : null));
+    const daysText = Number.isFinite(Number(numericDays)) ? formatDays(Number(numericDays)) : 'не рассчитан';
     qs('#batchStockTitle').textContent = `Остатки партии: ${batch.article}`;
-    qs('#batchStockMeta').textContent = `${batch.code ? `Код: ${batch.code}. ` : ''}${batch.name || ''}`;
+    qs('#batchStockMeta').textContent = `${batch.code ? `Код: ${batch.code}. ` : ''}${batch.name || ''}. Срок годности до: ${expiryText}. Остаток дней: ${daysText}`;
     qs('#batchStockBody').innerHTML = '<tr><td colspan="2">Загрузка...</td></tr>';
     qs('#batchStockTotal').textContent = '0';
     state.selectedStockBatchId = String(id);
