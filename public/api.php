@@ -20,7 +20,8 @@ require_once __DIR__ . '/../app/auto_importer.php';
 require_once __DIR__ . '/../app/warehouse_repository.php';
 
 const ACTIVE_STATUS = 'В наличии';
-const ARCHIVED_STATUSES = ['Реализована', 'Списана'];
+const UNAVAILABLE_STATUS = 'Нет в наличии';
+const ARCHIVED_STATUSES = ['Реализована', 'Списана', UNAVAILABLE_STATUS];
 const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта партия товара';
 const SENDER_EMAIL = 'vr-vk@yandex.ru';
 const SETTINGS_PASSWORD_HASH = 'ff10705eafbaa3ff925fb0429d4b3f10379a4dd9dc1725654bbe0a5c9ce1a10f';
@@ -39,9 +40,11 @@ function handleApiRequest(): void
     try {
         $pdo = getDatabaseConnection();
         ensureBatchesSchema($pdo);
+        ensureLogsSchema($pdo);
         ensureSettingsSchema($pdo);
         ensureMissingFilterLogSchema($pdo);
         ensureWarehouseSchema($pdo);
+        ensurePurchaseNotificationSchema($pdo);
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $payload = readPayload();
         $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
@@ -51,7 +54,7 @@ function handleApiRequest(): void
         }
 
         refreshDaysLeft($pdo);
-        if ($action !== 'test_notification') {
+        if (!in_array($action, ['test_notification', 'test_purchase_notification'], true)) {
             runDueExpiryNotifications($pdo);
         }
 
@@ -66,8 +69,12 @@ function handleApiRequest(): void
                 'stock_form' => ['ok' => true] + loadStockFormByToken($pdo, (string)($_GET['token'] ?? '')),
                 'stock_notifications' => ['ok' => true, 'notifications' => listStockNotifications($pdo)],
                 'stock_notification' => ['ok' => true] + getStockNotificationDetails($pdo, (int)($_GET['id'] ?? 0)),
-                'stock_batch_notifications' => ['ok' => true, 'notifications' => listStockBatchNotifications($pdo)],
+                'purchase_recipients' => getProtectedPurchaseRecipients($pdo, $_GET),
+                'purchase_event_summary' => ['ok' => true] + getPurchaseEventSummary($pdo, (string)($_GET['token'] ?? '')),
+                'purchase_event_xls' => downloadPurchaseEventXls($pdo, (string)($_GET['token'] ?? '')),
+                'stock_batch_notifications' => ['ok' => true, 'notifications' => listPurchaseEventNotifications($pdo)],
                 'events' => ['ok' => true, 'events' => listExpiryEvents($pdo)],
+                'batch_stock_xlsx' => downloadBatchStockXlsx($pdo, (int)($_GET['batch_id'] ?? 0)),
                 'tick' => ['ok' => true],
                 default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
             };
@@ -83,6 +90,7 @@ function handleApiRequest(): void
                 'test_notification' => sendTestNotification($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
                 'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
+                'test_purchase_notification' => sendTestPurchaseNotification($pdo, $payload),
                 'test_stock_fill_notification' => sendTestStockFillNotification($pdo, $payload),
                 'verify_write_off' => verifyWriteOffPassword($payload),
                 'warehouse_create' => createWarehouse($pdo, $payload),
@@ -90,6 +98,9 @@ function handleApiRequest(): void
                 'warehouse_delete' => deleteWarehouse($pdo, $payload),
                 'save_stock_form' => saveStockForm($pdo, (string)($payload['token'] ?? ''), (array)($payload['quantities'] ?? []), clientIp(), (string)($_SERVER['HTTP_USER_AGENT'] ?? '')),
                 'mark_stock_batch_notification_viewed' => markStockBatchNotificationViewed($pdo, (int)($payload['batch_id'] ?? 0)),
+                'purchase_recipient_create' => createPurchaseRecipient($pdo, $payload),
+                'purchase_recipient_delete' => deletePurchaseRecipient($pdo, $payload),
+                'purchase_event_batch_status' => updatePurchaseEventBatchStatus($pdo, $payload),
                 default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
             };
         }
@@ -169,6 +180,100 @@ function ensureSettingsSchema(PDO $pdo): void
     }
 }
 
+
+function ensureLogsSchema(PDO $pdo): void
+{
+    // История должна создаваться автоматически даже на базах, которые были
+    // развернуты до появления таблицы logs или без выполнения install.sql.
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS logs (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            action VARCHAR(128) NOT NULL,
+            payload JSON NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            INDEX idx_logs_action (action),
+            INDEX idx_logs_created_at (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+}
+
+
+function ensurePurchaseNotificationSchema(PDO $pdo): void
+{
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS purchase_notification_recipients (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            full_name VARCHAR(255) NOT NULL,
+            email VARCHAR(255) NOT NULL,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_purchase_recipient_email (email),
+            INDEX idx_purchase_recipient_active (is_active)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS purchase_notification_log (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            batch_id BIGINT UNSIGNED NOT NULL,
+            event_days INT NOT NULL,
+            sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            recipients JSON NULL,
+            status ENUM('SUCCESS', 'ERROR') NOT NULL,
+            error_message TEXT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_purchase_batch_event (batch_id, event_days),
+            INDEX idx_purchase_log_status (status),
+            CONSTRAINT fk_purchase_log_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS purchase_event_notification_log (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            event_key VARCHAR(128) NOT NULL,
+            event_date DATE NOT NULL,
+            event_days INT NOT NULL,
+            expiry_date DATE NOT NULL,
+            access_token_hash CHAR(64) NOT NULL,
+            recipients JSON NULL,
+            status ENUM('PENDING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
+            error_message TEXT NULL,
+            sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_purchase_event (event_key, event_date),
+            UNIQUE KEY uniq_purchase_event_token (access_token_hash),
+            INDEX idx_purchase_event_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS purchase_event_summary_links (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            event_key VARCHAR(128) NOT NULL,
+            event_date DATE NOT NULL,
+            event_days INT NOT NULL,
+            expiry_date DATE NOT NULL,
+            access_token VARCHAR(64) NULL,
+            access_token_hash CHAR(64) NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_purchase_summary_token (access_token_hash),
+            INDEX idx_purchase_summary_event (event_key, event_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $columnCheck = $pdo->prepare(
+        'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+    );
+    $columnCheck->execute([':table' => 'purchase_event_summary_links', ':column' => 'access_token']);
+    if ((int)$columnCheck->fetchColumn() === 0) {
+        $pdo->exec('ALTER TABLE purchase_event_summary_links ADD COLUMN access_token VARCHAR(64) NULL AFTER expiry_date');
+    }
+}
+
 function ensureMissingFilterLogSchema(PDO $pdo): void
 {
     $pdo->exec(
@@ -205,12 +310,20 @@ function ensureBatchesSchema(PDO $pdo): void
             $pdo->exec($sql);
         }
     }
+
+    $statusColumn = $pdo->prepare(
+        'SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+    );
+    $statusColumn->execute([':table' => 'batches', ':column' => 'status']);
+    if (!str_contains((string)$statusColumn->fetchColumn(), UNAVAILABLE_STATUS)) {
+        $pdo->exec("ALTER TABLE batches MODIFY COLUMN status ENUM('В наличии', 'Реализована', 'Списана', 'Нет в наличии') NOT NULL DEFAULT 'В наличии'");
+    }
 }
 
 function listBatches(PDO $pdo, array $filters): array
 {
     [$where, $params] = buildBatchFilters($filters);
-    $sql = 'SELECT id, created_at, created_source, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status, updated_at FROM batches ' . $where . ' ORDER BY expiry_date ASC, id DESC';
+    $sql = 'SELECT id, created_at, created_source, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status, updated_at FROM batches ' . $where . ' ORDER BY expiry_date ASC, id DESC';
     $statement = $pdo->prepare($sql);
     $statement->execute($params);
 
@@ -378,7 +491,6 @@ function updateBatch(PDO $pdo, array $payload): array
              article = :article,
              code = :code,
              name = :name,
-             quantity = :quantity,
              expiry_date = :expiry_date,
              expiry_full_date = :expiry_full_date,
              expiry_invalid = :expiry_invalid,
@@ -448,7 +560,6 @@ function buildCreateBatchParams(array $batch): array
         'article' => $batch['article'],
         'code' => $batch['code'],
         'name' => $batch['name'],
-        'quantity' => $batch['quantity'],
         'expiry_date' => $batch['expiry_date'],
         'expiry_full_date' => (int)$batch['expiry_full_date'],
         'expiry_invalid' => (int)$batch['expiry_invalid'],
@@ -466,7 +577,6 @@ function buildUpdateBatchParams(array $batch, int $id): array
         'article' => $batch['article'],
         'code' => $batch['code'],
         'name' => $batch['name'],
-        'quantity' => $batch['quantity'],
         'expiry_date' => $batch['expiry_date'],
         'expiry_full_date' => (int)$batch['expiry_full_date'],
         'expiry_invalid' => (int)$batch['expiry_invalid'],
@@ -508,8 +618,8 @@ function duplicateBatchInfo(array $batch): array
 function insertBatch(PDO $pdo, array $batch): int
 {
     $statement = $pdo->prepare(
-        'INSERT INTO batches (created_at, created_source, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status)
-         VALUES (:created_at, :created_source, :article, :code, :name, :quantity, :expiry_date, :expiry_full_date, :expiry_invalid, :expiry_raw, :days_left, :status)'
+        'INSERT INTO batches (created_at, created_source, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left, status)
+         VALUES (:created_at, :created_source, :article, :code, :name, :expiry_date, :expiry_full_date, :expiry_invalid, :expiry_raw, :days_left, :status)'
     );
     $statement->execute(buildCreateBatchParams($batch));
 
@@ -518,7 +628,7 @@ function insertBatch(PDO $pdo, array $batch): int
 
 function findBatchForHistory(PDO $pdo, int $id): array
 {
-    $statement = $pdo->prepare('SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE id = :id');
+    $statement = $pdo->prepare('SELECT id, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE id = :id');
     $statement->execute([':id' => $id]);
     $row = $statement->fetch();
 
@@ -533,7 +643,6 @@ function historyBatchInfo(array $batch, ?int $id = null): array
         'article' => (string)($batch['article'] ?? ''),
         'code' => (string)($batch['code'] ?? ''),
         'name' => (string)($batch['name'] ?? ''),
-        'quantity' => isset($batch['quantity']) ? (int)$batch['quantity'] : null,
         'expiry_date' => (string)($batch['expiry_date'] ?? ''),
         'expiry_full_date' => (bool)($batch['expiry_full_date'] ?? false),
         'expiry_invalid' => (bool)($batch['expiry_invalid'] ?? false),
@@ -614,7 +723,7 @@ function deleteBatchesByArticles(PDO $pdo, array $payload): array
     }
 
     $placeholders = implode(',', array_fill(0, count($articles), '?'));
-    $select = $pdo->prepare("SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE article IN ($placeholders) ORDER BY article ASC, id ASC");
+    $select = $pdo->prepare("SELECT id, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE article IN ($placeholders) ORDER BY article ASC, id ASC");
     $select->execute($articles);
     $batches = $select->fetchAll();
 
@@ -649,8 +758,6 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
     $code = trim((string)($payload['code'] ?? $payload['Код'] ?? ''));
     $name = trim((string)($payload['name'] ?? $payload['Наименование'] ?? ''));
     $createdSource = normalizeCreatedSource((string)($payload['created_source'] ?? $payload['createdSource'] ?? $payload['Способ'] ?? 'Ручной'));
-    $quantityValue = $payload['quantity'] ?? $payload['Количество в партии'] ?? null;
-    $quantity = (int)($quantityValue ?? 0);
     $expiryInput = (string)($payload['expiry_date'] ?? $payload['expiryDate'] ?? $payload['Срок годности до'] ?? '');
     $expiryRaw = trim((string)($payload['expiry_raw'] ?? $payload['expiryRaw'] ?? $expiryInput));
     $expiryFullDate = array_key_exists('expiry_full_date', $payload) || array_key_exists('expiryFullDate', $payload)
@@ -659,8 +766,8 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
     $expiryInfo = normalizeExpiryDate($expiryInput, $expiryRaw, filter_var($payload['expiry_invalid'] ?? $payload['expiryInvalid'] ?? false, FILTER_VALIDATE_BOOLEAN), $expiryFullDate);
     $expiryDate = $expiryInfo['date'];
     $status = (string)($payload['status'] ?? $payload['Статус партии'] ?? ACTIVE_STATUS);
-    if ($article === '' || $quantityValue === null || trim((string)$quantityValue) === '' || $expiryDate === '') {
-        throw new InvalidArgumentException('Заполните артикул, количество и срок годности.');
+    if ($article === '' || $expiryDate === '') {
+        throw new InvalidArgumentException('Заполните артикул и срок годности.');
     }
     if (!in_array($status, array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES), true)) {
         throw new InvalidArgumentException('Недопустимый статус партии.');
@@ -672,7 +779,6 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
         'article' => $article,
         'code' => $code,
         'name' => $name,
-        'quantity' => $quantity,
         'expiry_date' => $expiryDate,
         'expiry_full_date' => $expiryInfo['full'],
         'expiry_invalid' => $expiryInfo['invalid'],
@@ -783,7 +889,6 @@ function normalizeBatchRow(array $row): array
         'article' => $row['article'],
         'code' => (string)($row['code'] ?? ''),
         'name' => $row['name'],
-        'quantity' => (int)$row['quantity'],
         'expiryDate' => $row['expiry_date'],
         'expiry_date' => $row['expiry_date'],
         'expiryFullDate' => (bool)($row['expiry_full_date'] ?? false),
@@ -887,7 +992,7 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
     $notificationDays = NOTIFICATION_EVENT_DAYS;
     $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
     $statement = $pdo->prepare(
-        "SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, days_left
+        "SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
          FROM batches
          WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
          ORDER BY days_left ASC, expiry_date ASC, article ASC"
@@ -1087,7 +1192,7 @@ function findStockFillTestEvent(PDO $pdo): array
     }
 
     $batchStatement = $pdo->prepare(
-        'SELECT id, article, code, name, quantity, expiry_date, expiry_full_date, days_left
+        'SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
          FROM batches
          WHERE status = :status AND expiry_invalid = 0 AND days_left = :days_left
          ORDER BY expiry_date ASC, article ASC'
@@ -1139,6 +1244,513 @@ function assertWriteOffPassword(array $payload): void
     if (!hash_equals(WRITE_OFF_PASSWORD_HASH, hash('sha256', $password))) {
         throw new InvalidArgumentException('Неверный пароль для списания партии.');
     }
+}
+
+
+function listPurchaseRecipients(PDO $pdo): array
+{
+    ensurePurchaseNotificationSchema($pdo);
+    $statement = $pdo->query('SELECT id, full_name, email, is_active, created_at, updated_at FROM purchase_notification_recipients WHERE is_active = 1 ORDER BY full_name ASC, id ASC');
+    return array_map(static fn (array $row): array => [
+        'id' => (int)$row['id'],
+        'full_name' => (string)$row['full_name'],
+        'email' => (string)$row['email'],
+        'is_active' => (bool)$row['is_active'],
+        'created_at' => (string)$row['created_at'],
+        'updated_at' => (string)$row['updated_at'],
+    ], $statement->fetchAll());
+}
+
+function getProtectedPurchaseRecipients(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    return ['ok' => true, 'recipients' => listPurchaseRecipients($pdo)];
+}
+
+function createPurchaseRecipient(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    ensurePurchaseNotificationSchema($pdo);
+    $fullName = trim((string)($payload['full_name'] ?? ''));
+    $email = trim((string)($payload['email'] ?? ''));
+    if ($fullName === '') {
+        throw new InvalidArgumentException('Укажите ФИО получателя.');
+    }
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Укажите корректный email получателя.');
+    }
+
+    $statement = $pdo->prepare(
+        'INSERT INTO purchase_notification_recipients (full_name, email, is_active)
+         VALUES (:full_name, :email, 1)
+         ON DUPLICATE KEY UPDATE full_name = VALUES(full_name), is_active = 1, updated_at = CURRENT_TIMESTAMP'
+    );
+    $statement->execute([':full_name' => $fullName, ':email' => $email]);
+
+    return ['ok' => true, 'recipients' => listPurchaseRecipients($pdo)];
+}
+
+function deletePurchaseRecipient(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    ensurePurchaseNotificationSchema($pdo);
+    $id = (int)($payload['id'] ?? 0);
+    if ($id <= 0) {
+        throw new InvalidArgumentException('Не указан получатель для удаления.');
+    }
+    $statement = $pdo->prepare('UPDATE purchase_notification_recipients SET is_active = 0 WHERE id = :id');
+    $statement->execute([':id' => $id]);
+
+    return ['ok' => true, 'recipients' => listPurchaseRecipients($pdo)];
+}
+
+function activePurchaseRecipientEmails(PDO $pdo): array
+{
+    return array_values(array_unique(array_map(static fn (array $row): string => (string)$row['email'], listPurchaseRecipients($pdo))));
+}
+
+function maybeSendPurchaseNotifications(PDO $pdo, array $notification, array $submittedBatchIds): void
+{
+    if (!$submittedBatchIds) return;
+    $eventDays = parsePurchaseEventDays((string)($notification['event_key'] ?? ''));
+    if ($eventDays <= 0) return;
+    $eventDate = substr((string)($notification['sent_at'] ?? $notification['created_at'] ?? ''), 0, 10);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $eventDate)) return;
+    $event = getPurchaseEventData($pdo, (string)$notification['event_key'], $eventDate, false);
+    if (!$event['batches'] || !$event['warehouses']) return;
+
+    $expected = count($event['batches']) * count($event['warehouses']);
+    if ((int)$event['filled_count'] < $expected) return;
+    sendPurchaseNotificationForEvent($pdo, $event, $eventDays);
+}
+
+function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, bool $currentWarehouses): array
+{
+    $batchStatement = $pdo->prepare(
+        'SELECT i.batch_id AS id, MAX(i.article) AS article, MAX(i.code) AS code, MAX(i.name) AS name,
+                MAX(i.expiry_date) AS expiry_date, MAX(b.status) AS status, MIN(i.sort_order) AS event_sort_order
+         FROM stock_notifications n
+         INNER JOIN stock_notification_items i ON i.notification_id = n.id
+         INNER JOIN batches b ON b.id = i.batch_id
+         WHERE n.event_key = :event_key AND DATE(n.sent_at) = :event_date AND i.batch_id IS NOT NULL
+         GROUP BY i.batch_id
+         ORDER BY event_sort_order, i.batch_id'
+    );
+    $batchStatement->execute([':event_key' => $eventKey, ':event_date' => $eventDate]);
+    $batches = $batchStatement->fetchAll();
+
+    if ($currentWarehouses) {
+        $warehouseStatement = $pdo->query('SELECT id, name FROM warehouses WHERE is_active = 1 ORDER BY sort_order, name, id');
+    } else {
+        $warehouseStatement = $pdo->prepare(
+            'SELECT DISTINCT w.id, w.name, w.sort_order
+             FROM stock_notifications n
+             INNER JOIN warehouses w ON w.id = n.warehouse_id AND w.is_active = 1
+             WHERE n.event_key = :event_key AND DATE(n.sent_at) = :event_date
+             ORDER BY w.sort_order, w.name, w.id'
+        );
+        $warehouseStatement->execute([':event_key' => $eventKey, ':event_date' => $eventDate]);
+    }
+    $warehouses = $warehouseStatement->fetchAll();
+    $batchIds = array_map(static fn (array $row): int => (int)$row['id'], $batches);
+    $warehouseIds = array_map(static fn (array $row): int => (int)$row['id'], $warehouses);
+    $stock = [];
+    $lastStockAt = '';
+    if ($batchIds && $warehouseIds) {
+        $batchMarks = implode(',', array_fill(0, count($batchIds), '?'));
+        $warehouseMarks = implode(',', array_fill(0, count($warehouseIds), '?'));
+        $stockStatement = $pdo->prepare("SELECT batch_id, warehouse_id, quantity, updated_at FROM batch_stock WHERE batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)");
+        $stockStatement->execute(array_merge($batchIds, $warehouseIds));
+        foreach ($stockStatement->fetchAll() as $row) {
+            $stock[(int)$row['batch_id']][(int)$row['warehouse_id']] = (float)$row['quantity'];
+            if ((string)$row['updated_at'] > $lastStockAt) $lastStockAt = (string)$row['updated_at'];
+        }
+    }
+
+    return [
+        'event_key' => $eventKey,
+        'event_date' => $eventDate,
+        'expiry_date' => $batches ? max(array_column($batches, 'expiry_date')) : $eventDate,
+        'batches' => $batches,
+        'warehouses' => $warehouses,
+        'stock' => $stock,
+        'filled_count' => array_sum(array_map('count', $stock)),
+        'last_stock_at' => $lastStockAt,
+    ];
+}
+
+function listPurchaseEventNotifications(PDO $pdo): array
+{
+    ensurePurchaseNotificationSchema($pdo);
+    $statement = $pdo->query(
+        "SELECT event_key, DATE(sent_at) AS event_date, MAX(sent_at) AS sent_at
+         FROM stock_notifications
+         WHERE event_key REGEXP '^expiry_[0-9]+$'
+         GROUP BY event_key, DATE(sent_at)
+         ORDER BY sent_at DESC"
+    );
+    $events = [];
+    foreach ($statement->fetchAll() as $row) {
+        $eventKey = (string)$row['event_key'];
+        $eventDate = (string)$row['event_date'];
+        $event = getPurchaseEventData($pdo, $eventKey, $eventDate, false);
+        if (!$event['batches'] || !$event['warehouses']) continue;
+        $expected = count($event['batches']) * count($event['warehouses']);
+        $warehouseIds = array_map(static fn (array $warehouse): int => (int)$warehouse['id'], $event['warehouses']);
+        $filledBatchCount = count(array_filter($event['batches'], static function (array $batch) use ($event, $warehouseIds): bool {
+            $filledWarehouseIds = array_keys($event['stock'][(int)$batch['id']] ?? []);
+            return count(array_intersect($warehouseIds, array_map('intval', $filledWarehouseIds))) === count($warehouseIds);
+        }));
+        $token = getOrCreatePurchaseEventSummaryToken($pdo, $event);
+        $events[] = [
+            'event_key' => $eventKey,
+            'event_days' => parsePurchaseEventDays($eventKey),
+            'event_date' => $eventDate,
+            'expiry_date' => $event['expiry_date'],
+            'batch_count' => count($event['batches']),
+            'warehouse_count' => count($event['warehouses']),
+            'filled_batch_count' => $filledBatchCount,
+            'filled_count' => (int)$event['filled_count'],
+            'expected_count' => $expected,
+            'status' => (int)$event['filled_count'] >= $expected ? 'Заполнено' : 'Ожидает заполнения',
+            'sent_at' => (string)$row['sent_at'],
+            'last_stock_at' => $event['last_stock_at'],
+            'url' => publicBaseUrl() . '/purchase-event.php?token=' . rawurlencode($token),
+        ];
+    }
+    return $events;
+}
+
+function getOrCreatePurchaseEventSummaryToken(PDO $pdo, array $event): string
+{
+    $statement = $pdo->prepare(
+        'SELECT access_token FROM purchase_event_summary_links
+         WHERE event_key = :event_key AND event_date = :event_date AND access_token IS NOT NULL
+         ORDER BY id DESC LIMIT 1'
+    );
+    $statement->execute([':event_key' => $event['event_key'], ':event_date' => $event['event_date']]);
+    $token = (string)($statement->fetchColumn() ?: '');
+    if ($token !== '') return $token;
+
+    $token = bin2hex(random_bytes(24));
+    $pdo->prepare(
+        'INSERT INTO purchase_event_summary_links (event_key, event_date, event_days, expiry_date, access_token, access_token_hash)
+         VALUES (:event_key, :event_date, :event_days, :expiry_date, :access_token, :token_hash)'
+    )->execute([
+        ':event_key' => $event['event_key'], ':event_date' => $event['event_date'],
+        ':event_days' => parsePurchaseEventDays((string)$event['event_key']), ':expiry_date' => $event['expiry_date'],
+        ':access_token' => $token, ':token_hash' => hash('sha256', $token),
+    ]);
+    return $token;
+}
+
+function sendPurchaseNotificationForEvent(PDO $pdo, array $event, int $eventDays): void
+{
+    $recipients = activePurchaseRecipientEmails($pdo);
+    if (!$recipients) return;
+    $token = bin2hex(random_bytes(24));
+    $statement = $pdo->prepare(
+        "INSERT INTO purchase_event_notification_log (event_key, event_date, event_days, expiry_date, access_token_hash, recipients, status)
+         VALUES (:event_key, :event_date, :event_days, :expiry_date, :token_hash, :recipients, 'PENDING')
+         ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)"
+    );
+    $statement->execute([
+        ':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':event_days' => $eventDays,
+        ':expiry_date' => $event['expiry_date'], ':token_hash' => hash('sha256', $token),
+        ':recipients' => json_encode($recipients, JSON_UNESCAPED_UNICODE),
+    ]);
+    if ($statement->rowCount() === 0) return;
+
+    $expiryText = date('d.m.Y', strtotime((string)$event['expiry_date']));
+    $subject = 'Остатки по товарам со сроком годности';
+    $url = publicBaseUrl() . '/purchase-event.php?token=' . rawurlencode($token);
+    $body = "Остатки по товарам со сроком годности до {$expiryText}. При необходимости ознакомьтесь с данными и, на основании указанных остатков, выполните списание товара.\n\nОткрыть сводную таблицу: {$url}";
+    try {
+        sendNotificationEmail($pdo, $recipients, $subject, $body, getRawSettings($pdo));
+        $pdo->prepare("UPDATE purchase_event_notification_log SET status = 'SUCCESS', error_message = NULL, sent_at = NOW() WHERE event_key = :event_key AND event_date = :event_date")
+            ->execute([':event_key' => $event['event_key'], ':event_date' => $event['event_date']]);
+    } catch (Throwable $error) {
+        $pdo->prepare("UPDATE purchase_event_notification_log SET status = 'ERROR', error_message = :error, sent_at = NOW() WHERE event_key = :event_key AND event_date = :event_date")
+            ->execute([':error' => $error->getMessage(), ':event_key' => $event['event_key'], ':event_date' => $event['event_date']]);
+    }
+}
+
+function getPurchaseEventSummary(PDO $pdo, string $token): array
+{
+    $log = findPurchaseEventByToken($pdo, $token);
+    $event = getPurchaseEventData($pdo, (string)$log['event_key'], (string)$log['event_date'], true);
+    $rows = [];
+    foreach ($event['batches'] as $batch) {
+        $quantities = [];
+        $total = 0;
+        foreach ($event['warehouses'] as $warehouse) {
+            $value = $event['stock'][(int)$batch['id']][(int)$warehouse['id']] ?? null;
+            $quantities[(string)$warehouse['id']] = $value;
+            if ($value !== null) $total += $value;
+        }
+        $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $batch['name'], 'total' => $total, 'status' => $batch['status'], 'quantities' => $quantities];
+    }
+    return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES)];
+}
+
+function findPurchaseEventByToken(PDO $pdo, string $token): array
+{
+    if ($token === '') throw new InvalidArgumentException('Не указана ссылка на сводную таблицу.');
+    $tokenHash = hash('sha256', $token);
+    $statement = $pdo->prepare('SELECT event_key, event_date, event_days, expiry_date FROM purchase_event_notification_log WHERE access_token_hash = :token_hash LIMIT 1');
+    $statement->execute([':token_hash' => $tokenHash]);
+    $event = $statement->fetch();
+    if (!$event) {
+        $statement = $pdo->prepare('SELECT event_key, event_date, event_days, expiry_date FROM purchase_event_summary_links WHERE access_token_hash = :token_hash LIMIT 1');
+        $statement->execute([':token_hash' => $tokenHash]);
+        $event = $statement->fetch();
+    }
+    if (!$event) throw new InvalidArgumentException('Сводная таблица не найдена.');
+    return $event;
+}
+
+function updatePurchaseEventBatchStatus(PDO $pdo, array $payload): array
+{
+    $eventInfo = findPurchaseEventByToken($pdo, trim((string)($payload['token'] ?? '')));
+    $batchId = (int)($payload['batch_id'] ?? 0);
+    $status = trim((string)($payload['status'] ?? ''));
+    if (!in_array($status, array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES), true)) {
+        throw new InvalidArgumentException('Недопустимый статус партии.');
+    }
+    $event = getPurchaseEventData($pdo, (string)$eventInfo['event_key'], (string)$eventInfo['event_date'], false);
+    if (!in_array($batchId, array_map(static fn (array $batch): int => (int)$batch['id'], $event['batches']), true)) {
+        throw new InvalidArgumentException('Партия не входит в это событие.');
+    }
+    $statement = $pdo->prepare('UPDATE batches SET status = :status, updated_at = NOW() WHERE id = :id');
+    $statement->execute([':status' => $status, ':id' => $batchId]);
+    writeLog($pdo, 'update', ['id' => $batchId, 'status' => $status, 'source' => 'purchase_event_summary']);
+    return ['ok' => true, 'status' => $status];
+}
+
+function downloadPurchaseEventXls(PDO $pdo, string $token): array
+{
+    $summary = getPurchaseEventSummary($pdo, $token);
+    $headers = ['Артикул', 'Код', 'Наименование', 'Общий остаток', 'Статус'];
+    foreach ($summary['warehouses'] as $warehouse) $headers[] = (string)$warehouse['name'];
+    $html = '<html><head><meta charset="UTF-8"></head><body><table border="1"><tr>';
+    foreach ($headers as $header) $html .= '<th>' . htmlspecialchars($header, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</th>';
+    $html .= '</tr>';
+    foreach ($summary['rows'] as $row) {
+        $values = [$row['article'], $row['code'], $row['name'], $row['total'], $row['status']];
+        foreach ($summary['warehouses'] as $warehouse) $values[] = $row['quantities'][(string)$warehouse['id']] ?? '';
+        $html .= '<tr>';
+        foreach ($values as $value) $html .= '<td>' . htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td>';
+        $html .= '</tr>';
+    }
+    $html .= '</table></body></html>';
+    $filename = sanitizeDownloadFilename('Остатки до ' . date('d.m.Y', strtotime((string)$summary['expiry_date'])) . '.xls');
+    header_remove('Content-Type');
+    header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
+    header('Content-Length: ' . strlen($html));
+    echo $html;
+    exit;
+}
+
+function parsePurchaseEventDays(string $eventKey): int
+{
+    return preg_match('/expiry_(\d+)/', $eventKey, $match) ? (int)$match[1] : 0;
+}
+
+function sendTestPurchaseNotification(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $email = trim((string)($payload['email'] ?? ''));
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Укажите корректный email для тестового уведомления.');
+    }
+    $event = findLatestCompletelyFilledPurchaseEvent($pdo);
+    if (!$event) {
+        throw new RuntimeException('Нет события, по которому все партии заполнены всеми активными складами.');
+    }
+    $recipients = [$email];
+    $token = bin2hex(random_bytes(24));
+    $pdo->prepare(
+        'INSERT INTO purchase_event_summary_links (event_key, event_date, event_days, expiry_date, access_token_hash)
+         VALUES (:event_key, :event_date, :event_days, :expiry_date, :token_hash)'
+    )->execute([
+        ':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':event_days' => $event['event_days'],
+        ':expiry_date' => $event['expiry_date'], ':token_hash' => hash('sha256', $token),
+    ]);
+    $expiryText = date('d.m.Y', strtotime((string)$event['expiry_date']));
+    $subject = 'Остатки по товарам со сроком годности';
+    $url = publicBaseUrl() . '/purchase-event.php?token=' . rawurlencode($token);
+    $body = "Остатки по товарам со сроком годности до {$expiryText}. При необходимости ознакомьтесь с данными и, на основании указанных остатков, выполните списание товара.\n\nОткрыть сводную таблицу: {$url}";
+
+    try {
+        sendNotificationEmail($pdo, $recipients, $subject, $body, getRawSettings($pdo));
+        writeLog($pdo, 'purchase_test_notification_sent', [
+            'recipients' => $recipients,
+            'event_key' => $event['event_key'],
+            'event_date' => $event['event_date'],
+            'expiry_date' => $event['expiry_date'],
+            'days_left' => $event['event_days'],
+        ]);
+    } catch (Throwable $error) {
+        writeLog($pdo, 'purchase_test_notification_failed', [
+            'recipients' => $recipients,
+            'event_key' => $event['event_key'],
+            'event_date' => $event['event_date'],
+            'expiry_date' => $event['expiry_date'],
+            'days_left' => $event['event_days'],
+            'error' => $error->getMessage(),
+        ]);
+        throw $error;
+    }
+
+    return ['ok' => true, 'message' => 'Тестовое уведомление отдела закупок отправлено.'];
+}
+
+function findLatestCompletelyFilledPurchaseEvent(PDO $pdo): ?array
+{
+    $statement = $pdo->query(
+        "SELECT event_key, DATE(sent_at) AS event_date, MAX(sent_at) AS sent_at
+         FROM stock_notifications
+         WHERE event_key REGEXP '^expiry_[0-9]+$'
+         GROUP BY event_key, DATE(sent_at)
+         ORDER BY sent_at DESC"
+    );
+    foreach ($statement->fetchAll() as $candidate) {
+        $eventDays = parsePurchaseEventDays((string)$candidate['event_key']);
+        $event = getPurchaseEventData($pdo, (string)$candidate['event_key'], (string)$candidate['event_date'], false);
+        if (!$event['batches'] || !$event['warehouses']) continue;
+        if ((int)$event['filled_count'] < count($event['batches']) * count($event['warehouses'])) continue;
+        $event['event_days'] = $eventDays;
+        return $event;
+    }
+    return null;
+}
+
+function findBatchForPurchaseNotification(PDO $pdo, int $batchId): ?array
+{
+    $statement = $pdo->prepare('SELECT id, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left FROM batches WHERE id = :id');
+    $statement->execute([':id' => $batchId]);
+    $row = $statement->fetch();
+    return $row ?: null;
+}
+
+function downloadBatchStockXlsx(PDO $pdo, int $batchId): array
+{
+    if ($batchId <= 0) {
+        throw new InvalidArgumentException('Не указана партия для выгрузки XLSX.');
+    }
+    $batch = findBatchForPurchaseNotification($pdo, $batchId);
+    if (!$batch) {
+        throw new InvalidArgumentException('Партия не найдена.');
+    }
+    $stock = getBatchStockByWarehouses($pdo, $batchId);
+    $code = trim((string)($batch['code'] ?? '')) ?: (string)$batch['article'];
+    $expiry = formatBatchExpiryForFilename($batch);
+    $filename = sanitizeDownloadFilename($code . ' до ' . $expiry . '.xlsx');
+    $rows = [['Склад', 'Количество']];
+    foreach ($stock['items'] as $item) {
+        $rows[] = [(string)$item['name'], $item['quantity'] === null ? '' : (string)$item['quantity']];
+    }
+    $content = buildBatchStockXlsxContent($rows);
+    header_remove('Content-Type');
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
+    header('Content-Length: ' . strlen($content));
+    echo $content;
+    exit;
+}
+
+
+function formatBatchExpiryForFilename(array $batch): string
+{
+    if (!empty($batch['expiry_invalid'])) {
+        $raw = trim((string)($batch['expiry_raw'] ?? ''));
+        return $raw !== '' ? $raw : 'не указан';
+    }
+
+    $expiryDate = trim((string)($batch['expiry_date'] ?? ''));
+    if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $expiryDate, $matches)) {
+        return 'не указан';
+    }
+
+    [, $year, $month, $day] = $matches;
+    return !empty($batch['expiry_full_date']) || $day !== '01'
+        ? $day . '.' . $month . '.' . $year
+        : $month . '.' . $year;
+}
+
+function sanitizeDownloadFilename(string $filename): string
+{
+    $filename = preg_replace('/[\\\/\:\*\?"\<\>\|]+/u', '_', $filename) ?: 'ostatki.xlsx';
+    return trim($filename) !== '' ? $filename : 'ostatki.xlsx';
+}
+
+
+function buildBatchStockXlsxContent(array $rows): string
+{
+    if (class_exists('PhpOffice\\PhpSpreadsheet\\Spreadsheet') && class_exists('PhpOffice\\PhpSpreadsheet\\Writer\\Xlsx')) {
+        $spreadsheetClass = 'PhpOffice\\PhpSpreadsheet\\Spreadsheet';
+        $writerClass = 'PhpOffice\\PhpSpreadsheet\\Writer\\Xlsx';
+        $spreadsheet = new $spreadsheetClass();
+        $sheet = $spreadsheet->getActiveSheet();
+        foreach ($rows as $rowIndex => $row) {
+            foreach (array_values($row) as $columnIndex => $value) {
+                $cell = xlsxColumnName($columnIndex + 1) . (string)($rowIndex + 1);
+                $sheet->setCellValue($cell, $value);
+            }
+        }
+        $tmp = tempnam(sys_get_temp_dir(), 'purchase-stock-');
+        $writer = new $writerClass($spreadsheet);
+        $writer->save($tmp);
+        $content = (string)file_get_contents($tmp);
+        @unlink($tmp);
+        return $content;
+    }
+
+    return buildSimpleXlsx($rows);
+}
+
+
+function xlsxColumnName(int $columnIndex): string
+{
+    $name = '';
+    while ($columnIndex > 0) {
+        $columnIndex--;
+        $name = chr(65 + ($columnIndex % 26)) . $name;
+        $columnIndex = intdiv($columnIndex, 26);
+    }
+
+    return $name;
+}
+
+function buildSimpleXlsx(array $rows): string
+{
+    if (!class_exists('ZipArchive')) {
+        throw new RuntimeException('Для выгрузки XLSX установите расширение PHP zip или PhpSpreadsheet.');
+    }
+    $tmp = tempnam(sys_get_temp_dir(), 'xlsx-');
+    $zip = new ZipArchive();
+    if ($zip->open($tmp, ZipArchive::OVERWRITE) !== true) {
+        throw new RuntimeException('Не удалось создать XLSX-файл.');
+    }
+    $zip->addFromString('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>');
+    $zip->addFromString('_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
+    $zip->addFromString('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>');
+    $zip->addFromString('xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Остатки" sheetId="1" r:id="rId1"/></sheets></workbook>');
+    $sheetRows = '';
+    foreach ($rows as $rowIndex => $row) {
+        $sheetRows .= '<row r="' . ($rowIndex + 1) . '">';
+        foreach (array_values($row) as $columnIndex => $value) {
+            $cell = chr(65 + $columnIndex) . ($rowIndex + 1);
+            $sheetRows .= '<c r="' . $cell . '" t="inlineStr"><is><t>' . htmlspecialchars((string)$value, ENT_XML1 | ENT_COMPAT, 'UTF-8') . '</t></is></c>';
+        }
+        $sheetRows .= '</row>';
+    }
+    $zip->addFromString('xl/worksheets/sheet1.xml', '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' . $sheetRows . '</sheetData></worksheet>');
+    $zip->close();
+    $content = (string)file_get_contents($tmp);
+    @unlink($tmp);
+    return $content;
 }
 
 function getProtectedSettings(PDO $pdo, array $payload): array
@@ -1216,6 +1828,7 @@ function normalizeSettings(array $settings): array
         'auto_import_logs' => getAutoImportLogs($GLOBALS['pdo_for_settings_info'] ?? null),
         'notification_history' => getNotificationHistory($GLOBALS['pdo_for_settings_info'] ?? null),
         'system' => getSystemSettingsInfo($GLOBALS['pdo_for_settings_info'] ?? null),
+        'purchase_recipients' => listPurchaseRecipients($GLOBALS['pdo_for_settings_info'] ?? getDatabaseConnection()),
     ];
 }
 
@@ -1432,26 +2045,102 @@ function getNotificationHistory(?PDO $pdo): array
         return [];
     }
 
+    $history = [];
     $statement = $pdo->prepare(
         "SELECT action, payload, created_at
          FROM logs
-         WHERE action IN ('expiry_notifications_sent', 'expiry_notifications_failed', 'test_notification_sent', 'test_notification_failed')
+         WHERE action IN ('expiry_notifications_sent', 'expiry_notifications_failed', 'test_notification_sent', 'test_notification_failed', 'purchase_test_notification_sent', 'purchase_test_notification_failed')
          ORDER BY id DESC
          LIMIT 100"
     );
     $statement->execute();
 
-    return array_map(static function (array $row): array {
+    foreach ($statement->fetchAll() as $row) {
         $action = (string)$row['action'];
         $payload = json_decode((string)($row['payload'] ?? ''), true);
         $payload = is_array($payload) ? $payload : [];
-
-        return [
+        $isPurchase = str_starts_with($action, 'purchase_');
+        $history[] = [
             'date' => formatMoscowDateTime((string)$row['created_at']),
-            'status' => notificationHistoryStatus($action),
+            'type' => $isPurchase ? 'Отдел закупок' : 'Срок годности',
+            'event' => notificationHistoryText($action, $payload),
+            'recipients' => array_values((array)($payload['recipients'] ?? $payload['emails'] ?? [])),
+            'status' => $isPurchase && str_ends_with($action, '_sent') ? 'Успешно' : notificationHistoryStatus($action),
             'text' => notificationHistoryText($action, $payload),
+            '_sort' => strtotime((string)$row['created_at']) ?: 0,
         ];
-    }, $statement->fetchAll());
+    }
+
+    ensureMissingFilterLogSchema($pdo);
+    foreach ($pdo->query('SELECT created_at, codes, recipients, status, error_message FROM notification_missing_filter_logs ORDER BY id DESC LIMIT 100')->fetchAll() as $row) {
+        $codes = json_decode((string)$row['codes'], true);
+        $recipients = json_decode((string)$row['recipients'], true);
+        $success = (string)$row['status'] === 'SUCCESS';
+        $history[] = [
+            'date' => formatMoscowDateTime((string)$row['created_at']),
+            'type' => 'Товар без фильтров',
+            'event' => $success
+                ? sprintf('Отправлено товаров: %d.', is_array($codes) ? count($codes) : 0)
+                : 'Ошибка: ' . ((string)($row['error_message'] ?? '') ?: 'причина не указана.'),
+            'recipients' => is_array($recipients) ? $recipients : [],
+            'status' => $success ? 'Успешно' : 'Ошибка',
+            'text' => $success ? 'Уведомление отправлено.' : (string)($row['error_message'] ?? ''),
+            '_sort' => strtotime((string)$row['created_at']) ?: 0,
+        ];
+    }
+
+    ensurePurchaseNotificationSchema($pdo);
+    $eventLogs = $pdo->query(
+        'SELECT sent_at, event_days, expiry_date, recipients, status, error_message
+         FROM purchase_event_notification_log
+         ORDER BY id DESC
+         LIMIT 100'
+    );
+    foreach ($eventLogs->fetchAll() as $row) {
+        $recipients = json_decode((string)$row['recipients'], true);
+        $success = (string)$row['status'] === 'SUCCESS';
+        $history[] = [
+            'date' => formatMoscowDateTime((string)$row['sent_at']),
+            'type' => 'Отдел закупок',
+            'event' => $success
+                ? sprintf('Событие %d дней, срок годности до %s.', (int)$row['event_days'], date('d.m.Y', strtotime((string)$row['expiry_date'])))
+                : 'Ошибка: ' . ((string)($row['error_message'] ?? '') ?: 'причина не указана.'),
+            'recipients' => is_array($recipients) ? $recipients : [],
+            'status' => $success ? 'Успешно' : ((string)$row['status'] === 'PENDING' ? 'Отправляется' : 'Ошибка'),
+            'text' => $success ? 'Уведомление по событию отправлено.' : (string)($row['error_message'] ?? ''),
+            '_sort' => strtotime((string)$row['sent_at']) ?: 0,
+        ];
+    }
+
+    $purchaseLogs = $pdo->query(
+        'SELECT l.sent_at, l.event_days, l.recipients, l.status, l.error_message, b.article, b.code
+         FROM purchase_notification_log l
+         INNER JOIN batches b ON b.id = l.batch_id
+         ORDER BY l.id DESC
+         LIMIT 100'
+    );
+    foreach ($purchaseLogs->fetchAll() as $row) {
+        $recipients = json_decode((string)$row['recipients'], true);
+        $success = (string)$row['status'] === 'SUCCESS';
+        $code = trim((string)$row['code']) ?: (string)$row['article'];
+        $history[] = [
+            'date' => formatMoscowDateTime((string)$row['sent_at']),
+            'type' => 'Отдел закупок',
+            'event' => $success
+                ? sprintf('Остатки по товару %s, событие %d дней.', $code, (int)$row['event_days'])
+                : 'Ошибка: ' . ((string)($row['error_message'] ?? '') ?: 'причина не указана.'),
+            'recipients' => is_array($recipients) ? $recipients : [],
+            'status' => $success ? 'Успешно' : 'Ошибка',
+            'text' => $success ? 'Уведомление отправлено.' : (string)($row['error_message'] ?? ''),
+            '_sort' => strtotime((string)$row['sent_at']) ?: 0,
+        ];
+    }
+
+    usort($history, static fn (array $left, array $right): int => $right['_sort'] <=> $left['_sort']);
+    return array_map(static function (array $item): array {
+        unset($item['_sort']);
+        return $item;
+    }, array_slice($history, 0, 100));
 }
 
 function notificationHistoryStatus(string $action): string
@@ -1484,6 +2173,14 @@ function notificationHistoryText(string $action, array $payload): string
             'Тестовое уведомление: истекает срок годности через %d дней у партии артикул %s.',
             (int)$payload['days_left'],
             (string)$payload['article']
+        );
+    }
+
+    if ($action === 'purchase_test_notification_sent') {
+        return sprintf(
+            'Тестовое уведомление по событию %d дней, срок годности до %s.',
+            (int)($payload['days_left'] ?? 0),
+            isset($payload['expiry_date']) ? date('d.m.Y', strtotime((string)$payload['expiry_date'])) : 'не указан'
         );
     }
 
