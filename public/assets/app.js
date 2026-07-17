@@ -1137,13 +1137,12 @@ function renderStockBatchNotifications() {
             <td>${Number(notification.batch_count || 0)}</td>
             <td>${Number(notification.expected_count || 0) > 0 ? Math.round(Number(notification.filled_count || 0) / Number(notification.expected_count) * 100) : 0}%</td>
             <td>${escapeHtml(notification.status || '')}</td>
-            <td><a class="small-button stock-event-link" href="${escapeHtml(notification.url)}">Открыть сводную</a></td>
         </tr>
-    `).join('') || '<tr><td colspan="7">Событий с остатками пока нет.</td></tr>';
+    `).join('') || '<tr><td colspan="6">Событий с остатками пока нет.</td></tr>';
     qsa('[data-stock-event-url]').forEach((row) => {
         const openEvent = () => { window.location.assign(row.dataset.stockEventUrl); };
-        row.addEventListener('click', (event) => {
-            if (!event.target.closest('a')) openEvent();
+        row.addEventListener('click', () => {
+            openEvent();
         });
         row.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' || event.key === ' ') {

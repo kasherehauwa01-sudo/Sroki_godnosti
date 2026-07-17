@@ -121,7 +121,7 @@ declare(strict_types=1);
             </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Тип события</th><th>Дата события</th><th>Срок годности до</th><th>Партий</th><th>Заполнено остатков</th><th>Статус</th><th>Действие</th></tr></thead>
+                    <thead><tr><th>Тип события</th><th>Дата события</th><th>Срок годности до</th><th>Партий</th><th>Заполнено остатков</th><th>Статус</th></tr></thead>
                     <tbody id="stockBatchNotificationsBody"></tbody>
                 </table>
             </div>
