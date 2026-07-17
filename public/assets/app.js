@@ -1130,20 +1130,16 @@ function renderStockBatchNotifications() {
     const hasIncomplete = state.stockBatchNotifications.some((notification) => notification.status !== 'Заполнено');
     qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasIncomplete);
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
-        <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification' : 'unread-stock-notification'}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
+        <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification' : ''}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
             <td>${Number(notification.event_days || 0)} дней</td>
             <td>${escapeHtml(formatDateRu(notification.event_date))}</td>
             <td>${escapeHtml(formatDateRu(notification.expiry_date))}</td>
             <td>${Number(notification.batch_count || 0)}</td>
-            <td>${Number(notification.warehouse_count || 0)}</td>
-            <td>${Number(notification.filled_batch_count || 0)} из ${Number(notification.batch_count || 0)}</td>
-            <td>${Number(notification.filled_count || 0)} из ${Number(notification.expected_count || 0)}</td>
+            <td>${Number(notification.expected_count || 0) > 0 ? Math.round(Number(notification.filled_count || 0) / Number(notification.expected_count) * 100) : 0}%</td>
             <td>${escapeHtml(notification.status || '')}</td>
-            <td>${escapeHtml(formatDateTimeRu(notification.sent_at) || '—')}</td>
-            <td>${escapeHtml(formatDateTimeRu(notification.last_stock_at) || '—')}</td>
             <td><a class="small-button stock-event-link" href="${escapeHtml(notification.url)}">Открыть сводную</a></td>
         </tr>
-    `).join('') || '<tr><td colspan="11">Событий с остатками пока нет.</td></tr>';
+    `).join('') || '<tr><td colspan="7">Событий с остатками пока нет.</td></tr>';
     qsa('[data-stock-event-url]').forEach((row) => {
         const openEvent = () => { window.location.assign(row.dataset.stockEventUrl); };
         row.addEventListener('click', (event) => {
