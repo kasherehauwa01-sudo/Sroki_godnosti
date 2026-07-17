@@ -264,6 +264,7 @@ CREATE TABLE IF NOT EXISTS purchase_event_summary_links (
     event_date DATE NOT NULL,
     event_days INT NOT NULL,
     expiry_date DATE NOT NULL,
+    access_token VARCHAR(64) NULL,
     access_token_hash CHAR(64) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),

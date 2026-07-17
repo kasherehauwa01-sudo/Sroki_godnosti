@@ -1127,20 +1127,22 @@ async function loadStockBatchNotifications() {
 function renderStockBatchNotifications() {
     const body = qs('#stockBatchNotificationsBody');
     if (!body) return;
-    const hasUnread = state.stockBatchNotifications.some((notification) => notification.unread);
-    qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnread);
+    const hasIncomplete = state.stockBatchNotifications.some((notification) => notification.status !== 'Заполнено');
+    qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasIncomplete);
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
-        <tr class="${[notification.unread ? 'unread-stock-notification' : '', notification.all_warehouses_reported ? 'complete-stock-notification' : ''].filter(Boolean).join(' ')}" data-stock-batch-id="${notification.id}">
-            <td>${escapeHtml(notification.article)}</td>
-            <td>${escapeHtml(notification.code || '')}</td>
-            <td>${escapeHtml(notification.name || '')}</td>
-            <td>${formatQuantity(notification.total_stock || 0)}</td>
-            <td>${Number(notification.filled_warehouse_count || 0)} из ${Number(notification.active_warehouse_count || 0)}</td>
+        <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification' : 'unread-stock-notification'}" data-stock-event-url="${escapeHtml(notification.url)}">
+            <td>${Number(notification.event_days || 0)} дней</td>
+            <td>${escapeHtml(formatDateRu(notification.event_date))}</td>
+            <td>${escapeHtml(formatDateRu(notification.expiry_date))}</td>
+            <td>${Number(notification.batch_count || 0)}</td>
+            <td>${Number(notification.filled_count || 0)} из ${Number(notification.expected_count || 0)}</td>
             <td>${escapeHtml(notification.status || '')}</td>
             <td>${escapeHtml(notification.last_stock_at || '—')}</td>
         </tr>
-    `).join('') || '<tr><td colspan="7">Остатков по партиям пока нет.</td></tr>';
-    qsa('[data-stock-batch-id]').forEach((row) => row.addEventListener('click', () => openBatchStockDialog(row.dataset.stockBatchId, { markViewed: true, showWriteOff: true })));
+    `).join('') || '<tr><td colspan="7">Событий с остатками пока нет.</td></tr>';
+    qsa('[data-stock-event-url]').forEach((row) => row.addEventListener('click', () => {
+        window.location.href = row.dataset.stockEventUrl;
+    }));
 }
 
 async function saveSelectedStockBatchStatus() {

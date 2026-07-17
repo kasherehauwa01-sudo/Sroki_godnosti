@@ -117,11 +117,11 @@ declare(strict_types=1);
         <section class="panel" id="tab-notifications">
             <div class="section-heading">
                 <h2>Уведомления</h2>
-                <p>Партии, по которым склады внесли остатки.</p>
+                <p>События по срокам годности и прогресс заполнения остатков складами.</p>
             </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Остаток</th><th>Заполнены остатки</th><th>Статус</th><th>Последнее изменение</th></tr></thead>
+                    <thead><tr><th>Тип события</th><th>Дата события</th><th>Срок годности до</th><th>Партий</th><th>Заполнено остатков</th><th>Статус</th><th>Дата отправки</th></tr></thead>
                     <tbody id="stockBatchNotificationsBody"></tbody>
                 </table>
             </div>

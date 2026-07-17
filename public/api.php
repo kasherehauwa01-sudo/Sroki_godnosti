@@ -71,7 +71,7 @@ function handleApiRequest(): void
                 'stock_notification' => ['ok' => true] + getStockNotificationDetails($pdo, (int)($_GET['id'] ?? 0)),
                 'purchase_recipients' => getProtectedPurchaseRecipients($pdo, $_GET),
                 'purchase_event_summary' => ['ok' => true] + getPurchaseEventSummary($pdo, (string)($_GET['token'] ?? '')),
-                'stock_batch_notifications' => ['ok' => true, 'notifications' => listStockBatchNotifications($pdo)],
+                'stock_batch_notifications' => ['ok' => true, 'notifications' => listPurchaseEventNotifications($pdo)],
                 'events' => ['ok' => true, 'events' => listExpiryEvents($pdo)],
                 'batch_stock_xlsx' => downloadBatchStockXlsx($pdo, (int)($_GET['batch_id'] ?? 0)),
                 'tick' => ['ok' => true],
@@ -255,6 +255,7 @@ function ensurePurchaseNotificationSchema(PDO $pdo): void
             event_date DATE NOT NULL,
             event_days INT NOT NULL,
             expiry_date DATE NOT NULL,
+            access_token VARCHAR(64) NULL,
             access_token_hash CHAR(64) NOT NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
@@ -262,6 +263,13 @@ function ensurePurchaseNotificationSchema(PDO $pdo): void
             INDEX idx_purchase_summary_event (event_key, event_date)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+    $columnCheck = $pdo->prepare(
+        'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+    );
+    $columnCheck->execute([':table' => 'purchase_event_summary_links', ':column' => 'access_token']);
+    if ((int)$columnCheck->fetchColumn() === 0) {
+        $pdo->exec('ALTER TABLE purchase_event_summary_links ADD COLUMN access_token VARCHAR(64) NULL AFTER expiry_date');
+    }
 }
 
 function ensureMissingFilterLogSchema(PDO $pdo): void
@@ -1363,6 +1371,63 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
         'stock' => $stock,
         'filled_count' => array_sum(array_map('count', $stock)),
     ];
+}
+
+function listPurchaseEventNotifications(PDO $pdo): array
+{
+    ensurePurchaseNotificationSchema($pdo);
+    $statement = $pdo->query(
+        "SELECT event_key, DATE(sent_at) AS event_date, MAX(sent_at) AS sent_at
+         FROM stock_notifications
+         WHERE event_key REGEXP '^expiry_[0-9]+$'
+         GROUP BY event_key, DATE(sent_at)
+         ORDER BY sent_at DESC"
+    );
+    $events = [];
+    foreach ($statement->fetchAll() as $row) {
+        $eventKey = (string)$row['event_key'];
+        $eventDate = (string)$row['event_date'];
+        $event = getPurchaseEventData($pdo, $eventKey, $eventDate, false);
+        if (!$event['batches'] || !$event['warehouses']) continue;
+        $expected = count($event['batches']) * count($event['warehouses']);
+        $token = getOrCreatePurchaseEventSummaryToken($pdo, $event);
+        $events[] = [
+            'event_key' => $eventKey,
+            'event_days' => parsePurchaseEventDays($eventKey),
+            'event_date' => $eventDate,
+            'expiry_date' => $event['expiry_date'],
+            'batch_count' => count($event['batches']),
+            'filled_count' => (int)$event['filled_count'],
+            'expected_count' => $expected,
+            'status' => (int)$event['filled_count'] >= $expected ? 'Заполнено' : 'Ожидает заполнения',
+            'last_stock_at' => (string)$row['sent_at'],
+            'url' => publicBaseUrl() . '/purchase-event.php?token=' . rawurlencode($token),
+        ];
+    }
+    return $events;
+}
+
+function getOrCreatePurchaseEventSummaryToken(PDO $pdo, array $event): string
+{
+    $statement = $pdo->prepare(
+        'SELECT access_token FROM purchase_event_summary_links
+         WHERE event_key = :event_key AND event_date = :event_date AND access_token IS NOT NULL
+         ORDER BY id DESC LIMIT 1'
+    );
+    $statement->execute([':event_key' => $event['event_key'], ':event_date' => $event['event_date']]);
+    $token = (string)($statement->fetchColumn() ?: '');
+    if ($token !== '') return $token;
+
+    $token = bin2hex(random_bytes(24));
+    $pdo->prepare(
+        'INSERT INTO purchase_event_summary_links (event_key, event_date, event_days, expiry_date, access_token, access_token_hash)
+         VALUES (:event_key, :event_date, :event_days, :expiry_date, :access_token, :token_hash)'
+    )->execute([
+        ':event_key' => $event['event_key'], ':event_date' => $event['event_date'],
+        ':event_days' => parsePurchaseEventDays((string)$event['event_key']), ':expiry_date' => $event['expiry_date'],
+        ':access_token' => $token, ':token_hash' => hash('sha256', $token),
+    ]);
+    return $token;
 }
 
 function sendPurchaseNotificationForEvent(PDO $pdo, array $event, int $eventDays): void
