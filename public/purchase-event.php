@@ -50,15 +50,14 @@ async function loadPurchaseEvent() {
         const result = await response.json();
         if (!response.ok || !result.ok) throw new Error(result.error || 'Не удалось загрузить сводную таблицу.');
         document.querySelector('#purchaseEventInfo').textContent = `Срок годности до ${formatDate(result.expiry_date)}. Событие: ${result.event_days} дней.`;
-        document.querySelector('#purchaseEventHead').innerHTML = ['Артикул', 'Код', 'Наименование', 'Общий остаток', 'Статус']
+        document.querySelector('#purchaseEventHead').innerHTML = ['Код', 'Наименование', 'Общий остаток', 'Статус']
             .map((title) => `<th class="purchase-event-main-column">${title}</th>`).join('')
             + result.warehouses.map((warehouse) => `<th>${escapeHtml(warehouse.name)}</th>`).join('');
         document.querySelector('#purchaseEventBody').innerHTML = result.rows.map((row) => `<tr>
-            <td class="purchase-event-main-column">${escapeHtml(row.article)}</td>
             <td class="purchase-event-main-column">${escapeHtml(row.code)}</td>
             <td class="purchase-event-main-column">${escapeHtml(row.name)}</td>
             <td class="purchase-event-main-column numeric-cell">${formatQuantity(row.total)}</td>
-            <td class="purchase-event-main-column"><select class="purchase-event-status" data-batch-id="${row.id}">${result.statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === row.status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}</select></td>
+            <td class="purchase-event-main-column"><select class="purchase-event-status" data-batch-id="${row.id}" data-current-status="${escapeHtml(row.status)}">${result.statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === row.status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}</select></td>
             ${result.warehouses.map((warehouse) => `<td class="numeric-cell">${formatQuantity(row.quantities[warehouse.id])}</td>`).join('')}
         </tr>`).join('');
         document.querySelectorAll('.purchase-event-status').forEach((select) => select.addEventListener('change', savePurchaseEventStatus));
@@ -70,15 +69,21 @@ async function loadPurchaseEvent() {
 }
 async function savePurchaseEventStatus(event) {
     const select = event.currentTarget;
+    const password = prompt('Введите пароль для смены статуса партии:');
+    if (password === null) {
+        select.value = select.dataset.currentStatus;
+        return;
+    }
     select.disabled = true;
     try {
         const response = await fetch(`${purchaseEventApiUrl}?action=purchase_event_batch_status`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: purchaseEventToken, batch_id: Number(select.dataset.batchId), status: select.value }),
+            body: JSON.stringify({ token: purchaseEventToken, batch_id: Number(select.dataset.batchId), status: select.value, write_off_password: password }),
         });
         const result = await response.json();
         if (!response.ok || !result.ok) throw new Error(result.error || 'Не удалось изменить статус партии.');
+        select.dataset.currentStatus = result.status;
         document.querySelector('#purchaseEventError').textContent = '';
     } catch (error) {
         document.querySelector('#purchaseEventError').textContent = error.message;

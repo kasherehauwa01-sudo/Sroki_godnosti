@@ -1511,6 +1511,7 @@ function findPurchaseEventByToken(PDO $pdo, string $token): array
 
 function updatePurchaseEventBatchStatus(PDO $pdo, array $payload): array
 {
+    assertWriteOffPassword($payload);
     $eventInfo = findPurchaseEventByToken($pdo, trim((string)($payload['token'] ?? '')));
     $batchId = (int)($payload['batch_id'] ?? 0);
     $status = trim((string)($payload['status'] ?? ''));
@@ -1530,13 +1531,13 @@ function updatePurchaseEventBatchStatus(PDO $pdo, array $payload): array
 function downloadPurchaseEventXls(PDO $pdo, string $token): array
 {
     $summary = getPurchaseEventSummary($pdo, $token);
-    $headers = ['Артикул', 'Код', 'Наименование', 'Общий остаток', 'Статус'];
+    $headers = ['Код', 'Наименование', 'Общий остаток', 'Статус'];
     foreach ($summary['warehouses'] as $warehouse) $headers[] = (string)$warehouse['name'];
     $html = '<html><head><meta charset="UTF-8"></head><body><table border="1"><tr>';
     foreach ($headers as $header) $html .= '<th>' . htmlspecialchars($header, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</th>';
     $html .= '</tr>';
     foreach ($summary['rows'] as $row) {
-        $values = [$row['article'], $row['code'], $row['name'], $row['total'], $row['status']];
+        $values = [$row['code'], $row['name'], $row['total'], $row['status']];
         foreach ($summary['warehouses'] as $warehouse) $values[] = $row['quantities'][(string)$warehouse['id']] ?? '';
         $html .= '<tr>';
         foreach ($values as $value) $html .= '<td>' . htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td>';
