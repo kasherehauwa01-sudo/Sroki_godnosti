@@ -154,6 +154,8 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 #missingFilterEmails { min-height: 84px; max-height: 140px; resize: vertical; }
 .purchase-notification-logs-dialog { width: min(980px, calc(100vw - 28px)); }
 .purchase-notification-logs-dialog .notification-dialog-body { padding: 0; white-space: normal; }
+.notification-history-dialog { width: min(1100px, calc(100vw - 28px)); }
+.notification-history-dialog .notification-dialog-body { padding: 0; white-space: normal; }
 .help-card { max-width: 980px; line-height: 1.55; }
 .help-card h2 { margin-top: 0; }
 .help-card h3 { margin: 22px 0 8px; }

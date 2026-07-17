@@ -1607,7 +1607,6 @@ function renderSettings() {
     setValueIfPresent('#notificationEmails', (settings.emails || []).join('\n'));
     setValueIfPresent('#notificationTime', settings.notification_time || '09:00');
     setValueIfPresent('#missingFilterEmails', (settings.missing_filter_emails || []).join('\n'));
-    renderNotificationHistory(settings.notification_history || []);
     renderPurchaseRecipients();
 
     const autoImport = settings.auto_import || {};
@@ -1702,21 +1701,64 @@ function downloadBatchStockXlsx() {
     window.location.href = url.toString();
 }
 
-function renderNotificationHistory(history) {
-    const container = qs('#notificationHistoryList');
-    if (!history.length) {
-        container.innerHTML = '<tr><td colspan="4">Уведомления пока не отправлялись.</td></tr>';
+function openTestPurchaseNotificationDialog() {
+    setValueIfPresent('#testPurchaseNotificationEmail', '');
+    setTextIfPresent('#testPurchaseNotificationError', '');
+    qs('#testPurchaseNotificationDialog').showModal();
+    focusIfPresent('#testPurchaseNotificationEmail');
+}
+
+function closeTestPurchaseNotificationDialog() {
+    qs('#testPurchaseNotificationDialog').close();
+}
+
+async function submitTestPurchaseNotification(event) {
+    event.preventDefault();
+    const email = qs('#testPurchaseNotificationEmail').value.trim();
+    const errorField = qs('#testPurchaseNotificationError');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errorField.textContent = 'Укажите корректный email.';
         return;
     }
 
-    container.innerHTML = history.map((item) => `
-        <tr>
-            <td>${escapeHtml(item.date || 'Дата не указана')}</td>
-            <td>${escapeHtml(item.type || 'Уведомление')}</td>
-            <td>${escapeHtml(item.event || item.text || 'Событие не указано')}</td>
-            <td>${escapeHtml((item.recipients || []).join(', ') || '—')}</td>
-        </tr>
-    `).join('');
+    const button = event.submitter || qs('#confirmTestPurchaseNotificationButton');
+    button.disabled = true;
+    errorField.textContent = '';
+    try {
+        const result = await api('test_purchase_notification', { settings_password: state.settingsPassword, email });
+        await loadSettings();
+        const message = result.message || 'Тестовое уведомление отправлено.';
+        setTextIfPresent('#testPurchaseNotificationStatus', message);
+        closeTestPurchaseNotificationDialog();
+        showToast(message);
+    } catch (error) {
+        errorField.textContent = error.message;
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function showPurchaseNotificationLogs() {
+    const logs = (state.settings?.notification_history || []).filter((log) => log.type === 'Отдел закупок');
+    const body = qs('#purchaseNotificationLogsBody');
+    if (!logs.length) {
+        body.innerHTML = '<tr><td colspan="4">Логи уведомлений отдела закупок пока отсутствуют.</td></tr>';
+    } else {
+        body.innerHTML = logs.map((log) => `
+            <tr>
+                <td>${escapeHtml(log.date || 'Дата не указана')}</td>
+                <td>${escapeHtml(log.event || log.text || 'Описание отсутствует')}</td>
+                <td>${escapeHtml((log.recipients || []).join(', ') || '—')}</td>
+                <td>${escapeHtml(log.status || 'Статус не указан')}</td>
+            </tr>
+        `).join('');
+    }
+    qs('#purchaseNotificationLogsDialog').showModal();
+}
+
+function closePurchaseNotificationLogs() {
+    qs('#purchaseNotificationLogsDialog').close();
 }
 
 function openTestPurchaseNotificationDialog() {
@@ -1942,14 +1984,15 @@ function showNotificationLogs() {
     const logs = state.settings?.notification_history || [];
     const body = qs('#notificationLogsBody');
     if (!logs.length) {
-        body.textContent = 'Логи уведомлений пока отсутствуют.';
+        body.innerHTML = '<tr><td colspan="4">История уведомлений пока отсутствует.</td></tr>';
     } else {
         body.innerHTML = logs.map((log) => `
-            <article class="notification-history-item">
-                <time>${escapeHtml(log.date || 'Дата не указана')}</time>
-                <p><strong>${escapeHtml(log.status || 'Статус не указан')}</strong></p>
-                <p>${escapeHtml(log.text || 'Описание отсутствует')}</p>
-            </article>
+            <tr>
+                <td>${escapeHtml(log.date || 'Дата не указана')}</td>
+                <td>${escapeHtml(log.type || 'Уведомление')}</td>
+                <td>${escapeHtml(log.event || log.text || 'Событие не указано')}</td>
+                <td>${escapeHtml((log.recipients || []).join(', ') || '—')}</td>
+            </tr>
         `).join('');
     }
     qs('#notificationLogsDialog').showModal();

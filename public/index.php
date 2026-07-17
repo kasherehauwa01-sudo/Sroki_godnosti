@@ -218,7 +218,7 @@ declare(strict_types=1);
                     </label>
                     <div class="settings-actions">
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
-                        <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">Логи уведомлений</button>
+                        <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">История уведомлений</button>
                     </div>
                     <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
                 </div>
@@ -243,16 +243,6 @@ declare(strict_types=1);
                         <button class="ghost-button" id="showMissingFilterLogsButton" formnovalidate type="button">Логи</button>
                     </div>
                     <p class="subtitle" id="testMissingFilterStatus" role="status" aria-live="polite"></p>
-                </div>
-
-                <div class="card form notification-history-card">
-                    <h3>История уведомлений</h3>
-                    <div class="table-wrap">
-                        <table>
-                            <thead><tr><th>Дата, время</th><th>Тип уведомления</th><th>Событие</th><th>Адресаты</th></tr></thead>
-                            <tbody id="notificationHistoryList"><tr><td colspan="4">Уведомления пока не отправлялись.</td></tr></tbody>
-                        </table>
-                    </div>
                 </div>
 
                 <div class="settings-save-bar">
@@ -789,13 +779,18 @@ declare(strict_types=1);
         </form>
     </dialog>
 
-    <dialog class="modal" id="notificationLogsDialog">
+    <dialog class="modal notification-history-dialog" id="notificationLogsDialog">
         <div class="card form modal-card notification-modal-card">
             <div class="modal-heading">
-                <h2>Логи уведомлений</h2>
+                <h2>История уведомлений</h2>
                 <button class="icon-button" id="closeNotificationLogsDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
-            <div class="notification-dialog-body" id="notificationLogsBody"></div>
+            <div class="table-wrap notification-dialog-body">
+                <table>
+                    <thead><tr><th>Дата, время</th><th>Тип уведомления</th><th>Событие</th><th>Адресаты</th></tr></thead>
+                    <tbody id="notificationLogsBody"></tbody>
+                </table>
+            </div>
             <div class="modal-actions">
                 <button class="primary" id="confirmNotificationLogsDialogButton" type="button">Закрыть</button>
             </div>
