@@ -735,7 +735,7 @@ declare(strict_types=1);
                 <h2>Тест уведомления отдела закупок</h2>
                 <button class="icon-button" id="closeTestPurchaseNotificationDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
-            <p class="subtitle">Уведомление будет сформировано по последней партии, для которой все активные склады заполнили остатки.</p>
+            <p class="subtitle">Уведомление будет сформировано по последнему событию, в котором все партии заполнены всеми активными складами.</p>
             <label>Email<input id="testPurchaseNotificationEmail" required autocomplete="email" type="email" placeholder="manager@example.ru"></label>
             <p class="field-error" id="testPurchaseNotificationError" role="alert"></p>
             <div class="modal-actions">
