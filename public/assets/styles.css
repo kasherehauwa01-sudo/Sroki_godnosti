@@ -179,6 +179,10 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .settings-stock-fill-card { grid-column: 1 / -1; }
 .public-stock-card { max-width: 1100px; margin: 0 auto; }
 .public-stock-page h1 { color: var(--text); font-size: clamp(26px, 4vw, 36px); }
+.purchase-event-card { max-width: 1500px; margin: 0 auto; display: grid; gap: 14px; }
+.purchase-event-card h1 { color: var(--text); font-size: clamp(26px, 4vw, 36px); }
+.purchase-event-table { min-width: 980px; }
+.purchase-event-table .purchase-event-main-column { background: #dbeafe; }
 [hidden] { display: none !important; }
 .notification-tab { position: relative; }
 .notification-dot { display: inline-block; width: 9px; height: 9px; margin-left: 6px; border-radius: 999px; background: #dc2626; vertical-align: middle; }

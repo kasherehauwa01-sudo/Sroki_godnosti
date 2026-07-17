@@ -665,6 +665,7 @@ function normalizeStockNotificationRow(array $row, array $items): array
         'warehouse' => (string)($row['warehouse_name'] ?? ''),
         'email' => (string)$row['email'],
         'subject' => (string)$row['subject'],
+        'event_key' => (string)($row['event_key'] ?? ''),
         'status' => (string)$row['status'],
         'created_at' => (string)$row['created_at'],
         'sent_at' => (string)($row['sent_at'] ?? ''),
