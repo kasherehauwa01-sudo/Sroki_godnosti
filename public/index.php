@@ -739,6 +739,40 @@ declare(strict_types=1);
         </form>
     </dialog>
 
+    <dialog class="modal" id="testPurchaseNotificationDialog">
+        <form class="card form modal-card" id="testPurchaseNotificationForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Тест уведомления отдела закупок</h2>
+                <button class="icon-button" id="closeTestPurchaseNotificationDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Уведомление будет сформировано по последней партии, для которой все активные склады заполнили остатки.</p>
+            <label>Email<input id="testPurchaseNotificationEmail" required autocomplete="email" type="email" placeholder="manager@example.ru"></label>
+            <p class="field-error" id="testPurchaseNotificationError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelTestPurchaseNotificationButton" type="button">Отмена</button>
+                <button class="primary" id="confirmTestPurchaseNotificationButton" type="submit">ОК</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal purchase-notification-logs-dialog" id="purchaseNotificationLogsDialog">
+        <div class="card form modal-card notification-modal-card">
+            <div class="modal-heading">
+                <h2>Логи уведомлений отдела закупок</h2>
+                <button class="icon-button" id="closePurchaseNotificationLogsDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="table-wrap notification-dialog-body">
+                <table>
+                    <thead><tr><th>Дата и время</th><th>Событие</th><th>Адресаты</th><th>Статус</th></tr></thead>
+                    <tbody id="purchaseNotificationLogsBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmPurchaseNotificationLogsDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
     <dialog class="modal" id="deleteArticlesDialog">
         <form class="card form modal-card" id="deleteArticlesForm" method="dialog">
             <div class="modal-heading">

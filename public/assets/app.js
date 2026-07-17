@@ -1719,18 +1719,38 @@ function renderNotificationHistory(history) {
     `).join('');
 }
 
-async function sendTestPurchaseNotification() {
-    const button = qs('#testPurchaseNotificationButton');
-    const status = qs('#testPurchaseNotificationStatus');
+function openTestPurchaseNotificationDialog() {
+    setValueIfPresent('#testPurchaseNotificationEmail', '');
+    setTextIfPresent('#testPurchaseNotificationError', '');
+    qs('#testPurchaseNotificationDialog').showModal();
+    focusIfPresent('#testPurchaseNotificationEmail');
+}
+
+function closeTestPurchaseNotificationDialog() {
+    qs('#testPurchaseNotificationDialog').close();
+}
+
+async function submitTestPurchaseNotification(event) {
+    event.preventDefault();
+    const email = qs('#testPurchaseNotificationEmail').value.trim();
+    const errorField = qs('#testPurchaseNotificationError');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errorField.textContent = 'Укажите корректный email.';
+        return;
+    }
+
+    const button = event.submitter || qs('#confirmTestPurchaseNotificationButton');
     button.disabled = true;
-    status.textContent = 'Отправляю тестовое уведомление...';
+    errorField.textContent = '';
     try {
-        const result = await api('test_purchase_notification', { settings_password: state.settingsPassword });
+        const result = await api('test_purchase_notification', { settings_password: state.settingsPassword, email });
         await loadSettings();
-        status.textContent = result.message || 'Тестовое уведомление отправлено.';
-        showToast(status.textContent);
+        const message = result.message || 'Тестовое уведомление отправлено.';
+        setTextIfPresent('#testPurchaseNotificationStatus', message);
+        closeTestPurchaseNotificationDialog();
+        showToast(message);
     } catch (error) {
-        status.textContent = error.message;
+        errorField.textContent = error.message;
         showToast(error.message, true);
     } finally {
         button.disabled = false;
@@ -1739,20 +1759,24 @@ async function sendTestPurchaseNotification() {
 
 function showPurchaseNotificationLogs() {
     const logs = (state.settings?.notification_history || []).filter((log) => log.type === 'Отдел закупок');
-    const body = qs('#notificationLogsBody');
+    const body = qs('#purchaseNotificationLogsBody');
     if (!logs.length) {
-        body.textContent = 'Логи уведомлений отдела закупок пока отсутствуют.';
+        body.innerHTML = '<tr><td colspan="4">Логи уведомлений отдела закупок пока отсутствуют.</td></tr>';
     } else {
         body.innerHTML = logs.map((log) => `
-            <article class="notification-history-item">
-                <time>${escapeHtml(log.date || 'Дата не указана')}</time>
-                <p><strong>${escapeHtml(log.status || 'Статус не указан')}</strong></p>
-                <p>${escapeHtml(log.event || log.text || 'Описание отсутствует')}</p>
-                <p>Адресаты: ${escapeHtml((log.recipients || []).join(', ') || '—')}</p>
-            </article>
+            <tr>
+                <td>${escapeHtml(log.date || 'Дата не указана')}</td>
+                <td>${escapeHtml(log.event || log.text || 'Описание отсутствует')}</td>
+                <td>${escapeHtml((log.recipients || []).join(', ') || '—')}</td>
+                <td>${escapeHtml(log.status || 'Статус не указан')}</td>
+            </tr>
         `).join('');
     }
-    qs('#notificationLogsDialog').showModal();
+    qs('#purchaseNotificationLogsDialog').showModal();
+}
+
+function closePurchaseNotificationLogs() {
+    qs('#purchaseNotificationLogsDialog').close();
 }
 
 function collectSettingsForm() {
@@ -2240,8 +2264,13 @@ function bindEvents() {
 
     qs('#showMissingFilterLogsButton').addEventListener('click', showMissingFilterLogs);
     qs('#testMissingFilterButton').addEventListener('click', sendTestMissingFilterNotification);
-    qs('#testPurchaseNotificationButton').addEventListener('click', sendTestPurchaseNotification);
+    qs('#testPurchaseNotificationButton').addEventListener('click', openTestPurchaseNotificationDialog);
     qs('#showPurchaseNotificationLogsButton').addEventListener('click', showPurchaseNotificationLogs);
+    qs('#testPurchaseNotificationForm').addEventListener('submit', submitTestPurchaseNotification);
+    qs('#closeTestPurchaseNotificationDialogButton').addEventListener('click', closeTestPurchaseNotificationDialog);
+    qs('#cancelTestPurchaseNotificationButton').addEventListener('click', closeTestPurchaseNotificationDialog);
+    qs('#closePurchaseNotificationLogsDialogButton').addEventListener('click', closePurchaseNotificationLogs);
+    qs('#confirmPurchaseNotificationLogsDialogButton').addEventListener('click', closePurchaseNotificationLogs);
     qs('#closeMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
     qs('#confirmMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
 

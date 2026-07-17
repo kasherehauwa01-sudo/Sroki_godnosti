@@ -150,6 +150,10 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .registry-summary { margin: 12px 0; color: var(--muted); font-weight: 700; }
 .notification-modal-card { max-height: min(82vh, 720px); display: flex; flex-direction: column; }
 .notification-dialog-body { max-height: min(52vh, 460px); overflow-y: auto; white-space: pre-line; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: #f8fafc; color: #475569; }
+.missing-filter-card { align-self: start; }
+#missingFilterEmails { min-height: 84px; max-height: 140px; resize: vertical; }
+.purchase-notification-logs-dialog { width: min(980px, calc(100vw - 28px)); }
+.purchase-notification-logs-dialog .notification-dialog-body { padding: 0; white-space: normal; }
 .help-card { max-width: 980px; line-height: 1.55; }
 .help-card h2 { margin-top: 0; }
 .help-card h3 { margin: 22px 0 8px; }

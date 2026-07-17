@@ -1359,13 +1359,14 @@ function sendPurchaseNotificationForBatch(PDO $pdo, int $batchId, int $eventDays
 function sendTestPurchaseNotification(PDO $pdo, array $payload): array
 {
     assertSettingsPassword($payload);
-    $recipients = activePurchaseRecipientEmails($pdo);
-    if (!$recipients) {
-        throw new RuntimeException('Добавьте хотя бы одного получателя отдела закупок.');
+    $email = trim((string)($payload['email'] ?? ''));
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Укажите корректный email для тестового уведомления.');
     }
-    $batch = findNearestExpiringBatch($pdo);
+    $recipients = [$email];
+    $batch = findLatestCompletelyFilledBatch($pdo);
     if (!$batch) {
-        throw new RuntimeException('В реестре нет подходящей партии для тестового уведомления.');
+        throw new RuntimeException('Нет партии с заполненными остатками по всем активным складам.');
     }
 
     $daysLeft = max(0, (int)($batch['days_left'] ?? 0));
@@ -1400,6 +1401,24 @@ function sendTestPurchaseNotification(PDO $pdo, array $payload): array
     }
 
     return ['ok' => true, 'message' => 'Тестовое уведомление отдела закупок отправлено.'];
+}
+
+function findLatestCompletelyFilledBatch(PDO $pdo): ?array
+{
+    $statement = $pdo->query(
+        'SELECT b.id, b.article, b.code, b.name, b.expiry_date, b.expiry_full_date, b.days_left,
+                MAX(bs.updated_at) AS stock_completed_at
+         FROM batches b
+         INNER JOIN batch_stock bs ON bs.batch_id = b.id
+         INNER JOIN warehouses w ON w.id = bs.warehouse_id AND w.is_active = 1
+         GROUP BY b.id, b.article, b.code, b.name, b.expiry_date, b.expiry_full_date, b.days_left
+         HAVING COUNT(DISTINCT w.id) = (SELECT COUNT(*) FROM warehouses WHERE is_active = 1)
+            AND COUNT(DISTINCT w.id) > 0
+         ORDER BY stock_completed_at DESC, b.id DESC
+         LIMIT 1'
+    );
+    $batch = $statement->fetch();
+    return $batch ?: null;
 }
 
 function findBatchForPurchaseNotification(PDO $pdo, int $batchId): ?array
@@ -1841,7 +1860,7 @@ function getNotificationHistory(?PDO $pdo): array
             'type' => $isPurchase ? 'Отдел закупок' : 'Срок годности',
             'event' => notificationHistoryText($action, $payload),
             'recipients' => array_values((array)($payload['recipients'] ?? $payload['emails'] ?? [])),
-            'status' => notificationHistoryStatus($action),
+            'status' => $isPurchase && str_ends_with($action, '_sent') ? 'Успешно' : notificationHistoryStatus($action),
             'text' => notificationHistoryText($action, $payload),
             '_sort' => strtotime((string)$row['created_at']) ?: 0,
         ];
@@ -1859,7 +1878,7 @@ function getNotificationHistory(?PDO $pdo): array
                 ? sprintf('Отправлено товаров: %d.', is_array($codes) ? count($codes) : 0)
                 : 'Ошибка: ' . ((string)($row['error_message'] ?? '') ?: 'причина не указана.'),
             'recipients' => is_array($recipients) ? $recipients : [],
-            'status' => $success ? 'Отправлено' : 'Ошибка',
+            'status' => $success ? 'Успешно' : 'Ошибка',
             'text' => $success ? 'Уведомление отправлено.' : (string)($row['error_message'] ?? ''),
             '_sort' => strtotime((string)$row['created_at']) ?: 0,
         ];
@@ -1884,7 +1903,7 @@ function getNotificationHistory(?PDO $pdo): array
                 ? sprintf('Остатки по товару %s, событие %d дней.', $code, (int)$row['event_days'])
                 : 'Ошибка: ' . ((string)($row['error_message'] ?? '') ?: 'причина не указана.'),
             'recipients' => is_array($recipients) ? $recipients : [],
-            'status' => $success ? 'Отправлено' : 'Ошибка',
+            'status' => $success ? 'Успешно' : 'Ошибка',
             'text' => $success ? 'Уведомление отправлено.' : (string)($row['error_message'] ?? ''),
             '_sort' => strtotime((string)$row['sent_at']) ?: 0,
         ];
