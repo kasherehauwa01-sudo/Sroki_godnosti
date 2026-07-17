@@ -17,7 +17,10 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
 <body>
 <main class="layout purchase-event-page">
     <section class="card purchase-event-card">
-        <h1>Остатки по товарам со сроком годности</h1>
+        <div class="section-heading registry-heading">
+            <h1>Остатки по товарам со сроком годности</h1>
+            <button class="primary" id="downloadPurchaseEventXlsButton" type="button">Скачать XLS</button>
+        </div>
         <p class="subtitle" id="purchaseEventInfo">Загрузка сводной таблицы...</p>
         <p class="field-error" id="purchaseEventError" role="alert"></p>
         <div class="table-wrap hidden" id="purchaseEventTableWrap">
@@ -47,7 +50,7 @@ async function loadPurchaseEvent() {
         const result = await response.json();
         if (!response.ok || !result.ok) throw new Error(result.error || 'Не удалось загрузить сводную таблицу.');
         document.querySelector('#purchaseEventInfo').textContent = `Срок годности до ${formatDate(result.expiry_date)}. Событие: ${result.event_days} дней.`;
-        document.querySelector('#purchaseEventHead').innerHTML = ['Артикул', 'Код', 'Наименование', 'Общий остаток']
+        document.querySelector('#purchaseEventHead').innerHTML = ['Артикул', 'Код', 'Наименование', 'Общий остаток', 'Статус']
             .map((title) => `<th class="purchase-event-main-column">${title}</th>`).join('')
             + result.warehouses.map((warehouse) => `<th>${escapeHtml(warehouse.name)}</th>`).join('');
         document.querySelector('#purchaseEventBody').innerHTML = result.rows.map((row) => `<tr>
@@ -55,14 +58,41 @@ async function loadPurchaseEvent() {
             <td class="purchase-event-main-column">${escapeHtml(row.code)}</td>
             <td class="purchase-event-main-column">${escapeHtml(row.name)}</td>
             <td class="purchase-event-main-column numeric-cell">${formatQuantity(row.total)}</td>
+            <td class="purchase-event-main-column"><select class="purchase-event-status" data-batch-id="${row.id}">${result.statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === row.status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}</select></td>
             ${result.warehouses.map((warehouse) => `<td class="numeric-cell">${formatQuantity(row.quantities[warehouse.id])}</td>`).join('')}
         </tr>`).join('');
+        document.querySelectorAll('.purchase-event-status').forEach((select) => select.addEventListener('change', savePurchaseEventStatus));
         document.querySelector('#purchaseEventTableWrap').classList.remove('hidden');
     } catch (error) {
         document.querySelector('#purchaseEventInfo').textContent = '';
         document.querySelector('#purchaseEventError').textContent = error.message;
     }
 }
+async function savePurchaseEventStatus(event) {
+    const select = event.currentTarget;
+    select.disabled = true;
+    try {
+        const response = await fetch(`${purchaseEventApiUrl}?action=purchase_event_batch_status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: purchaseEventToken, batch_id: Number(select.dataset.batchId), status: select.value }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || 'Не удалось изменить статус партии.');
+        document.querySelector('#purchaseEventError').textContent = '';
+    } catch (error) {
+        document.querySelector('#purchaseEventError').textContent = error.message;
+        await loadPurchaseEvent();
+    } finally {
+        select.disabled = false;
+    }
+}
+document.querySelector('#downloadPurchaseEventXlsButton').addEventListener('click', () => {
+    const url = new URL(purchaseEventApiUrl, window.location.origin);
+    url.searchParams.set('action', 'purchase_event_xls');
+    url.searchParams.set('token', purchaseEventToken);
+    window.location.href = url.toString();
+});
 loadPurchaseEvent();
 </script>
 </body>
