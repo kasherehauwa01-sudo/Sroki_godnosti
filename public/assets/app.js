@@ -1,3 +1,12 @@
+const STOCK_EVENTS_VIEWED_AT_KEY = 'stockEventsViewedAt';
+const storedStockEventsViewedAt = (() => {
+    try {
+        return window.localStorage.getItem(STOCK_EVENTS_VIEWED_AT_KEY) || '';
+    } catch {
+        return '';
+    }
+})();
+
 const state = {
     batches: [],
     filteredBatches: [],
@@ -19,6 +28,7 @@ const state = {
     stockNotifications: [],
     expandedStockNotificationGroups: new Set(),
     stockBatchNotifications: [],
+    stockEventsViewedAt: storedStockEventsViewedAt,
     selectedStockBatchId: null,
     events: [],
     eventPeriodFilters: new Set(['today', 'future']),
@@ -1122,13 +1132,31 @@ async function loadStockBatchNotifications() {
     const result = await api('stock_batch_notifications');
     state.stockBatchNotifications = result.notifications || [];
     renderStockBatchNotifications();
+    if (document.body.dataset.activeTab === 'notifications') markStockEventsViewed();
+}
+
+function markStockEventsViewed() {
+    const latestChange = state.stockBatchNotifications.reduce((latest, notification) => {
+        const changedAt = String(notification.last_stock_at || '');
+        return changedAt > latest ? changedAt : latest;
+    }, state.stockEventsViewedAt);
+    state.stockEventsViewedAt = latestChange;
+    try {
+        window.localStorage.setItem(STOCK_EVENTS_VIEWED_AT_KEY, latestChange);
+    } catch {
+        // В закрытом режиме браузер может запрещать localStorage — точку всё равно скрываем на текущей странице.
+    }
+    qs('#notificationsUnreadDot')?.classList.add('hidden');
 }
 
 function renderStockBatchNotifications() {
     const body = qs('#stockBatchNotificationsBody');
     if (!body) return;
-    const hasIncomplete = state.stockBatchNotifications.some((notification) => notification.status !== 'Заполнено');
-    qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasIncomplete);
+    const hasUnreadChanges = state.stockBatchNotifications.some((notification) => {
+        const changedAt = String(notification.last_stock_at || '');
+        return changedAt !== '' && changedAt > state.stockEventsViewedAt;
+    });
+    qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnreadChanges);
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
         <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification' : ''}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
             <td>${Number(notification.event_days || 0)} дней</td>
