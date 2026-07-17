@@ -115,10 +115,12 @@ function buildMultipartMessage(string $body, array $attachments, string $boundar
         $filename = (string)($attachment['filename'] ?? 'attachment.xls');
         $contentType = (string)($attachment['content_type'] ?? 'application/octet-stream');
         $content = (string)($attachment['content'] ?? '');
+        $safeFilename = addcslashes($filename, '\"');
+        $encodedFilename = rawurlencode($filename);
         $parts[] = '--' . $boundary;
-        $parts[] = 'Content-Type: ' . $contentType . '; name="' . addcslashes($filename, '\"') . '"';
+        $parts[] = 'Content-Type: ' . $contentType . '; name="' . $safeFilename . '"; name*=UTF-8\'\'' . $encodedFilename;
         $parts[] = 'Content-Transfer-Encoding: base64';
-        $parts[] = 'Content-Disposition: attachment; filename="' . addcslashes($filename, '\"') . '"';
+        $parts[] = 'Content-Disposition: attachment; filename="' . $safeFilename . '"; filename*=UTF-8\'\'' . $encodedFilename;
         $parts[] = '';
         $parts[] = chunk_split(base64_encode($content));
     }
