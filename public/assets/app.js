@@ -107,7 +107,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_delete']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_delete']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -1705,17 +1705,54 @@ function downloadBatchStockXlsx() {
 function renderNotificationHistory(history) {
     const container = qs('#notificationHistoryList');
     if (!history.length) {
-        container.textContent = 'Уведомления пока не отправлялись.';
+        container.innerHTML = '<tr><td colspan="4">Уведомления пока не отправлялись.</td></tr>';
         return;
     }
 
     container.innerHTML = history.map((item) => `
-        <article class="notification-history-item">
-            <time>${escapeHtml(item.date || 'Дата не указана')}</time>
-            <p><strong>${escapeHtml(item.status || 'Статус не указан')}</strong></p>
-            <p>${escapeHtml(item.text || 'Текст уведомления не указан')}</p>
-        </article>
+        <tr>
+            <td>${escapeHtml(item.date || 'Дата не указана')}</td>
+            <td>${escapeHtml(item.type || 'Уведомление')}</td>
+            <td>${escapeHtml(item.event || item.text || 'Событие не указано')}</td>
+            <td>${escapeHtml((item.recipients || []).join(', ') || '—')}</td>
+        </tr>
     `).join('');
+}
+
+async function sendTestPurchaseNotification() {
+    const button = qs('#testPurchaseNotificationButton');
+    const status = qs('#testPurchaseNotificationStatus');
+    button.disabled = true;
+    status.textContent = 'Отправляю тестовое уведомление...';
+    try {
+        const result = await api('test_purchase_notification', { settings_password: state.settingsPassword });
+        await loadSettings();
+        status.textContent = result.message || 'Тестовое уведомление отправлено.';
+        showToast(status.textContent);
+    } catch (error) {
+        status.textContent = error.message;
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function showPurchaseNotificationLogs() {
+    const logs = (state.settings?.notification_history || []).filter((log) => log.type === 'Отдел закупок');
+    const body = qs('#notificationLogsBody');
+    if (!logs.length) {
+        body.textContent = 'Логи уведомлений отдела закупок пока отсутствуют.';
+    } else {
+        body.innerHTML = logs.map((log) => `
+            <article class="notification-history-item">
+                <time>${escapeHtml(log.date || 'Дата не указана')}</time>
+                <p><strong>${escapeHtml(log.status || 'Статус не указан')}</strong></p>
+                <p>${escapeHtml(log.event || log.text || 'Описание отсутствует')}</p>
+                <p>Адресаты: ${escapeHtml((log.recipients || []).join(', ') || '—')}</p>
+            </article>
+        `).join('');
+    }
+    qs('#notificationLogsDialog').showModal();
 }
 
 function collectSettingsForm() {
@@ -2203,6 +2240,8 @@ function bindEvents() {
 
     qs('#showMissingFilterLogsButton').addEventListener('click', showMissingFilterLogs);
     qs('#testMissingFilterButton').addEventListener('click', sendTestMissingFilterNotification);
+    qs('#testPurchaseNotificationButton').addEventListener('click', sendTestPurchaseNotification);
+    qs('#showPurchaseNotificationLogsButton').addEventListener('click', showPurchaseNotificationLogs);
     qs('#closeMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
     qs('#confirmMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
 
@@ -2215,7 +2254,7 @@ function bindEvents() {
     qs('#closeAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
     qs('#confirmAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
     qs('#copyDeployCommandButton').addEventListener('click', copyDeployCommand);
-    qsa('#settingsForm input, #settingsForm textarea').forEach((field) => {
+    qsa('#settingsForm input, #settingsForm textarea, #notificationSettingsForm input, #notificationSettingsForm textarea').forEach((field) => {
         if (field.id !== 'deployCommandInput') {
             field.addEventListener('input', markSettingsDirty);
             field.addEventListener('change', markSettingsDirty);
@@ -2223,6 +2262,14 @@ function bindEvents() {
     });
 
     qs('#settingsForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+            await persistSettings();
+        } catch (error) {
+            showToast(error.message, true);
+        }
+    });
+    qs('#notificationSettingsForm').addEventListener('submit', async (event) => {
         event.preventDefault();
         try {
             await persistSettings();

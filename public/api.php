@@ -54,7 +54,7 @@ function handleApiRequest(): void
         }
 
         refreshDaysLeft($pdo);
-        if ($action !== 'test_notification') {
+        if (!in_array($action, ['test_notification', 'test_purchase_notification'], true)) {
             runDueExpiryNotifications($pdo);
         }
 
@@ -88,6 +88,7 @@ function handleApiRequest(): void
                 'test_notification' => sendTestNotification($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
                 'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
+                'test_purchase_notification' => sendTestPurchaseNotification($pdo, $payload),
                 'test_stock_fill_notification' => sendTestStockFillNotification($pdo, $payload),
                 'verify_write_off' => verifyWriteOffPassword($payload),
                 'warehouse_create' => createWarehouse($pdo, $payload),
@@ -1355,6 +1356,52 @@ function sendPurchaseNotificationForBatch(PDO $pdo, int $batchId, int $eventDays
     }
 }
 
+function sendTestPurchaseNotification(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $recipients = activePurchaseRecipientEmails($pdo);
+    if (!$recipients) {
+        throw new RuntimeException('Добавьте хотя бы одного получателя отдела закупок.');
+    }
+    $batch = findNearestExpiringBatch($pdo);
+    if (!$batch) {
+        throw new RuntimeException('В реестре нет подходящей партии для тестового уведомления.');
+    }
+
+    $daysLeft = max(0, (int)($batch['days_left'] ?? 0));
+    $code = trim((string)($batch['code'] ?? '')) ?: (string)$batch['article'];
+    $subject = sprintf('Тест: остатки по товару %s с остатком срока годности %d дней', $code, $daysLeft);
+    $body = sprintf(
+        "Тестовое уведомление отдела закупок по товару %s, %s, %d дней.\n\nОткрыть партию: %s/?batch_id=%d",
+        $code,
+        (string)($batch['name'] ?? ''),
+        $daysLeft,
+        rtrim(publicBaseUrl(), '/'),
+        (int)$batch['id']
+    );
+
+    try {
+        sendNotificationEmail($pdo, $recipients, $subject, $body, getRawSettings($pdo));
+        writeLog($pdo, 'purchase_test_notification_sent', [
+            'recipients' => $recipients,
+            'batch_id' => (int)$batch['id'],
+            'code' => $code,
+            'days_left' => $daysLeft,
+        ]);
+    } catch (Throwable $error) {
+        writeLog($pdo, 'purchase_test_notification_failed', [
+            'recipients' => $recipients,
+            'batch_id' => (int)$batch['id'],
+            'code' => $code,
+            'days_left' => $daysLeft,
+            'error' => $error->getMessage(),
+        ]);
+        throw $error;
+    }
+
+    return ['ok' => true, 'message' => 'Тестовое уведомление отдела закупок отправлено.'];
+}
+
 function findBatchForPurchaseNotification(PDO $pdo, int $batchId): ?array
 {
     $statement = $pdo->prepare('SELECT id, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, days_left FROM batches WHERE id = :id');
@@ -1774,26 +1821,80 @@ function getNotificationHistory(?PDO $pdo): array
         return [];
     }
 
+    $history = [];
     $statement = $pdo->prepare(
         "SELECT action, payload, created_at
          FROM logs
-         WHERE action IN ('expiry_notifications_sent', 'expiry_notifications_failed', 'test_notification_sent', 'test_notification_failed')
+         WHERE action IN ('expiry_notifications_sent', 'expiry_notifications_failed', 'test_notification_sent', 'test_notification_failed', 'purchase_test_notification_sent', 'purchase_test_notification_failed')
          ORDER BY id DESC
          LIMIT 100"
     );
     $statement->execute();
 
-    return array_map(static function (array $row): array {
+    foreach ($statement->fetchAll() as $row) {
         $action = (string)$row['action'];
         $payload = json_decode((string)($row['payload'] ?? ''), true);
         $payload = is_array($payload) ? $payload : [];
-
-        return [
+        $isPurchase = str_starts_with($action, 'purchase_');
+        $history[] = [
             'date' => formatMoscowDateTime((string)$row['created_at']),
+            'type' => $isPurchase ? 'Отдел закупок' : 'Срок годности',
+            'event' => notificationHistoryText($action, $payload),
+            'recipients' => array_values((array)($payload['recipients'] ?? $payload['emails'] ?? [])),
             'status' => notificationHistoryStatus($action),
             'text' => notificationHistoryText($action, $payload),
+            '_sort' => strtotime((string)$row['created_at']) ?: 0,
         ];
-    }, $statement->fetchAll());
+    }
+
+    ensureMissingFilterLogSchema($pdo);
+    foreach ($pdo->query('SELECT created_at, codes, recipients, status, error_message FROM notification_missing_filter_logs ORDER BY id DESC LIMIT 100')->fetchAll() as $row) {
+        $codes = json_decode((string)$row['codes'], true);
+        $recipients = json_decode((string)$row['recipients'], true);
+        $success = (string)$row['status'] === 'SUCCESS';
+        $history[] = [
+            'date' => formatMoscowDateTime((string)$row['created_at']),
+            'type' => 'Товар без фильтров',
+            'event' => $success
+                ? sprintf('Отправлено товаров: %d.', is_array($codes) ? count($codes) : 0)
+                : 'Ошибка: ' . ((string)($row['error_message'] ?? '') ?: 'причина не указана.'),
+            'recipients' => is_array($recipients) ? $recipients : [],
+            'status' => $success ? 'Отправлено' : 'Ошибка',
+            'text' => $success ? 'Уведомление отправлено.' : (string)($row['error_message'] ?? ''),
+            '_sort' => strtotime((string)$row['created_at']) ?: 0,
+        ];
+    }
+
+    ensurePurchaseNotificationSchema($pdo);
+    $purchaseLogs = $pdo->query(
+        'SELECT l.sent_at, l.event_days, l.recipients, l.status, l.error_message, b.article, b.code
+         FROM purchase_notification_log l
+         INNER JOIN batches b ON b.id = l.batch_id
+         ORDER BY l.id DESC
+         LIMIT 100'
+    );
+    foreach ($purchaseLogs->fetchAll() as $row) {
+        $recipients = json_decode((string)$row['recipients'], true);
+        $success = (string)$row['status'] === 'SUCCESS';
+        $code = trim((string)$row['code']) ?: (string)$row['article'];
+        $history[] = [
+            'date' => formatMoscowDateTime((string)$row['sent_at']),
+            'type' => 'Отдел закупок',
+            'event' => $success
+                ? sprintf('Остатки по товару %s, событие %d дней.', $code, (int)$row['event_days'])
+                : 'Ошибка: ' . ((string)($row['error_message'] ?? '') ?: 'причина не указана.'),
+            'recipients' => is_array($recipients) ? $recipients : [],
+            'status' => $success ? 'Отправлено' : 'Ошибка',
+            'text' => $success ? 'Уведомление отправлено.' : (string)($row['error_message'] ?? ''),
+            '_sort' => strtotime((string)$row['sent_at']) ?: 0,
+        ];
+    }
+
+    usort($history, static fn (array $left, array $right): int => $right['_sort'] <=> $left['_sort']);
+    return array_map(static function (array $item): array {
+        unset($item['_sort']);
+        return $item;
+    }, array_slice($history, 0, 100));
 }
 
 function notificationHistoryStatus(string $action): string
@@ -1826,6 +1927,14 @@ function notificationHistoryText(string $action, array $payload): string
             'Тестовое уведомление: истекает срок годности через %d дней у партии артикул %s.',
             (int)$payload['days_left'],
             (string)$payload['article']
+        );
+    }
+
+    if ($action === 'purchase_test_notification_sent') {
+        return sprintf(
+            'Тестовое уведомление по товару %s, событие %d дней.',
+            (string)($payload['code'] ?? 'не указан'),
+            (int)($payload['days_left'] ?? 0)
         );
     }
 

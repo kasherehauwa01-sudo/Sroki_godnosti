@@ -130,6 +130,7 @@ declare(strict_types=1);
         <section class="panel" id="tab-settings">
             <div class="settings-subtabs" aria-label="Разделы настроек">
                 <button class="settings-subtab active" data-settings-tab="main" type="button">Основные</button>
+                <button class="settings-subtab" data-settings-tab="notifications" type="button">Уведомления</button>
                 <button class="settings-subtab" data-settings-tab="warehouses" type="button">Склады</button>
                 <button class="settings-subtab" data-settings-tab="stock-fill" type="button">Заполнение остатков</button>
             </div>
@@ -152,48 +153,6 @@ declare(strict_types=1);
             </div>
 
             <form class="settings-grid settings-subpanel active" data-settings-panel="main" id="settingsForm">
-                <div class="card form">
-                    <h3>Уведомления</h3>
-                    <label class="checkbox-row"><input id="notify0" name="notify_0_days" type="checkbox"> В день просрочки</label>
-                    <label class="checkbox-row"><input id="notify180" name="notify_180_days" type="checkbox"> За 180 дней</label>
-                    <label class="checkbox-row"><input id="notify90" name="notify_90_days" type="checkbox"> За 90 дней</label>
-                    <label class="checkbox-row"><input id="notify60" name="notify_60_days" type="checkbox"> За 60 дней</label>
-                    <label class="checkbox-row"><input id="notify30" name="notify_30_days" type="checkbox"> За 30 дней</label>
-                    <label class="checkbox-row"><input id="notify15" name="notify_15_days" type="checkbox"> За 15 дней</label>
-                    <label class="checkbox-row"><input id="notify7" name="notify_7_days" type="checkbox"> За 7 дней</label>
-                    <label class="checkbox-row"><input id="notify1" name="notify_1_day" type="checkbox"> За 1 день</label>
-                    <label>Время отправки уведомлений
-                        <input id="notificationTime" name="notification_time" type="time" value="09:00">
-                    </label>
-                    <div class="settings-actions">
-                        <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
-                        <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">Логи уведомлений</button>
-                    </div>
-                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
-                </div>
-
-                <div class="card form notification-history-card">
-                    <h3>История уведомлений</h3>
-                    <div class="notification-history-list" id="notificationHistoryList" aria-live="polite">Уведомления пока не отправлялись.</div>
-                </div>
-
-                <div class="card form purchase-recipients-card">
-                    <h3>Настройка уведомлений Отделу закупок</h3>
-                    <div class="notification-history-list" id="purchaseRecipientsList" aria-live="polite">Получатели пока не добавлены.</div>
-                    <button class="ghost-button" id="openPurchaseRecipientButton" formnovalidate type="button">Добавить получателя</button>
-                </div>
-
-                <div class="card form missing-filter-card">
-                    <h3>Уведомления «Товар без фильтров»</h3>
-                    <label>Получатели<textarea id="missingFilterEmails" rows="5" placeholder="ivan@mail.ru&#10;petrov@mail.ru"></textarea></label>
-                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
-                    <div class="settings-actions">
-                        <button class="ghost-button" id="testMissingFilterButton" formnovalidate type="button">Тест</button>
-                        <button class="ghost-button" id="showMissingFilterLogsButton" formnovalidate type="button">Логи</button>
-                    </div>
-                    <p class="subtitle" id="testMissingFilterStatus" role="status" aria-live="polite"></p>
-                </div>
-
                 <div class="card form settings-auto-import-card">
                     <h3>Автозагрузка</h3>
                     <p class="subtitle">Автозагрузка запускается в 23:50 по московскому времени.</p>
@@ -238,9 +197,66 @@ declare(strict_types=1);
                     <p class="subtitle">Нажмите «Копировать», чтобы скопировать команду обновления в буфер обмена.</p>
                 </div>
 
-
                 <div class="settings-save-bar">
                     <button class="primary" id="saveSettingsButton" type="submit">Сохранить настройки</button>
+                </div>
+            </form>
+
+            <form class="settings-grid settings-subpanel" data-settings-panel="notifications" id="notificationSettingsForm" hidden>
+                <div class="card form">
+                    <h3>Уведомления</h3>
+                    <label class="checkbox-row"><input id="notify0" name="notify_0_days" type="checkbox"> В день просрочки</label>
+                    <label class="checkbox-row"><input id="notify180" name="notify_180_days" type="checkbox"> За 180 дней</label>
+                    <label class="checkbox-row"><input id="notify90" name="notify_90_days" type="checkbox"> За 90 дней</label>
+                    <label class="checkbox-row"><input id="notify60" name="notify_60_days" type="checkbox"> За 60 дней</label>
+                    <label class="checkbox-row"><input id="notify30" name="notify_30_days" type="checkbox"> За 30 дней</label>
+                    <label class="checkbox-row"><input id="notify15" name="notify_15_days" type="checkbox"> За 15 дней</label>
+                    <label class="checkbox-row"><input id="notify7" name="notify_7_days" type="checkbox"> За 7 дней</label>
+                    <label class="checkbox-row"><input id="notify1" name="notify_1_day" type="checkbox"> За 1 день</label>
+                    <label>Время отправки уведомлений
+                        <input id="notificationTime" name="notification_time" type="time" value="09:00">
+                    </label>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                        <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">Логи уведомлений</button>
+                    </div>
+                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="card form purchase-recipients-card">
+                    <h3>Настройка уведомлений Отделу закупок</h3>
+                    <div class="notification-history-list" id="purchaseRecipientsList" aria-live="polite">Получатели пока не добавлены.</div>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="openPurchaseRecipientButton" formnovalidate type="button">Добавить получателя</button>
+                        <button class="ghost-button" id="testPurchaseNotificationButton" formnovalidate type="button">Тест</button>
+                        <button class="ghost-button" id="showPurchaseNotificationLogsButton" formnovalidate type="button">Логи</button>
+                    </div>
+                    <p class="subtitle" id="testPurchaseNotificationStatus" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="card form missing-filter-card">
+                    <h3>Уведомления «Товар без фильтров»</h3>
+                    <label>Получатели<textarea id="missingFilterEmails" rows="5" placeholder="ivan@mail.ru&#10;petrov@mail.ru"></textarea></label>
+                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="testMissingFilterButton" formnovalidate type="button">Тест</button>
+                        <button class="ghost-button" id="showMissingFilterLogsButton" formnovalidate type="button">Логи</button>
+                    </div>
+                    <p class="subtitle" id="testMissingFilterStatus" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="card form notification-history-card">
+                    <h3>История уведомлений</h3>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Дата, время</th><th>Тип уведомления</th><th>Событие</th><th>Адресаты</th></tr></thead>
+                            <tbody id="notificationHistoryList"><tr><td colspan="4">Уведомления пока не отправлялись.</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="settings-save-bar">
+                    <button class="primary" type="submit">Сохранить настройки</button>
                 </div>
             </form>
 
@@ -337,7 +353,7 @@ declare(strict_types=1);
                 <ul>
                     <li>Сервис умеет анализировать файл ежедневной выгрузки и находить товары без фильтра <code>Срок годности</code>.</li>
                     <li>Для таких товаров формируется отдельная email-рассылка ответственным получателям.</li>
-                    <li>Получатели рассылки настраиваются во вкладке <code>Настройки</code> в блоке уведомлений <code>Товар без фильтров</code>.</li>
+                    <li>Получатели рассылки настраиваются во вкладке <code>Настройки → Уведомления</code> в блоке <code>Товар без фильтров</code>.</li>
                     <li>В настройках доступна тестовая отправка и просмотр логов рассылки товаров без фильтров.</li>
                     <li>Рассылка помогает обнаружить товары, которые не попадут в контроль сроков годности из-за отсутствующего фильтра в исходной выгрузке.</li>
                 </ul>
