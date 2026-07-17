@@ -52,6 +52,7 @@ declare(strict_types=1);
                         <option>В наличии</option>
                         <option>Реализована</option>
                         <option>Списана</option>
+                        <option>Нет в наличии</option>
                     </select>
                 </label>
                 <label>Остаток дней до
@@ -100,9 +101,14 @@ declare(strict_types=1);
                 <h2>События</h2>
                 <p>Партии с событиями по сроку годности: 180, 90, 60, 30 и 1 день.</p>
             </div>
+            <div class="card event-periods" aria-label="Фильтр событий по периоду">
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="past"> Прошедшие</label>
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="today" checked> Сегодня</label>
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="future" checked> Будущие</label>
+            </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Срок годности</th><th>Тип события</th></tr></thead>
+                    <thead><tr><th>Тип события</th><th>Дата события</th><th>Количество партий</th></tr></thead>
                     <tbody id="eventsBody"></tbody>
                 </table>
             </div>
@@ -115,7 +121,7 @@ declare(strict_types=1);
             </div>
             <div class="table-wrap card">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Остаток</th><th>Статус</th><th>Последнее изменение</th></tr></thead>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Остаток</th><th>Заполнены остатки</th><th>Статус</th><th>Последнее изменение</th></tr></thead>
                     <tbody id="stockBatchNotificationsBody"></tbody>
                 </table>
             </div>
@@ -124,6 +130,7 @@ declare(strict_types=1);
         <section class="panel" id="tab-settings">
             <div class="settings-subtabs" aria-label="Разделы настроек">
                 <button class="settings-subtab active" data-settings-tab="main" type="button">Основные</button>
+                <button class="settings-subtab" data-settings-tab="notifications" type="button">Уведомления</button>
                 <button class="settings-subtab" data-settings-tab="warehouses" type="button">Склады</button>
                 <button class="settings-subtab" data-settings-tab="stock-fill" type="button">Заполнение остатков</button>
             </div>
@@ -146,42 +153,6 @@ declare(strict_types=1);
             </div>
 
             <form class="settings-grid settings-subpanel active" data-settings-panel="main" id="settingsForm">
-                <div class="card form">
-                    <h3>Уведомления</h3>
-                    <label class="checkbox-row"><input id="notify0" name="notify_0_days" type="checkbox"> В день просрочки</label>
-                    <label class="checkbox-row"><input id="notify180" name="notify_180_days" type="checkbox"> За 180 дней</label>
-                    <label class="checkbox-row"><input id="notify90" name="notify_90_days" type="checkbox"> За 90 дней</label>
-                    <label class="checkbox-row"><input id="notify60" name="notify_60_days" type="checkbox"> За 60 дней</label>
-                    <label class="checkbox-row"><input id="notify30" name="notify_30_days" type="checkbox"> За 30 дней</label>
-                    <label class="checkbox-row"><input id="notify15" name="notify_15_days" type="checkbox"> За 15 дней</label>
-                    <label class="checkbox-row"><input id="notify7" name="notify_7_days" type="checkbox"> За 7 дней</label>
-                    <label class="checkbox-row"><input id="notify1" name="notify_1_day" type="checkbox"> За 1 день</label>
-                    <label>Время отправки уведомлений
-                        <input id="notificationTime" name="notification_time" type="time" value="09:00">
-                    </label>
-                    <div class="settings-actions">
-                        <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
-                        <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">Логи уведомлений</button>
-                    </div>
-                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
-                </div>
-
-                <div class="card form notification-history-card">
-                    <h3>История уведомлений</h3>
-                    <div class="notification-history-list" id="notificationHistoryList" aria-live="polite">Уведомления пока не отправлялись.</div>
-                </div>
-
-                <div class="card form missing-filter-card">
-                    <h3>Уведомления «Товар без фильтров»</h3>
-                    <label>Получатели<textarea id="missingFilterEmails" rows="5" placeholder="ivan@mail.ru&#10;petrov@mail.ru"></textarea></label>
-                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
-                    <div class="settings-actions">
-                        <button class="ghost-button" id="testMissingFilterButton" formnovalidate type="button">Тест</button>
-                        <button class="ghost-button" id="showMissingFilterLogsButton" formnovalidate type="button">Логи</button>
-                    </div>
-                    <p class="subtitle" id="testMissingFilterStatus" role="status" aria-live="polite"></p>
-                </div>
-
                 <div class="card form settings-auto-import-card">
                     <h3>Автозагрузка</h3>
                     <p class="subtitle">Автозагрузка запускается в 23:50 по московскому времени.</p>
@@ -226,9 +197,56 @@ declare(strict_types=1);
                     <p class="subtitle">Нажмите «Копировать», чтобы скопировать команду обновления в буфер обмена.</p>
                 </div>
 
-
                 <div class="settings-save-bar">
                     <button class="primary" id="saveSettingsButton" type="submit">Сохранить настройки</button>
+                </div>
+            </form>
+
+            <form class="settings-grid settings-subpanel" data-settings-panel="notifications" id="notificationSettingsForm" hidden>
+                <div class="card form">
+                    <h3>Уведомления</h3>
+                    <label class="checkbox-row"><input id="notify0" name="notify_0_days" type="checkbox"> В день просрочки</label>
+                    <label class="checkbox-row"><input id="notify180" name="notify_180_days" type="checkbox"> За 180 дней</label>
+                    <label class="checkbox-row"><input id="notify90" name="notify_90_days" type="checkbox"> За 90 дней</label>
+                    <label class="checkbox-row"><input id="notify60" name="notify_60_days" type="checkbox"> За 60 дней</label>
+                    <label class="checkbox-row"><input id="notify30" name="notify_30_days" type="checkbox"> За 30 дней</label>
+                    <label class="checkbox-row"><input id="notify15" name="notify_15_days" type="checkbox"> За 15 дней</label>
+                    <label class="checkbox-row"><input id="notify7" name="notify_7_days" type="checkbox"> За 7 дней</label>
+                    <label class="checkbox-row"><input id="notify1" name="notify_1_day" type="checkbox"> За 1 день</label>
+                    <label>Время отправки уведомлений
+                        <input id="notificationTime" name="notification_time" type="time" value="09:00">
+                    </label>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                        <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">История уведомлений</button>
+                    </div>
+                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="card form purchase-recipients-card">
+                    <h3>Настройка уведомлений Отделу закупок</h3>
+                    <div class="notification-history-list" id="purchaseRecipientsList" aria-live="polite">Получатели пока не добавлены.</div>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="openPurchaseRecipientButton" formnovalidate type="button">Добавить получателя</button>
+                        <button class="ghost-button" id="testPurchaseNotificationButton" formnovalidate type="button">Тест</button>
+                        <button class="ghost-button" id="showPurchaseNotificationLogsButton" formnovalidate type="button">Логи</button>
+                    </div>
+                    <p class="subtitle" id="testPurchaseNotificationStatus" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="card form missing-filter-card">
+                    <h3>Уведомления «Товар без фильтров»</h3>
+                    <label>Получатели<textarea id="missingFilterEmails" rows="5" placeholder="ivan@mail.ru&#10;petrov@mail.ru"></textarea></label>
+                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="testMissingFilterButton" formnovalidate type="button">Тест</button>
+                        <button class="ghost-button" id="showMissingFilterLogsButton" formnovalidate type="button">Логи</button>
+                    </div>
+                    <p class="subtitle" id="testMissingFilterStatus" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="settings-save-bar">
+                    <button class="primary" type="submit">Сохранить настройки</button>
                 </div>
             </form>
 
@@ -243,7 +261,7 @@ declare(strict_types=1);
                     </div>
                     <div class="table-wrap">
                         <table>
-                            <thead><tr><th>Склад</th><th>Партий</th><th>Заполнено</th><th>Статус</th><th>Последнее изменение</th><th>Действия</th></tr></thead>
+                            <thead><tr><th>Дата отправки</th><th>Тип события</th><th>Склад</th><th>Партий</th><th>Заполнено</th><th>Статус</th><th>Последнее изменение</th><th>Действия</th></tr></thead>
                             <tbody id="stockNotificationsBody"></tbody>
                         </table>
                     </div>
@@ -267,8 +285,8 @@ declare(strict_types=1);
 
                 <h3>Реестр партий</h3>
                 <ul>
-                    <li>Хранение партий товаров с артикулом, кодом, наименованием, количеством, сроком годности, датой внесения, источником создания и статусом.</li>
-                    <li>Поддержка статусов <code>В наличии</code>, <code>Реализована</code>, <code>Списана</code>.</li>
+                    <li>Хранение партий товаров с артикулом, кодом, наименованием, сроком годности, датой внесения, источником создания и статусом.</li>
+                    <li>Поддержка статусов <code>В наличии</code>, <code>Реализована</code>, <code>Списана</code>, <code>Нет в наличии</code>.</li>
                     <li>Поиск по артикулу, коду или наименованию.</li>
                     <li>Фильтры по статусу, остатку дней до срока годности и событию по сроку годности.</li>
                     <li>Сортировка по артикулу, сроку годности, остатку дней и дате внесения.</li>
@@ -310,7 +328,7 @@ declare(strict_types=1);
                     <li>Если склад добавлен, удален или деактивирован, значение <code>y</code> пересчитывается по текущему списку активных складов.</li>
                     <li>Партии со статусом <code>Списана</code> не попадают в формы заполнения остатков и в список складских уведомлений.</li>
                     <li>Из вкладки <code>Уведомления</code> можно открыть партию и посмотреть остатки по активным складам.</li>
-                    <li>В окне остатков доступна кнопка <code>Списать</code>: после нажатия появляется выбор статуса, пользователь выбирает статус и нажимает <code>Сохранить</code>. Статус партии обновляется в реестре.</li>
+                    <li>В окне остатков доступна кнопка <code>Сменить статус</code>: после нажатия появляется выбор статуса, пользователь выбирает статус и нажимает <code>Сохранить</code>. Статус партии обновляется в реестре.</li>
                 </ul>
 
                 <h3>Склады</h3>
@@ -325,7 +343,7 @@ declare(strict_types=1);
                 <ul>
                     <li>Сервис умеет анализировать файл ежедневной выгрузки и находить товары без фильтра <code>Срок годности</code>.</li>
                     <li>Для таких товаров формируется отдельная email-рассылка ответственным получателям.</li>
-                    <li>Получатели рассылки настраиваются во вкладке <code>Настройки</code> в блоке уведомлений <code>Товар без фильтров</code>.</li>
+                    <li>Получатели рассылки настраиваются во вкладке <code>Настройки → Уведомления</code> в блоке <code>Товар без фильтров</code>.</li>
                     <li>В настройках доступна тестовая отправка и просмотр логов рассылки товаров без фильтров.</li>
                     <li>Рассылка помогает обнаружить товары, которые не попадут в контроль сроков годности из-за отсутствующего фильтра в исходной выгрузке.</li>
                 </ul>
@@ -399,7 +417,6 @@ declare(strict_types=1);
                 <p>Обязательные колонки файла:</p>
                 <ul>
                     <li><code>Артикул</code>;</li>
-                    <li><code>Количество</code> или <code>Количество в партии</code>;</li>
                     <li><code>Срок годности до</code>, <code>Срок годности</code> или похожий заголовок.</li>
                 </ul>
                 <p>Необязательные колонки:</p>
@@ -435,14 +452,18 @@ declare(strict_types=1);
                     <li>Нажимает сохранение формы.</li>
                     <li>Администратор видит прогресс заполнения во вкладке <code>Уведомления</code>.</li>
                 </ol>
+            </div>
+        </section>
 
+        <!-- Вкладка истории должна быть самостоятельной панелью, а не частью скрытой инструкции. -->
         <section class="panel" id="tab-history">
             <div class="card filters history-filters">
                 <label>Дата
                     <select id="historyDatePreset">
+                        <option selected value="all">Всё время</option>
                         <option value="today">Сегодня</option>
                         <option value="yesterday">Вчера</option>
-                        <option selected value="week">Неделя</option>
+                        <option value="week">Неделя</option>
                         <option value="month">Месяц</option>
                         <option value="year">Год</option>
                         <option value="custom">Произвольная дата</option>
@@ -458,6 +479,11 @@ declare(strict_types=1);
                         <option value="update">Изменение партий</option>
                         <option value="delete">Удаление партий</option>
                         <option value="auto_import_completed">Автозагрузка</option>
+                        <option value="auto_import_failed">Ошибка автозагрузки</option>
+                        <option value="auto_import_not_found">Автозагрузка без файлов</option>
+                        <option value="delete_by_articles">Удаление артикулов</option>
+                        <option value="expiry_notifications_sent">Отправка уведомлений</option>
+                        <option value="expiry_notifications_failed">Ошибка уведомлений</option>
                     </select>
                 </label>
             </div>
@@ -585,13 +611,13 @@ declare(strict_types=1);
             <label>Артикул<input id="editArticle" name="article" required autocomplete="off"></label>
             <label>Код<input id="editCode" name="code" autocomplete="off"></label>
             <label>Наименование<input id="editName" name="name" autocomplete="off"></label>
-            <label>Количество в партии<input id="editQuantity" name="quantity" required min="0" step="1" type="number"></label>
             <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10"></label>
             <label>Статус
                 <select id="editStatus" name="status" required>
                     <option>В наличии</option>
                     <option>Реализована</option>
                     <option>Списана</option>
+                    <option>Нет в наличии</option>
                 </select>
             </label>
             <label>Дата внесения<input id="editCreatedAt" name="createdAt" required type="date"></label>
@@ -619,7 +645,20 @@ declare(strict_types=1);
                 </table>
             </div>
             <div class="modal-actions">
-                <button class="ghost-button danger hidden" id="writeOffStockBatchButton" type="button">Списать</button>
+                <button class="ghost-button" id="downloadBatchStockXlsxButton" type="button">Скачать XLS</button>
+                <button class="ghost-button" id="writeOffStockBatchButton" type="button">Сменить статус</button>
+                <div class="stock-status-actions" id="stockStatusActions" hidden>
+                    <label>Новый статус
+                        <select id="batchStockStatusSelect">
+                            <option>В наличии</option>
+                            <option>Реализована</option>
+                            <option>Списана</option>
+                            <option>Нет в наличии</option>
+                        </select>
+                    </label>
+                    <button class="ghost-button" id="cancelBatchStockStatusButton" type="button">Отмена</button>
+                    <button class="primary" id="saveBatchStockStatusButton" type="button">Сохранить</button>
+                </div>
                 <button class="primary" id="confirmBatchStockDialogButton" type="button">Закрыть</button>
             </div>
         </div>
@@ -673,6 +712,57 @@ declare(strict_types=1);
         </div>
     </dialog>
 
+
+    <dialog class="modal" id="purchaseRecipientDialog">
+        <form class="card form modal-card" id="purchaseRecipientForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Получатель отдела закупок</h2>
+                <button class="icon-button" id="closePurchaseRecipientDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <label>ФИО<input id="purchaseRecipientName" required autocomplete="name"></label>
+            <label>Email<input id="purchaseRecipientEmail" required autocomplete="email" type="email"></label>
+            <p class="field-error" id="purchaseRecipientError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelPurchaseRecipientButton" type="button">Отмена</button>
+                <button class="primary" type="submit">ОК</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal" id="testPurchaseNotificationDialog">
+        <form class="card form modal-card" id="testPurchaseNotificationForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Тест уведомления отдела закупок</h2>
+                <button class="icon-button" id="closeTestPurchaseNotificationDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Уведомление будет сформировано по последнему событию, в котором все партии заполнены всеми активными складами.</p>
+            <label>Email<input id="testPurchaseNotificationEmail" required autocomplete="email" type="email" placeholder="manager@example.ru"></label>
+            <p class="field-error" id="testPurchaseNotificationError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelTestPurchaseNotificationButton" type="button">Отмена</button>
+                <button class="primary" id="confirmTestPurchaseNotificationButton" type="submit">ОК</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal purchase-notification-logs-dialog" id="purchaseNotificationLogsDialog">
+        <div class="card form modal-card notification-modal-card">
+            <div class="modal-heading">
+                <h2>Логи уведомлений отдела закупок</h2>
+                <button class="icon-button" id="closePurchaseNotificationLogsDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="table-wrap notification-dialog-body">
+                <table>
+                    <thead><tr><th>Дата и время</th><th>Событие</th><th>Адресаты</th><th>Статус</th></tr></thead>
+                    <tbody id="purchaseNotificationLogsBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmPurchaseNotificationLogsDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
     <dialog class="modal" id="deleteArticlesDialog">
         <form class="card form modal-card" id="deleteArticlesForm" method="dialog">
             <div class="modal-heading">
@@ -689,13 +779,18 @@ declare(strict_types=1);
         </form>
     </dialog>
 
-    <dialog class="modal" id="notificationLogsDialog">
+    <dialog class="modal notification-history-dialog" id="notificationLogsDialog">
         <div class="card form modal-card notification-modal-card">
             <div class="modal-heading">
-                <h2>Логи уведомлений</h2>
+                <h2>История уведомлений</h2>
                 <button class="icon-button" id="closeNotificationLogsDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
-            <div class="notification-dialog-body" id="notificationLogsBody"></div>
+            <div class="table-wrap notification-dialog-body">
+                <table>
+                    <thead><tr><th>Дата, время</th><th>Тип уведомления</th><th>Событие</th><th>Адресаты</th></tr></thead>
+                    <tbody id="notificationLogsBody"></tbody>
+                </table>
+            </div>
             <div class="modal-actions">
                 <button class="primary" id="confirmNotificationLogsDialogButton" type="button">Закрыть</button>
             </div>
