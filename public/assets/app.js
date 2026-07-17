@@ -2164,6 +2164,10 @@ function bindEvents() {
     qsa('.help-subtab').forEach((button) => button.addEventListener('click', () => switchHelpTab(button.dataset.helpTab)));
 
     qs('#openTestStockFillButton').addEventListener('click', openTestStockFillDialog);
+    qs('#openPurchaseRecipientButton').addEventListener('click', openPurchaseRecipientDialog);
+    qs('#purchaseRecipientForm').addEventListener('submit', submitPurchaseRecipient);
+    qs('#closePurchaseRecipientDialogButton').addEventListener('click', closePurchaseRecipientDialog);
+    qs('#cancelPurchaseRecipientButton').addEventListener('click', closePurchaseRecipientDialog);
     qs('#testStockFillForm').addEventListener('submit', submitTestStockFillForm);
     qs('#closeTestStockFillDialogButton').addEventListener('click', closeTestStockFillDialog);
     qs('#cancelTestStockFillButton').addEventListener('click', closeTestStockFillDialog);
