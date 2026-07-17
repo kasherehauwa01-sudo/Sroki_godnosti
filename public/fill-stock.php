@@ -25,7 +25,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
             <form class="form hidden" id="stockFillForm">
                 <div class="table-wrap">
                     <table>
-                        <thead><tr><th>Артикул</th><th>Наименование</th><th>Остаток на складе</th></tr></thead>
+                        <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Остаток на складе</th></tr></thead>
                         <tbody id="stockFormBody"></tbody>
                     </table>
                 </div>
@@ -74,7 +74,8 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
             document.querySelector('#stockFormBody').innerHTML = result.items.map((item) => `
                 <tr>
                     <td>${escapeHtml(item.article)}</td>
-                    <td>${escapeHtml(item.name || item.code || '')}</td>
+                    <td>${escapeHtml(item.code)}</td>
+                    <td>${escapeHtml(item.name)}</td>
                     <td><input name="quantity_${item.id}" data-item-id="${item.id}" min="0" step="1" type="number" value="${item.quantity === null || item.quantity === undefined ? '' : Number(item.quantity)}" required></td>
                 </tr>
             `).join('');
