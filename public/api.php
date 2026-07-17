@@ -1533,23 +1533,19 @@ function downloadPurchaseEventXls(PDO $pdo, string $token): array
     $summary = getPurchaseEventSummary($pdo, $token);
     $headers = ['Код', 'Наименование', 'Общий остаток', 'Статус'];
     foreach ($summary['warehouses'] as $warehouse) $headers[] = (string)$warehouse['name'];
-    $html = '<html><head><meta charset="UTF-8"></head><body><table border="1"><tr>';
-    foreach ($headers as $header) $html .= '<th>' . htmlspecialchars($header, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</th>';
-    $html .= '</tr>';
+    $rows = [$headers];
     foreach ($summary['rows'] as $row) {
         $values = [$row['code'], $row['name'], $row['total'], $row['status']];
         foreach ($summary['warehouses'] as $warehouse) $values[] = $row['quantities'][(string)$warehouse['id']] ?? '';
-        $html .= '<tr>';
-        foreach ($values as $value) $html .= '<td>' . htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td>';
-        $html .= '</tr>';
+        $rows[] = $values;
     }
-    $html .= '</table></body></html>';
-    $filename = sanitizeDownloadFilename('Остатки до ' . date('d.m.Y', strtotime((string)$summary['expiry_date'])) . '.xls');
+    $content = buildBatchStockXlsxContent($rows);
+    $filename = sanitizeDownloadFilename('Остатки до ' . date('d.m.Y', strtotime((string)$summary['expiry_date'])) . '.xlsx');
     header_remove('Content-Type');
-    header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
-    header('Content-Length: ' . strlen($html));
-    echo $html;
+    header('Content-Length: ' . strlen($content));
+    echo $content;
     exit;
 }
 
