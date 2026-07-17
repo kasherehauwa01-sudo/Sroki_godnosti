@@ -1352,13 +1352,15 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
     $batchIds = array_map(static fn (array $row): int => (int)$row['id'], $batches);
     $warehouseIds = array_map(static fn (array $row): int => (int)$row['id'], $warehouses);
     $stock = [];
+    $lastStockAt = '';
     if ($batchIds && $warehouseIds) {
         $batchMarks = implode(',', array_fill(0, count($batchIds), '?'));
         $warehouseMarks = implode(',', array_fill(0, count($warehouseIds), '?'));
-        $stockStatement = $pdo->prepare("SELECT batch_id, warehouse_id, quantity FROM batch_stock WHERE batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)");
+        $stockStatement = $pdo->prepare("SELECT batch_id, warehouse_id, quantity, updated_at FROM batch_stock WHERE batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)");
         $stockStatement->execute(array_merge($batchIds, $warehouseIds));
         foreach ($stockStatement->fetchAll() as $row) {
             $stock[(int)$row['batch_id']][(int)$row['warehouse_id']] = (float)$row['quantity'];
+            if ((string)$row['updated_at'] > $lastStockAt) $lastStockAt = (string)$row['updated_at'];
         }
     }
 
@@ -1370,6 +1372,7 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
         'warehouses' => $warehouses,
         'stock' => $stock,
         'filled_count' => array_sum(array_map('count', $stock)),
+        'last_stock_at' => $lastStockAt,
     ];
 }
 
@@ -1390,6 +1393,11 @@ function listPurchaseEventNotifications(PDO $pdo): array
         $event = getPurchaseEventData($pdo, $eventKey, $eventDate, false);
         if (!$event['batches'] || !$event['warehouses']) continue;
         $expected = count($event['batches']) * count($event['warehouses']);
+        $warehouseIds = array_map(static fn (array $warehouse): int => (int)$warehouse['id'], $event['warehouses']);
+        $filledBatchCount = count(array_filter($event['batches'], static function (array $batch) use ($event, $warehouseIds): bool {
+            $filledWarehouseIds = array_keys($event['stock'][(int)$batch['id']] ?? []);
+            return count(array_intersect($warehouseIds, array_map('intval', $filledWarehouseIds))) === count($warehouseIds);
+        }));
         $token = getOrCreatePurchaseEventSummaryToken($pdo, $event);
         $events[] = [
             'event_key' => $eventKey,
@@ -1397,10 +1405,13 @@ function listPurchaseEventNotifications(PDO $pdo): array
             'event_date' => $eventDate,
             'expiry_date' => $event['expiry_date'],
             'batch_count' => count($event['batches']),
+            'warehouse_count' => count($event['warehouses']),
+            'filled_batch_count' => $filledBatchCount,
             'filled_count' => (int)$event['filled_count'],
             'expected_count' => $expected,
             'status' => (int)$event['filled_count'] >= $expected ? 'Заполнено' : 'Ожидает заполнения',
-            'last_stock_at' => (string)$row['sent_at'],
+            'sent_at' => (string)$row['sent_at'],
+            'last_stock_at' => $event['last_stock_at'],
             'url' => publicBaseUrl() . '/purchase-event.php?token=' . rawurlencode($token),
         ];
     }
