@@ -183,14 +183,35 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .public-stock-page h1 { color: var(--text); font-size: clamp(26px, 4vw, 36px); }
 .purchase-event-card { max-width: 1500px; margin: 0 auto; display: grid; gap: 14px; }
 .purchase-event-card h1 { color: var(--text); font-size: clamp(26px, 4vw, 36px); }
+.purchase-event-table-wrap { max-height: calc(100vh - 220px); overflow: auto; }
 .purchase-event-table { min-width: 980px; }
+.purchase-event-table th { position: sticky; top: 0; z-index: 3; }
 .purchase-event-table .purchase-event-main-column { position: sticky; z-index: 2; background: #dbeafe; }
-.purchase-event-table thead .purchase-event-main-column { z-index: 4; }
+.purchase-event-table thead .purchase-event-main-column { top: 0; z-index: 5; }
 .purchase-event-table .purchase-event-main-column:nth-child(1) { left: 0; min-width: 120px; }
 .purchase-event-table .purchase-event-main-column:nth-child(2) { left: 120px; width: 200px; min-width: 200px; max-width: 200px; }
 .purchase-event-table .purchase-event-main-column:nth-child(3) { left: 320px; width: 80px; min-width: 80px; max-width: 80px; }
 .purchase-event-table .purchase-event-main-column:nth-child(4) { left: 400px; min-width: 180px; box-shadow: 8px 0 12px -10px rgba(15, 23, 42, .7); }
 .purchase-event-status { min-width: 160px; }
+.purchase-event-scroll {
+    position: fixed;
+    top: 50%;
+    z-index: 30;
+    width: 58px;
+    height: 96px;
+    min-height: 96px;
+    padding: 0;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, .38);
+    color: #fff;
+    font-size: 56px;
+    line-height: 1;
+    transform: translateY(-50%);
+    box-shadow: 0 16px 36px rgba(15, 23, 42, .16);
+}
+.purchase-event-scroll:hover, .purchase-event-scroll:focus { background: rgba(37, 99, 235, .68); outline: none; }
+.purchase-event-scroll-left { left: 18px; }
+.purchase-event-scroll-right { right: 18px; }
 [hidden] { display: none !important; }
 .notification-tab { position: relative; }
 .notification-dot { display: inline-block; width: 9px; height: 9px; margin-left: 6px; border-radius: 999px; background: #dc2626; vertical-align: middle; }

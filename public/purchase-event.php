@@ -23,12 +23,14 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
         </div>
         <p class="subtitle" id="purchaseEventInfo">Загрузка сводной таблицы...</p>
         <p class="field-error" id="purchaseEventError" role="alert"></p>
-        <div class="table-wrap hidden" id="purchaseEventTableWrap">
+        <div class="table-wrap purchase-event-table-wrap hidden" id="purchaseEventTableWrap">
             <table class="purchase-event-table">
                 <thead><tr id="purchaseEventHead"></tr></thead>
                 <tbody id="purchaseEventBody"></tbody>
             </table>
         </div>
+        <button class="purchase-event-scroll purchase-event-scroll-left hidden" id="purchaseEventScrollLeft" type="button" aria-label="Прокрутить таблицу влево">‹</button>
+        <button class="purchase-event-scroll purchase-event-scroll-right hidden" id="purchaseEventScrollRight" type="button" aria-label="Прокрутить таблицу вправо">›</button>
     </section>
 </main>
 <script>
@@ -40,6 +42,43 @@ const formatDate = (value) => {
     const [year, month, day] = String(value || '').split('-');
     return year && month && day ? `${day}.${month}.${year}` : value;
 };
+let purchaseEventScrollTimer = null;
+
+function scrollPurchaseEventTable(direction) {
+    document.querySelector('#purchaseEventTableWrap')?.scrollBy({ left: direction * 360, behavior: 'smooth' });
+}
+
+function startPurchaseEventScroll(direction) {
+    scrollPurchaseEventTable(direction);
+    stopPurchaseEventScroll();
+    purchaseEventScrollTimer = window.setInterval(() => scrollPurchaseEventTable(direction), 220);
+}
+
+function stopPurchaseEventScroll() {
+    if (purchaseEventScrollTimer !== null) {
+        window.clearInterval(purchaseEventScrollTimer);
+        purchaseEventScrollTimer = null;
+    }
+}
+
+function showPurchaseEventScrollControls() {
+    const wrap = document.querySelector('#purchaseEventTableWrap');
+    const shouldShow = wrap && wrap.scrollWidth > wrap.clientWidth;
+    document.querySelector('#purchaseEventScrollLeft')?.classList.toggle('hidden', !shouldShow);
+    document.querySelector('#purchaseEventScrollRight')?.classList.toggle('hidden', !shouldShow);
+}
+
+function bindPurchaseEventScrollButton(selector, direction) {
+    const button = document.querySelector(selector);
+    button?.addEventListener('click', () => scrollPurchaseEventTable(direction));
+    button?.addEventListener('mouseenter', () => startPurchaseEventScroll(direction));
+    button?.addEventListener('mouseleave', stopPurchaseEventScroll);
+    button?.addEventListener('mousedown', () => startPurchaseEventScroll(direction));
+    button?.addEventListener('mouseup', stopPurchaseEventScroll);
+    button?.addEventListener('blur', stopPurchaseEventScroll);
+    button?.addEventListener('touchstart', (event) => { event.preventDefault(); startPurchaseEventScroll(direction); });
+    button?.addEventListener('touchend', stopPurchaseEventScroll);
+}
 
 async function loadPurchaseEvent() {
     try {
@@ -62,6 +101,7 @@ async function loadPurchaseEvent() {
         </tr>`).join('');
         document.querySelectorAll('.purchase-event-status').forEach((select) => select.addEventListener('change', savePurchaseEventStatus));
         document.querySelector('#purchaseEventTableWrap').classList.remove('hidden');
+        showPurchaseEventScrollControls();
     } catch (error) {
         document.querySelector('#purchaseEventInfo').textContent = '';
         document.querySelector('#purchaseEventError').textContent = error.message;
@@ -92,6 +132,9 @@ async function savePurchaseEventStatus(event) {
         select.disabled = false;
     }
 }
+bindPurchaseEventScrollButton('#purchaseEventScrollLeft', -1);
+bindPurchaseEventScrollButton('#purchaseEventScrollRight', 1);
+window.addEventListener('resize', showPurchaseEventScrollControls);
 document.querySelector('#downloadPurchaseEventXlsButton').addEventListener('click', () => {
     const url = new URL(purchaseEventApiUrl, window.location.origin);
     url.searchParams.set('action', 'purchase_event_xls');
