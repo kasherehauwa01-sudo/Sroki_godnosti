@@ -527,6 +527,7 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
         throw new InvalidArgumentException('Заполните остатки по всем партиям. Если остатка нет, укажите 0.');
     }
 
+    $submittedBatchIds = [];
     $pdo->beginTransaction();
     try {
         $upsert = $pdo->prepare(
@@ -577,8 +578,18 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
         }
         $pdo->commit();
     } catch (Throwable $error) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         throw $error;
+    }
+
+    if (function_exists('maybeSendPurchaseNotifications')) {
+        try {
+            maybeSendPurchaseNotifications($pdo, $notification, $submittedBatchIds);
+        } catch (Throwable $error) {
+            error_log('Не удалось отправить уведомление отделу закупок после сохранения остатков: ' . $error->getMessage());
+        }
     }
 
     return ['ok' => true] + loadStockFormByToken($pdo, $token, false);
