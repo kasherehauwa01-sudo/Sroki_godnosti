@@ -102,6 +102,7 @@ function handleApiRequest(): void
                 'purchase_recipient_create' => createPurchaseRecipient($pdo, $payload),
                 'purchase_recipient_delete' => deletePurchaseRecipient($pdo, $payload),
                 'purchase_event_batch_status' => updatePurchaseEventBatchStatus($pdo, $payload),
+                'purchase_event_stocks' => updatePurchaseEventStocks($pdo, $payload),
                 default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
             };
         }
@@ -1588,6 +1589,62 @@ function updatePurchaseEventBatchStatus(PDO $pdo, array $payload): array
     $statement->execute([':status' => $status, ':id' => $batchId]);
     writeLog($pdo, 'update', ['id' => $batchId, 'status' => $status, 'source' => 'purchase_event_summary']);
     return ['ok' => true, 'status' => $status];
+}
+
+
+function updatePurchaseEventStocks(PDO $pdo, array $payload): array
+{
+    assertWriteOffPassword($payload);
+    $eventInfo = findPurchaseEventByToken($pdo, trim((string)($payload['token'] ?? '')));
+    $event = getPurchaseEventData($pdo, (string)$eventInfo['event_key'], (string)$eventInfo['event_date'], true);
+    $batchIds = array_map(static fn (array $batch): int => (int)$batch['id'], $event['batches']);
+    $warehouseIds = array_map(static fn (array $warehouse): int => (int)$warehouse['id'], $event['warehouses']);
+    $stocks = (array)($payload['stocks'] ?? []);
+
+    $pdo->beginTransaction();
+    try {
+        $upsert = $pdo->prepare(
+            'INSERT INTO batch_stock (batch_id, warehouse_id, quantity)
+             VALUES (:batch_id, :warehouse_id, :quantity)
+             ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)'
+        );
+        $delete = $pdo->prepare('DELETE FROM batch_stock WHERE batch_id = :batch_id AND warehouse_id = :warehouse_id');
+        foreach ($stocks as $batchId => $warehouseValues) {
+            $batchId = (int)$batchId;
+            if (!in_array($batchId, $batchIds, true)) {
+                throw new InvalidArgumentException('Партия не входит в это событие.');
+            }
+            foreach ((array)$warehouseValues as $warehouseId => $quantity) {
+                $warehouseId = (int)$warehouseId;
+                if (!in_array($warehouseId, $warehouseIds, true)) {
+                    throw new InvalidArgumentException('Склад не входит в сводную таблицу.');
+                }
+                $quantityText = trim((string)$quantity);
+                if ($quantityText === '') {
+                    $delete->execute([':batch_id' => $batchId, ':warehouse_id' => $warehouseId]);
+                    continue;
+                }
+                if (!ctype_digit($quantityText)) {
+                    throw new InvalidArgumentException('Остатки должны быть целыми числами больше или равными 0.');
+                }
+                $upsert->execute([':batch_id' => $batchId, ':warehouse_id' => $warehouseId, ':quantity' => (int)$quantityText]);
+            }
+        }
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $error;
+    }
+
+    writeLog($pdo, 'purchase_event_stocks_update', [
+        'event_key' => (string)$eventInfo['event_key'],
+        'event_date' => (string)$eventInfo['event_date'],
+        'batch_count' => count($stocks),
+    ]);
+
+    return ['ok' => true] + getPurchaseEventSummary($pdo, trim((string)($payload['token'] ?? '')));
 }
 
 function downloadPurchaseEventXls(PDO $pdo, string $token): array

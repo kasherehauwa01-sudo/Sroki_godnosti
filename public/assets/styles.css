@@ -183,6 +183,7 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .public-stock-page h1 { color: var(--text); font-size: clamp(26px, 4vw, 36px); }
 .purchase-event-card { max-width: 1500px; margin: 0 auto; display: grid; gap: 14px; }
 .purchase-event-card h1 { color: var(--text); font-size: clamp(26px, 4vw, 36px); }
+.purchase-event-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .purchase-event-table-wrap { width: 100%; max-width: 100%; height: calc(100vh - 190px); max-height: calc(100vh - 190px); overflow: auto; }
 .purchase-event-table { min-width: 980px; }
 .purchase-event-table th { position: sticky; top: 0; z-index: 3; }
@@ -193,6 +194,7 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .purchase-event-table .purchase-event-main-column:nth-child(3) { left: 320px; width: 80px; min-width: 80px; max-width: 80px; }
 .purchase-event-table .purchase-event-main-column:nth-child(4) { left: 400px; min-width: 180px; box-shadow: 8px 0 12px -10px rgba(15, 23, 42, .7); }
 .purchase-event-status { min-width: 160px; }
+.purchase-event-quantity { min-width: 110px; text-align: right; }
 [hidden] { display: none !important; }
 .notification-tab { position: relative; }
 .notification-dot { display: inline-block; width: 9px; height: 9px; margin-left: 6px; border-radius: 999px; background: #dc2626; vertical-align: middle; }
