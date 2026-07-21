@@ -1382,6 +1382,52 @@ function purchaseEventMissingWarehouseNames(array $event): array
     return array_values(array_unique($missing));
 }
 
+
+function updateUnavailableStatusForZeroStockBatches(PDO $pdo, array $batchIds): void
+{
+    $batchIds = array_values(array_unique(array_filter(array_map('intval', $batchIds), static fn (int $id): bool => $id > 0)));
+    if (!$batchIds) {
+        return;
+    }
+
+    $placeholders = implode(',', array_fill(0, count($batchIds), '?'));
+    $statement = $pdo->prepare(
+        "SELECT b.id, b.article, b.code, b.name, b.expiry_date, b.expiry_full_date, b.expiry_invalid, b.expiry_raw, b.status,
+                COUNT(w.id) AS active_warehouse_count,
+                COUNT(bs.id) AS filled_warehouse_count,
+                COALESCE(SUM(CASE WHEN bs.id IS NULL THEN 0 ELSE bs.quantity END), 0) AS total_stock
+         FROM batches b
+         LEFT JOIN warehouses w ON w.is_active = 1
+         LEFT JOIN batch_stock bs ON bs.batch_id = b.id AND bs.warehouse_id = w.id
+         WHERE b.id IN ($placeholders)
+         GROUP BY b.id, b.article, b.code, b.name, b.expiry_date, b.expiry_full_date, b.expiry_invalid, b.expiry_raw, b.status"
+    );
+    $statement->execute($batchIds);
+
+    $update = $pdo->prepare('UPDATE batches SET status = :status, updated_at = NOW() WHERE id = :id');
+    foreach ($statement->fetchAll() as $batch) {
+        $activeWarehouseCount = (int)$batch['active_warehouse_count'];
+        if ($activeWarehouseCount === 0
+            || (int)$batch['filled_warehouse_count'] !== $activeWarehouseCount
+            || (float)$batch['total_stock'] !== 0.0
+            || (string)$batch['status'] === UNAVAILABLE_STATUS
+            || in_array((string)$batch['status'], ['Списана', 'Реализована'], true)) {
+            continue;
+        }
+
+        $before = historyBatchInfo($batch, (int)$batch['id']);
+        $update->execute([':status' => UNAVAILABLE_STATUS, ':id' => (int)$batch['id']]);
+        $after = $before;
+        $after['status'] = UNAVAILABLE_STATUS;
+        writeLog($pdo, 'update', [
+            'before' => $before,
+            'after' => $after,
+            'source' => 'zero_stock_auto_status',
+            'reason' => 'Все активные склады заполнили остатки, сумма остатков равна 0',
+        ]);
+    }
+}
+
 function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, bool $currentWarehouses): array
 {
     $batchStatement = $pdo->prepare(
@@ -1638,6 +1684,7 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
         throw $error;
     }
 
+    updateUnavailableStatusForZeroStockBatches($pdo, $batchIds);
     writeLog($pdo, 'purchase_event_stocks_update', [
         'event_key' => (string)$eventInfo['event_key'],
         'event_date' => (string)$eventInfo['event_date'],

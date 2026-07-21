@@ -584,6 +584,14 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
         throw $error;
     }
 
+    if (function_exists('updateUnavailableStatusForZeroStockBatches')) {
+        try {
+            updateUnavailableStatusForZeroStockBatches($pdo, $submittedBatchIds);
+        } catch (Throwable $error) {
+            error_log('Не удалось обновить статус партии после сохранения нулевых остатков: ' . $error->getMessage());
+        }
+    }
+
     if (function_exists('maybeSendPurchaseNotifications')) {
         try {
             maybeSendPurchaseNotifications($pdo, $notification, $submittedBatchIds);
