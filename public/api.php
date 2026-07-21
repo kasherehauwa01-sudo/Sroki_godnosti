@@ -56,6 +56,7 @@ function handleApiRequest(): void
         refreshDaysLeft($pdo);
         if (!in_array($action, ['test_notification', 'test_purchase_notification'], true)) {
             runDueExpiryNotifications($pdo);
+            sendExpiredPurchaseEventNotifications($pdo);
         }
 
         if ($method === 'GET') {
@@ -1324,6 +1325,62 @@ function maybeSendPurchaseNotifications(PDO $pdo, array $notification, array $su
     sendPurchaseNotificationForEvent($pdo, $event, $eventDays);
 }
 
+function sendExpiredPurchaseEventNotifications(PDO $pdo): void
+{
+    ensurePurchaseNotificationSchema($pdo);
+    $statement = $pdo->query(
+        "SELECT n.event_key, DATE(n.sent_at) AS event_date, MAX(t.expires_at) AS expires_at
+         FROM stock_notifications n
+         INNER JOIN stock_notification_tokens t ON t.notification_id = n.id
+         WHERE n.event_key REGEXP '^expiry_[0-9]+$'
+         GROUP BY n.event_key, DATE(n.sent_at)
+         HAVING expires_at < NOW()"
+    );
+
+    foreach ($statement->fetchAll() as $row) {
+        $eventKey = (string)$row['event_key'];
+        $eventDate = (string)$row['event_date'];
+        if (purchaseEventNotificationAlreadyLogged($pdo, $eventKey, $eventDate)) {
+            continue;
+        }
+
+        $eventDays = parsePurchaseEventDays($eventKey);
+        if ($eventDays <= 0) {
+            continue;
+        }
+
+        $event = getPurchaseEventData($pdo, $eventKey, $eventDate, false);
+        if (!$event['batches'] || !$event['warehouses']) {
+            continue;
+        }
+
+        sendPurchaseNotificationForEvent($pdo, $event, $eventDays);
+    }
+}
+
+function purchaseEventNotificationAlreadyLogged(PDO $pdo, string $eventKey, string $eventDate): bool
+{
+    $statement = $pdo->prepare('SELECT COUNT(*) FROM purchase_event_notification_log WHERE event_key = :event_key AND event_date = :event_date');
+    $statement->execute([':event_key' => $eventKey, ':event_date' => $eventDate]);
+    return (int)$statement->fetchColumn() > 0;
+}
+
+function purchaseEventMissingWarehouseNames(array $event): array
+{
+    $missing = [];
+    foreach ($event['warehouses'] as $warehouse) {
+        $warehouseId = (int)$warehouse['id'];
+        foreach ($event['batches'] as $batch) {
+            if (!array_key_exists($warehouseId, $event['stock'][(int)$batch['id']] ?? [])) {
+                $missing[] = (string)$warehouse['name'];
+                break;
+            }
+        }
+    }
+
+    return array_values(array_unique($missing));
+}
+
 function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, bool $currentWarehouses): array
 {
     $batchStatement = $pdo->prepare(
@@ -1464,7 +1521,12 @@ function sendPurchaseNotificationForEvent(PDO $pdo, array $event, int $eventDays
     $expiryText = date('d.m.Y', strtotime((string)$event['expiry_date']));
     $subject = 'Остатки по товарам со сроком годности';
     $url = publicBaseUrl() . '/purchase-event.php?token=' . rawurlencode($token);
-    $body = "Остатки по товарам со сроком годности до {$expiryText}. При необходимости ознакомьтесь с данными и, на основании указанных остатков, выполните списание товара.\n\nОткрыть сводную таблицу: {$url}";
+    $warning = '';
+    $missingWarehouses = purchaseEventMissingWarehouseNames($event);
+    if ($missingWarehouses) {
+        $warning = "\n\nВнимание. Не все склады заполнили остатки. Уточните информацию по остаткам у складов " . implode(', ', $missingWarehouses) . '.';
+    }
+    $body = "Остатки по товарам со сроком годности до {$expiryText}. При необходимости ознакомьтесь с данными и, на основании указанных остатков, выполните списание товара.{$warning}\n\nОткрыть сводную таблицу: {$url}";
     try {
         sendNotificationEmail($pdo, $recipients, $subject, $body, getRawSettings($pdo));
         $pdo->prepare("UPDATE purchase_event_notification_log SET status = 'SUCCESS', error_message = NULL, sent_at = NOW() WHERE event_key = :event_key AND event_date = :event_date")
