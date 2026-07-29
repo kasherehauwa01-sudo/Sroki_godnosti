@@ -75,6 +75,7 @@ function handleApiRequest(): void
                 'stock_notification' => ['ok' => true] + getStockNotificationDetails($pdo, (int)($_GET['id'] ?? 0)),
                 'purchase_recipients' => getProtectedPurchaseRecipients($pdo, $_GET),
                 'email_notification_logs' => getProtectedEmailNotificationLogs($pdo, $_GET),
+                'catalog_health' => checkVrCatalogHealth($pdo),
                 'purchase_event_summary' => ['ok' => true] + getPurchaseEventSummary($pdo, (string)($_GET['token'] ?? '')),
                 'purchase_event_xls' => downloadPurchaseEventXls($pdo, (string)($_GET['token'] ?? '')),
                 'stock_batch_notifications' => ['ok' => true, 'notifications' => listPurchaseEventNotifications($pdo)],
@@ -1721,7 +1722,7 @@ function sendPurchaseNotificationForEvent(PDO $pdo, array $event, int $eventDays
     if ($missingWarehouses) {
         $warning = "\n\nВнимание. Не все склады заполнили остатки. Уточните информацию по остаткам у складов " . implode(', ', $missingWarehouses) . '.';
     }
-    $distribution = distributePurchaseEventBatches($event, $recipients);
+    $distribution = distributePurchaseEventBatches($event, $recipients, $pdo);
     savePurchaseEventDistributionAudit($pdo, $event, $distribution, $recipients);
     $allSent = true;
     $errors = [];
@@ -1792,14 +1793,14 @@ function normalizePurchaseManagerIdentity(string $value): string
     return mb_strtolower(preg_replace('/\s+/u', ' ', trim($value)) ?? trim($value), 'UTF-8');
 }
 
-function distributePurchaseEventBatches(array $event, array $recipients): array
+function distributePurchaseEventBatches(array $event, array $recipients, ?PDO $pdo = null): array
 {
     $assigned = [];
     $unassigned = [];
     $catalogProducts = [];
     $catalogError = '';
     try {
-        $catalogProducts = fetchVrCatalogProductsByArticles(array_column($event['batches'], 'article'));
+        $catalogProducts = fetchVrCatalogProductsByArticles(array_column($event['batches'], 'article'), $pdo);
     } catch (VrCatalogUnavailableException $error) {
         $catalogError = 'Сервис vrcatalog временно недоступен.';
     } catch (Throwable $error) {
@@ -1814,11 +1815,13 @@ function distributePurchaseEventBatches(array $event, array $recipients): array
         $reason = $catalogError;
         if ($reason === '') {
             $products = $byArticle[$article] ?? [];
-            if (!$products) {
+            if (!$products || !vrCatalogProductFound($products[0])) {
                 $reason = 'Товар отсутствует в vrcatalog.';
             } elseif (count($products) > 1) {
                 $reason = 'Найдено несколько совпадений менеджера.';
             } else {
+                $catalogName = vrCatalogProductName($products[0]);
+                if ($catalogName !== '') $batch['name'] = $catalogName;
                 $manager = vrCatalogManagerValue($products[0]);
                 $managerValue = (string)$manager['value'];
                 if (!$manager['exists']) {
@@ -1913,20 +1916,23 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
     $unassignedIds = array_map('intval', is_array($unassignedIds) ? $unassignedIds : []);
     $allowedIds = array_values(array_unique(array_merge($assignedIds, $unassignedIds)));
     $managerValues = [];
+    $catalogNames = [];
     $auditStatement = $pdo->prepare('SELECT batch_id, manager_value FROM purchase_event_distribution_log WHERE event_key = :event_key AND event_date = :event_date');
     $auditStatement->execute([':event_key' => $log['event_key'], ':event_date' => $log['event_date']]);
     foreach ($auditStatement->fetchAll() as $auditRow) $managerValues[(int)$auditRow['batch_id']] = (string)($auditRow['manager_value'] ?? '');
     // Для сводной таблицы повторно читаем актуальную характеристику из vrcatalog.
     // Аудит остаётся резервным источником, если каталог временно недоступен.
     try {
-        $catalogProducts = fetchVrCatalogProductsByArticles(array_column($event['batches'], 'article'));
+        $catalogProducts = fetchVrCatalogProductsByArticles(array_column($event['batches'], 'article'), $pdo);
         $catalogByArticle = [];
         foreach ($catalogProducts as $product) $catalogByArticle[vrCatalogProductArticle($product)][] = $product;
         foreach ($event['batches'] as $batch) {
             $products = $catalogByArticle[trim((string)$batch['article'])] ?? [];
-            if (count($products) !== 1) continue;
+            if (count($products) !== 1 || !vrCatalogProductFound($products[0])) continue;
             $manager = vrCatalogManagerValue($products[0]);
             if ($manager['exists']) $managerValues[(int)$batch['id']] = (string)$manager['value'];
+            $catalogName = vrCatalogProductName($products[0]);
+            if ($catalogName !== '') $catalogNames[(int)$batch['id']] = $catalogName;
         }
     } catch (Throwable $error) {
         error_log('Не удалось обновить менеджеров сводной таблицы из vrcatalog: ' . $error->getMessage());
@@ -1941,7 +1947,9 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
             $quantities[(string)$warehouse['id']] = $value;
             if ($value !== null) $total += $value;
         }
-        $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $batch['name'], 'total' => $total, 'status' => $batch['status'], 'quantities' => $quantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
+        $displayName = trim((string)($catalogNames[(int)$batch['id']] ?? $batch['name'] ?? ''));
+        if ($displayName === '') $displayName = (string)$batch['article'];
+        $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'total' => $total, 'status' => $batch['status'], 'quantities' => $quantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
     }
     usort($rows, static fn (array $left, array $right): int => ($left['section'] <=> $right['section']) ?: ($left['id'] <=> $right['id']));
     return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES)];

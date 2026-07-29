@@ -342,13 +342,15 @@ API находится в `public/api.php`.
 Для персонального распределения уведомлений закупкам задайте в окружении веб-сервера и cron-пользователя:
 
 ```env
-VRCATALOG_INTERNAL_API_URL=http://127.0.0.1/vr/vrcatalog/api/internal/products/by-articles
+VRCATALOG_INTERNAL_API_URL=http://127.0.0.1/vr/catalog/api/internal/products/by-articles
 VRCATALOG_INTERNAL_API_TOKEN=secret-token
 VRCATALOG_CONNECT_TIMEOUT=3
 VRCATALOG_REQUEST_TIMEOUT=10
 ```
 
-Сервис отправляет `POST` с JSON `{"articles":["10001","10002"]}` и заголовком
-`Authorization: Bearer <token>`. Ожидается ответ `{"products":[...]}`. Каждый товар должен
-содержать `article` и либо поле `manager`, либо характеристику `Менеджер` в
-`characteristics`. Токен не сохраняется в базе и не передаётся во frontend.
+Сервис отправляет один пакетный `POST` с JSON `{"articles":["10001","10002"]}` и
+заголовком `X-Internal-Token: <token>`. Официальный ответ имеет формат
+`{"ok":true,"items":[...]}`; используются поля `article`, `found`, `name` и
+`manager_name`. Токен не сохраняется в базе и не передаётся во frontend.
+
+Диагностика соединения доступна через `GET api.php?action=catalog_health`.
