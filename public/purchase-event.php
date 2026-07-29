@@ -51,19 +51,31 @@ const formatDate = (value) => {
 function renderPurchaseEventTable(result) {
     document.querySelector('#purchaseEventHead').innerHTML = ['Код', 'Наименование', 'Общий остаток', 'Статус']
         .map((title) => `<th class="purchase-event-main-column">${title}</th>`).join('')
+        + '<th>Остаток срока годности</th><th>Менеджер</th><th>Ссылка на партию</th>'
         + result.warehouses.map((warehouse) => `<th>${escapeHtml(warehouse.name)}</th>`).join('');
-    document.querySelector('#purchaseEventBody').innerHTML = result.rows.map((row) => `<tr>
+    let lastSection = '';
+    document.querySelector('#purchaseEventBody').innerHTML = result.rows.map((row) => {
+        const section = row.section || 'assigned';
+        const sectionHeading = section !== lastSection
+            ? `<tr class="purchase-event-section"><th colspan="${7 + result.warehouses.length}">${section === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары'}</th></tr>`
+            : '';
+        lastSection = section;
+        return `${sectionHeading}<tr id="batch-${Number(row.id)}">
         <td class="purchase-event-main-column">${escapeHtml(row.code)}</td>
         <td class="purchase-event-main-column">${escapeHtml(row.name)}</td>
         <td class="purchase-event-main-column numeric-cell">${formatQuantity(row.total)}</td>
         <td class="purchase-event-main-column"><select class="purchase-event-status" data-batch-id="${row.id}" data-current-status="${escapeHtml(row.status)}">${result.statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === row.status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}</select></td>
+        <td>${Number(result.event_days)} дней</td>
+        <td>${section === 'unassigned' ? escapeHtml(row.manager_value || '—') : '—'}</td>
+        <td><a href="#batch-${Number(row.id)}">Открыть партию</a></td>
         ${result.warehouses.map((warehouse) => {
             const value = row.quantities[warehouse.id];
             return `<td class="numeric-cell">${purchaseEventEditing
                 ? `<input class="purchase-event-quantity" type="number" min="0" step="1" inputmode="numeric" data-batch-id="${row.id}" data-warehouse-id="${warehouse.id}" value="${escapeHtml(inputQuantityValue(value))}">`
                 : formatQuantity(value)}</td>`;
         }).join('')}
-    </tr>`).join('');
+    </tr>`;
+    }).join('');
     document.querySelectorAll('.purchase-event-status').forEach((select) => select.addEventListener('change', savePurchaseEventStatus));
     document.querySelector('#savePurchaseEventStocksButton').classList.toggle('hidden', !purchaseEventEditing);
 }

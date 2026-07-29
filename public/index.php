@@ -245,6 +245,17 @@ declare(strict_types=1);
                     <p class="subtitle" id="testMissingFilterStatus" role="status" aria-live="polite"></p>
                 </div>
 
+                <div class="card form">
+                    <h3>История отправки уведомлений</h3>
+                    <p class="subtitle">Журнал фиксирует каждую успешную и неуспешную попытку отправки через SMTP.</p>
+                    <label>Хранить журнал, дней
+                        <input id="emailLogRetentionDays" min="1" max="3650" name="email_log_retention_days" type="number" value="365">
+                    </label>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="openEmailNotificationLogButton" formnovalidate type="button">Открыть журнал</button>
+                    </div>
+                </div>
+
                 <div class="settings-save-bar">
                     <button class="primary" type="submit">Сохранить настройки</button>
                 </div>
@@ -782,17 +793,35 @@ declare(strict_types=1);
     <dialog class="modal notification-history-dialog" id="notificationLogsDialog">
         <div class="card form modal-card notification-modal-card">
             <div class="modal-heading">
-                <h2>История уведомлений</h2>
+                <h2>История отправки уведомлений</h2>
                 <button class="icon-button" id="closeNotificationLogsDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="email-log-filters">
+                <input id="emailLogSearch" type="search" placeholder="Поиск по теме, типу или получателю">
+                <select id="emailLogStatusFilter"><option value="">Все статусы</option><option value="SUCCESS">Отправлено</option><option value="ERROR">Не отправлено</option></select>
+                <input id="emailLogTypeFilter" type="text" placeholder="Тип уведомления">
+                <input id="emailLogRecipientFilter" type="email" placeholder="Получатель">
+                <select id="emailLogDirection"><option value="DESC">Сначала новые</option><option value="ASC">Сначала старые</option></select>
             </div>
             <div class="table-wrap notification-dialog-body">
                 <table>
-                    <thead><tr><th>Дата, время</th><th>Тип уведомления</th><th>Событие</th><th>Адресаты</th></tr></thead>
+                    <thead><tr><th>Дата и время</th><th>Тип уведомления</th><th>Получатели</th><th>Статус</th></tr></thead>
                     <tbody id="notificationLogsBody"></tbody>
                 </table>
             </div>
             <div class="modal-actions">
                 <button class="primary" id="confirmNotificationLogsDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal" id="emailNotificationLogDetailsDialog">
+        <div class="card form modal-card notification-modal-card">
+            <div class="modal-heading"><h2>Детали отправки</h2><button class="icon-button" id="closeEmailNotificationLogDetailsButton" type="button" aria-label="Закрыть">×</button></div>
+            <dl class="email-log-details" id="emailNotificationLogDetails"></dl>
+            <div class="modal-actions">
+                <button class="ghost-button hidden" id="retryEmailNotificationButton" type="button">Повторить отправку</button>
+                <button class="primary" id="confirmEmailNotificationLogDetailsButton" type="button">Закрыть</button>
             </div>
         </div>
     </dialog>

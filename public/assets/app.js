@@ -32,6 +32,8 @@ const state = {
     selectedStockBatchId: null,
     events: [],
     eventPeriodFilters: new Set(['today', 'future']),
+    emailNotificationLogs: [],
+    selectedEmailNotificationLogId: null,
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана', 'Нет в наличии'];
@@ -116,8 +118,8 @@ async function copyDeployCommand() {
 }
 
 function getApiMethod(action, data = {}) {
-    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_delete']);
+    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients', 'email_notification_logs']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_delete', 'email_notification_retry']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -1645,6 +1647,7 @@ function renderSettings() {
     setValueIfPresent('#notificationEmails', (settings.emails || []).join('\n'));
     setValueIfPresent('#notificationTime', settings.notification_time || '09:00');
     setValueIfPresent('#missingFilterEmails', (settings.missing_filter_emails || []).join('\n'));
+    setValueIfPresent('#emailLogRetentionDays', settings.email_log_retention_days || 365);
     renderPurchaseRecipients();
 
     const autoImport = settings.auto_import || {};
@@ -1820,6 +1823,7 @@ function collectSettingsForm() {
         auto_import_time: '23:50',
         emails,
         missing_filter_email: missingFilterEmails.join(','),
+        email_log_retention_days: Number(qs('#emailLogRetentionDays')?.value || 365),
     };
 }
 
@@ -1958,26 +1962,91 @@ async function submitDeleteArticles(event) {
     }
 }
 
-function showNotificationLogs() {
-    const logs = state.settings?.notification_history || [];
+async function showNotificationLogs() {
+    const result = await api('email_notification_logs', {
+        settings_password: state.settingsPassword,
+        search: qs('#emailLogSearch')?.value || '',
+        status: qs('#emailLogStatusFilter')?.value || '',
+        type: qs('#emailLogTypeFilter')?.value || '',
+        recipient: qs('#emailLogRecipientFilter')?.value || '',
+        direction: qs('#emailLogDirection')?.value || 'DESC',
+    });
+    const logs = result.logs || [];
+    state.emailNotificationLogs = logs;
     const body = qs('#notificationLogsBody');
     if (!logs.length) {
         body.innerHTML = '<tr><td colspan="4">История уведомлений пока отсутствует.</td></tr>';
     } else {
         body.innerHTML = logs.map((log) => `
-            <tr>
+            <tr class="clickable-row" data-email-log-id="${Number(log.id)}" tabindex="0">
                 <td>${escapeHtml(log.date || 'Дата не указана')}</td>
-                <td>${escapeHtml(log.type || 'Уведомление')}</td>
-                <td>${escapeHtml(log.event || log.text || 'Событие не указано')}</td>
-                <td>${escapeHtml((log.recipients || []).join(', ') || '—')}</td>
+                <td>${escapeHtml(log.notification_type || 'Уведомление')}</td>
+                <td class="multiline-cell">${escapeHtml((log.recipients || []).join('\n') || '—')}</td>
+                <td>${escapeHtml(log.status_text || '—')}${log.error_reason ? `<br><small>${escapeHtml(log.error_reason)}</small>` : ''}</td>
             </tr>
         `).join('');
+        body.querySelectorAll('[data-email-log-id]').forEach((row) => {
+            const open = () => showEmailNotificationLogDetails(Number(row.dataset.emailLogId));
+            row.addEventListener('click', open);
+            row.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') open();
+            });
+        });
     }
     qs('#notificationLogsDialog').showModal();
 }
 
 function closeNotificationLogs() {
     qs('#notificationLogsDialog').close();
+}
+
+function showEmailNotificationLogDetails(id) {
+    const log = state.emailNotificationLogs.find((item) => Number(item.id) === Number(id));
+    if (!log) return;
+    state.selectedEmailNotificationLogId = Number(id);
+    const details = [
+        ['Дата', log.date],
+        ['Тип уведомления', log.notification_type],
+        ['Получатели', (log.recipients || []).join('\n')],
+        ['Тема письма', log.subject],
+        ['Статус', log.status_text],
+        ['SMTP-код', log.smtp_code || '—'],
+        ['Diagnostic Code', log.diagnostic_code || '—'],
+        ['Расшифровка', log.error_reason || '—'],
+        ['Полный текст ошибки SMTP', log.smtp_response || '—'],
+        ['ID сообщения', log.message_id || '—'],
+        ['Время выполнения отправки', log.duration_ms == null ? '—' : `${log.duration_ms} мс`],
+        ['Причина распределения', (log.distribution_details?.distribution || []).map((item) =>
+            `Партия ${item.batch_id}, артикул ${item.article}: ${item.distribution_reason}\nМенеджер: ${item.manager_value || '—'}; получатель: ${item.matched_recipient || '—'}; тип: ${item.distribution_type}`
+        ).join('\n\n') || '—'],
+    ];
+    qs('#emailNotificationLogDetails').innerHTML = details.map(([label, value]) =>
+        `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || '—')}</dd>`
+    ).join('');
+    qs('#retryEmailNotificationButton').classList.toggle('hidden', log.status !== 'ERROR');
+    qs('#emailNotificationLogDetailsDialog').showModal();
+}
+
+function closeEmailNotificationLogDetails() {
+    qs('#emailNotificationLogDetailsDialog').close();
+    state.selectedEmailNotificationLogId = null;
+}
+
+async function retryEmailNotification() {
+    if (!state.selectedEmailNotificationLogId) return;
+    const button = qs('#retryEmailNotificationButton');
+    button.disabled = true;
+    try {
+        await api('email_notification_retry', { settings_password: state.settingsPassword, id: state.selectedEmailNotificationLogId });
+        closeEmailNotificationLogDetails();
+        await showNotificationLogs();
+        showToast('Письмо отправлено повторно. В журнал добавлена новая запись.');
+    } catch (error) {
+        showToast(error.message, true);
+        await showNotificationLogs();
+    } finally {
+        button.disabled = false;
+    }
 }
 
 function showMissingFilterLogs() {
@@ -2297,8 +2366,17 @@ function bindEvents() {
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
+    qs('#openEmailNotificationLogButton').addEventListener('click', showNotificationLogs);
     qs('#closeNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
     qs('#confirmNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
+    qs('#closeEmailNotificationLogDetailsButton').addEventListener('click', closeEmailNotificationLogDetails);
+    qs('#confirmEmailNotificationLogDetailsButton').addEventListener('click', closeEmailNotificationLogDetails);
+    qs('#retryEmailNotificationButton').addEventListener('click', retryEmailNotification);
+    ['#emailLogStatusFilter', '#emailLogDirection'].forEach((selector) => qs(selector).addEventListener('change', showNotificationLogs));
+    ['#emailLogSearch', '#emailLogTypeFilter', '#emailLogRecipientFilter'].forEach((selector) => qs(selector).addEventListener('input', () => {
+        clearTimeout(state.emailLogFilterTimer);
+        state.emailLogFilterTimer = setTimeout(showNotificationLogs, 300);
+    }));
     qs('#testAutoImportButton').addEventListener('click', runTestAutoImport);
     qs('#showAutoImportLogsButton').addEventListener('click', showAutoImportLogs);
     qs('#closeAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);

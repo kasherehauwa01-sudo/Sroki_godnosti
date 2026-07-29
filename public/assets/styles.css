@@ -205,3 +205,11 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .stock-notification-group-row td { background: #f8fafc; font-weight: 800; }
 .stock-notification-child-row td:first-child, .stock-notification-child-row td:nth-child(2) { background: #fff; }
 #eventsBody tr[data-event-id] { cursor: pointer; }
+/* Централизованный журнал email: фильтры и диагностические данные. */
+.email-log-filters { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(150px, 1fr)); gap: 8px; }
+.multiline-cell, .email-log-details dd { white-space: pre-line; }
+.email-log-details { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 10px 16px; max-height: 65vh; overflow: auto; }
+.email-log-details dt { font-weight: 700; }
+.email-log-details dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 900px) { .email-log-filters { grid-template-columns: 1fr; } }
+.purchase-event-section th { position: sticky; left: 0; background: #e0f2fe; color: #0f172a; text-align: left; font-size: 1rem; z-index: 2; }
