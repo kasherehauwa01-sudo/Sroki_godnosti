@@ -225,6 +225,13 @@ function ensurePurchaseNotificationSchema(PDO $pdo): void
             INDEX idx_purchase_recipient_active (is_active)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+    $supervisorColumn = $pdo->prepare(
+        'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+    );
+    $supervisorColumn->execute([':table' => 'purchase_notification_recipients', ':column' => 'is_supervisor']);
+    if ((int)$supervisorColumn->fetchColumn() === 0) {
+        $pdo->exec('ALTER TABLE purchase_notification_recipients ADD COLUMN is_supervisor TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active');
+    }
 
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS purchase_notification_log (
@@ -1432,12 +1439,13 @@ function assertWriteOffPassword(array $payload): void
 function listPurchaseRecipients(PDO $pdo): array
 {
     ensurePurchaseNotificationSchema($pdo);
-    $statement = $pdo->query('SELECT id, full_name, email, is_active, created_at, updated_at FROM purchase_notification_recipients WHERE is_active = 1 ORDER BY full_name ASC, id ASC');
+    $statement = $pdo->query('SELECT id, full_name, email, is_active, is_supervisor, created_at, updated_at FROM purchase_notification_recipients WHERE is_active = 1 ORDER BY full_name ASC, id ASC');
     return array_map(static fn (array $row): array => [
         'id' => (int)$row['id'],
         'full_name' => (string)$row['full_name'],
         'email' => (string)$row['email'],
         'is_active' => (bool)$row['is_active'],
+        'is_supervisor' => (bool)$row['is_supervisor'],
         'created_at' => (string)$row['created_at'],
         'updated_at' => (string)$row['updated_at'],
     ], $statement->fetchAll());
@@ -1455,6 +1463,7 @@ function createPurchaseRecipient(PDO $pdo, array $payload): array
     ensurePurchaseNotificationSchema($pdo);
     $fullName = trim((string)($payload['full_name'] ?? ''));
     $email = trim((string)($payload['email'] ?? ''));
+    $isSupervisor = filter_var($payload['is_supervisor'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
     if ($fullName === '') {
         throw new InvalidArgumentException('Укажите ФИО получателя.');
     }
@@ -1463,11 +1472,11 @@ function createPurchaseRecipient(PDO $pdo, array $payload): array
     }
 
     $statement = $pdo->prepare(
-        'INSERT INTO purchase_notification_recipients (full_name, email, is_active)
-         VALUES (:full_name, :email, 1)
-         ON DUPLICATE KEY UPDATE full_name = VALUES(full_name), is_active = 1, updated_at = CURRENT_TIMESTAMP'
+        'INSERT INTO purchase_notification_recipients (full_name, email, is_active, is_supervisor)
+         VALUES (:full_name, :email, 1, :is_supervisor)
+         ON DUPLICATE KEY UPDATE full_name = VALUES(full_name), is_active = 1, is_supervisor = VALUES(is_supervisor), updated_at = CURRENT_TIMESTAMP'
     );
-    $statement->execute([':full_name' => $fullName, ':email' => $email]);
+    $statement->execute([':full_name' => $fullName, ':email' => $email, ':is_supervisor' => $isSupervisor]);
 
     return ['ok' => true, 'recipients' => listPurchaseRecipients($pdo)];
 }
@@ -1479,6 +1488,7 @@ function updatePurchaseRecipient(PDO $pdo, array $payload): array
     $id = (int)($payload['id'] ?? 0);
     $fullName = trim((string)($payload['full_name'] ?? ''));
     $email = trim((string)($payload['email'] ?? ''));
+    $isSupervisor = filter_var($payload['is_supervisor'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
     if ($id <= 0) throw new InvalidArgumentException('Не указан получатель для редактирования.');
     if ($fullName === '') throw new InvalidArgumentException('Укажите ФИО получателя.');
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('Укажите корректный email получателя.');
@@ -1489,10 +1499,10 @@ function updatePurchaseRecipient(PDO $pdo, array $payload): array
     $duplicate->execute([':email' => $email, ':id' => $id]);
     if ((int)$duplicate->fetchColumn() > 0) throw new InvalidArgumentException('Получатель с таким email уже существует.');
     $statement = $pdo->prepare(
-        'UPDATE purchase_notification_recipients SET full_name = :full_name, email = :email, updated_at = CURRENT_TIMESTAMP
+        'UPDATE purchase_notification_recipients SET full_name = :full_name, email = :email, is_supervisor = :is_supervisor, updated_at = CURRENT_TIMESTAMP
          WHERE id = :id AND is_active = 1'
     );
-    $statement->execute([':full_name' => $fullName, ':email' => $email, ':id' => $id]);
+    $statement->execute([':full_name' => $fullName, ':email' => $email, ':is_supervisor' => $isSupervisor, ':id' => $id]);
     return ['ok' => true, 'recipients' => listPurchaseRecipients($pdo)];
 }
 
@@ -1799,13 +1809,17 @@ function sendPurchaseNotificationForEvent(PDO $pdo, array $event, int $eventDays
     if ($missingWarehouses) {
         $warning = "\n\nВнимание. Не все склады заполнили остатки. Уточните информацию по остаткам у складов " . implode(', ', $missingWarehouses) . '.';
     }
-    $distribution = distributePurchaseEventBatches($event, $recipients, $pdo);
+    $managerRecipients = array_values(array_filter($recipients, static fn (array $recipient): bool => empty($recipient['is_supervisor'])));
+    $distribution = distributePurchaseEventBatches($event, $managerRecipients, $pdo);
     savePurchaseEventDistributionAudit($pdo, $event, $distribution, $recipients);
+    $allAssigned = [];
+    foreach ($distribution['assigned'] as $assignedItems) $allAssigned = array_merge($allAssigned, $assignedItems);
     $allSent = true;
     $errors = [];
     foreach ($recipients as $recipient) {
         $recipientId = (int)$recipient['id'];
-        $assigned = $distribution['assigned'][$recipientId] ?? [];
+        $isSupervisor = !empty($recipient['is_supervisor']);
+        $assigned = $isSupervisor ? $allAssigned : ($distribution['assigned'][$recipientId] ?? []);
         $unassigned = $distribution['unassigned'];
         if (!$assigned && !$unassigned) continue;
         $recipientAttempt = $pdo->prepare(
@@ -1819,15 +1833,13 @@ function sendPurchaseNotificationForEvent(PDO $pdo, array $event, int $eventDays
         );
         $recipientAttempt->execute([':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':recipient_id' => $recipientId, ':email' => $recipient['email']]);
         if ($recipientAttempt->rowCount() === 0) continue;
-        $summaryToken = getOrCreatePurchaseEventSummaryToken(
-            $pdo,
-            $event,
-            $recipientId,
-            array_column($assigned, 'id'),
-            array_column($unassigned, 'id')
-        );
+        $summaryToken = $isSupervisor
+            ? getOrCreatePurchaseEventSummaryToken($pdo, $event)
+            : getOrCreatePurchaseEventSummaryToken($pdo, $event, $recipientId, array_column($assigned, 'id'), array_column($unassigned, 'id'));
         $url = publicBaseUrl() . '/purchase-event.php?token=' . rawurlencode($summaryToken);
-        $body = purchaseManagerEmailBody($assigned, $unassigned, $eventDays, $expiryText, $url, $warning);
+        $body = $isSupervisor
+            ? "Остатки по товарам со сроком годности до {$expiryText}. При необходимости ознакомьтесь с данными и, на основании указанных остатков, выполните списание товара.{$warning}\n\nОткрыть общую сводную таблицу: {$url}"
+            : purchaseManagerEmailBody($assigned, $unassigned, $eventDays, $expiryText, $url, $warning);
         try {
             $distributionDetails = array_map(static fn (array $item): array => [
                 'batch_id' => (int)$item['id'],

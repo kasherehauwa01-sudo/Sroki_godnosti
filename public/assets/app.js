@@ -1674,6 +1674,7 @@ function renderPurchaseRecipients() {
         <article class="notification-history-item purchase-recipient-item">
             <p><strong>${escapeHtml(recipient.full_name)}</strong></p>
             <p>${escapeHtml(recipient.email)}</p>
+            ${recipient.is_supervisor ? '<p><strong>Супервайзер</strong></p>' : ''}
             <button class="small-button edit-purchase-recipient-button" data-id="${recipient.id}" type="button">Редактировать</button>
             <button class="small-button danger delete-purchase-recipient-button" data-id="${recipient.id}" type="button">Удалить</button>
         </article>
@@ -1689,6 +1690,7 @@ function openPurchaseRecipientDialog(event = null, recipientId = null) {
     setTextIfPresent('#purchaseRecipientDialogTitle', recipient ? 'Редактирование получателя' : 'Получатель отдела закупок');
     setValueIfPresent('#purchaseRecipientName', recipient?.full_name || '');
     setValueIfPresent('#purchaseRecipientEmail', recipient?.email || '');
+    setCheckedIfPresent('#purchaseRecipientSupervisor', Boolean(recipient?.is_supervisor));
     setTextIfPresent('#purchaseRecipientError', '');
     qs('#purchaseRecipientDialog').showModal();
     focusIfPresent('#purchaseRecipientName');
@@ -1703,6 +1705,7 @@ async function submitPurchaseRecipient(event) {
     event.preventDefault();
     const fullName = qs('#purchaseRecipientName').value.trim();
     const email = qs('#purchaseRecipientEmail').value.trim();
+    const isSupervisor = Boolean(qs('#purchaseRecipientSupervisor').checked);
     if (!fullName || !email) {
         setTextIfPresent('#purchaseRecipientError', 'Заполните ФИО и email.');
         return;
@@ -1713,7 +1716,7 @@ async function submitPurchaseRecipient(event) {
     }
     try {
         const action = state.editingPurchaseRecipientId ? 'purchase_recipient_update' : 'purchase_recipient_create';
-        const result = await api(action, { settings_password: state.settingsPassword, id: state.editingPurchaseRecipientId, full_name: fullName, email });
+        const result = await api(action, { settings_password: state.settingsPassword, id: state.editingPurchaseRecipientId, full_name: fullName, email, is_supervisor: isSupervisor });
         state.settings.purchase_recipients = result.recipients || [];
         renderPurchaseRecipients();
         closePurchaseRecipientDialog();

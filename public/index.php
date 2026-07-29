@@ -713,6 +713,7 @@ declare(strict_types=1);
             </div>
             <label>ФИО<input id="purchaseRecipientName" required autocomplete="name"></label>
             <label>Email<input id="purchaseRecipientEmail" required autocomplete="email" type="email"></label>
+            <label class="checkbox-row"><input id="purchaseRecipientSupervisor" type="checkbox"> Супервайзер</label>
             <p class="field-error" id="purchaseRecipientError" role="alert"></p>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelPurchaseRecipientButton" type="button">Отмена</button>
