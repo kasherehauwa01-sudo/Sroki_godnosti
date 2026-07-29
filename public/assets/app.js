@@ -34,6 +34,7 @@ const state = {
     eventPeriodFilters: new Set(['today', 'future']),
     emailNotificationLogs: [],
     selectedEmailNotificationLogId: null,
+    editingPurchaseRecipientId: null,
 };
 
 const statusOptions = ['В наличии', 'Реализована', 'Списана', 'Нет в наличии'];
@@ -119,7 +120,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients', 'email_notification_logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_delete', 'email_notification_retry']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -1673,16 +1674,21 @@ function renderPurchaseRecipients() {
         <article class="notification-history-item purchase-recipient-item">
             <p><strong>${escapeHtml(recipient.full_name)}</strong></p>
             <p>${escapeHtml(recipient.email)}</p>
+            <button class="small-button edit-purchase-recipient-button" data-id="${recipient.id}" type="button">Редактировать</button>
             <button class="small-button danger delete-purchase-recipient-button" data-id="${recipient.id}" type="button">Удалить</button>
         </article>
     `).join('') || 'Получатели пока не добавлены.';
+    qsa('.edit-purchase-recipient-button').forEach((button) => button.addEventListener('click', () => openPurchaseRecipientDialog(null, button.dataset.id)));
     qsa('.delete-purchase-recipient-button').forEach((button) => button.addEventListener('click', () => deletePurchaseRecipient(button.dataset.id)));
 }
 
-function openPurchaseRecipientDialog(event = null) {
+function openPurchaseRecipientDialog(event = null, recipientId = null) {
     event?.preventDefault();
-    setValueIfPresent('#purchaseRecipientName', '');
-    setValueIfPresent('#purchaseRecipientEmail', '');
+    const recipient = (state.settings?.purchase_recipients || []).find((item) => Number(item.id) === Number(recipientId));
+    state.editingPurchaseRecipientId = recipient ? Number(recipient.id) : null;
+    setTextIfPresent('#purchaseRecipientDialogTitle', recipient ? 'Редактирование получателя' : 'Получатель отдела закупок');
+    setValueIfPresent('#purchaseRecipientName', recipient?.full_name || '');
+    setValueIfPresent('#purchaseRecipientEmail', recipient?.email || '');
     setTextIfPresent('#purchaseRecipientError', '');
     qs('#purchaseRecipientDialog').showModal();
     focusIfPresent('#purchaseRecipientName');
@@ -1690,6 +1696,7 @@ function openPurchaseRecipientDialog(event = null) {
 
 function closePurchaseRecipientDialog() {
     qs('#purchaseRecipientDialog').close();
+    state.editingPurchaseRecipientId = null;
 }
 
 async function submitPurchaseRecipient(event) {
@@ -1705,7 +1712,8 @@ async function submitPurchaseRecipient(event) {
         return;
     }
     try {
-        const result = await api('purchase_recipient_create', { settings_password: state.settingsPassword, full_name: fullName, email });
+        const action = state.editingPurchaseRecipientId ? 'purchase_recipient_update' : 'purchase_recipient_create';
+        const result = await api(action, { settings_password: state.settingsPassword, id: state.editingPurchaseRecipientId, full_name: fullName, email });
         state.settings.purchase_recipients = result.recipients || [];
         renderPurchaseRecipients();
         closePurchaseRecipientDialog();

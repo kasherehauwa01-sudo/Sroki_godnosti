@@ -66,7 +66,7 @@ function renderPurchaseEventTable(result) {
         <td class="purchase-event-main-column numeric-cell">${formatQuantity(row.total)}</td>
         <td class="purchase-event-main-column"><select class="purchase-event-status" data-batch-id="${row.id}" data-current-status="${escapeHtml(row.status)}">${result.statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === row.status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}</select></td>
         <td class="purchase-event-main-column">${Number(result.event_days)} дней</td>
-        <td class="purchase-event-main-column">${escapeHtml(row.manager_value || '—')}</td>
+        <td class="purchase-event-main-column">${escapeHtml(row.manager_value || '—')}${row.manager_email ? `<br><small>${escapeHtml(row.manager_email)}</small>` : ''}</td>
         ${result.warehouses.map((warehouse) => {
             const value = row.quantities[warehouse.id];
             return `<td class="numeric-cell">${purchaseEventEditing

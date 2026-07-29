@@ -105,6 +105,7 @@ function handleApiRequest(): void
                 'save_stock_form' => saveStockForm($pdo, (string)($payload['token'] ?? ''), (array)($payload['quantities'] ?? []), clientIp(), (string)($_SERVER['HTTP_USER_AGENT'] ?? '')),
                 'mark_stock_batch_notification_viewed' => markStockBatchNotificationViewed($pdo, (int)($payload['batch_id'] ?? 0)),
                 'purchase_recipient_create' => createPurchaseRecipient($pdo, $payload),
+                'purchase_recipient_update' => updatePurchaseRecipient($pdo, $payload),
                 'purchase_recipient_delete' => deletePurchaseRecipient($pdo, $payload),
                 'purchase_event_batch_status' => updatePurchaseEventBatchStatus($pdo, $payload),
                 'purchase_event_stocks' => updatePurchaseEventStocks($pdo, $payload),
@@ -1420,6 +1421,30 @@ function createPurchaseRecipient(PDO $pdo, array $payload): array
     return ['ok' => true, 'recipients' => listPurchaseRecipients($pdo)];
 }
 
+function updatePurchaseRecipient(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    ensurePurchaseNotificationSchema($pdo);
+    $id = (int)($payload['id'] ?? 0);
+    $fullName = trim((string)($payload['full_name'] ?? ''));
+    $email = trim((string)($payload['email'] ?? ''));
+    if ($id <= 0) throw new InvalidArgumentException('Не указан получатель для редактирования.');
+    if ($fullName === '') throw new InvalidArgumentException('Укажите ФИО получателя.');
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('Укажите корректный email получателя.');
+    $exists = $pdo->prepare('SELECT COUNT(*) FROM purchase_notification_recipients WHERE id = :id AND is_active = 1');
+    $exists->execute([':id' => $id]);
+    if ((int)$exists->fetchColumn() === 0) throw new InvalidArgumentException('Получатель не найден.');
+    $duplicate = $pdo->prepare('SELECT COUNT(*) FROM purchase_notification_recipients WHERE email = :email AND id <> :id');
+    $duplicate->execute([':email' => $email, ':id' => $id]);
+    if ((int)$duplicate->fetchColumn() > 0) throw new InvalidArgumentException('Получатель с таким email уже существует.');
+    $statement = $pdo->prepare(
+        'UPDATE purchase_notification_recipients SET full_name = :full_name, email = :email, updated_at = CURRENT_TIMESTAMP
+         WHERE id = :id AND is_active = 1'
+    );
+    $statement->execute([':full_name' => $fullName, ':email' => $email, ':id' => $id]);
+    return ['ok' => true, 'recipients' => listPurchaseRecipients($pdo)];
+}
+
 function deletePurchaseRecipient(PDO $pdo, array $payload): array
 {
     assertSettingsPassword($payload);
@@ -1932,10 +1957,21 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
     $unassignedIds = array_map('intval', is_array($unassignedIds) ? $unassignedIds : []);
     $allowedIds = array_values(array_unique(array_merge($assignedIds, $unassignedIds)));
     $managerValues = [];
+    $managerEmails = [];
     $catalogNames = [];
-    $auditStatement = $pdo->prepare('SELECT batch_id, manager_value FROM purchase_event_distribution_log WHERE event_key = :event_key AND event_date = :event_date');
+    $auditStatement = $pdo->prepare(
+        'SELECT d.batch_id, d.manager_value, r.email AS manager_email
+         FROM purchase_event_distribution_log d
+         LEFT JOIN purchase_notification_recipients r ON r.id = d.matched_recipient_id
+         WHERE d.event_key = :event_key AND d.event_date = :event_date'
+    );
     $auditStatement->execute([':event_key' => $log['event_key'], ':event_date' => $log['event_date']]);
-    foreach ($auditStatement->fetchAll() as $auditRow) $managerValues[(int)$auditRow['batch_id']] = (string)($auditRow['manager_value'] ?? '');
+    foreach ($auditStatement->fetchAll() as $auditRow) {
+        $batchId = (int)$auditRow['batch_id'];
+        $managerValues[$batchId] = (string)($auditRow['manager_value'] ?? '');
+        $managerEmails[$batchId] = (string)($auditRow['manager_email'] ?? '');
+    }
+    $purchaseRecipients = listPurchaseRecipients($pdo);
     // Для сводной таблицы повторно читаем актуальную характеристику из vrcatalog.
     // Аудит остаётся резервным источником, если каталог временно недоступен.
     try {
@@ -1946,7 +1982,18 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
             $products = $catalogByArticle[trim((string)$batch['article'])] ?? [];
             if (count($products) !== 1 || !vrCatalogProductFound($products[0])) continue;
             $manager = vrCatalogManagerValue($products[0]);
-            if ($manager['exists']) $managerValues[(int)$batch['id']] = (string)$manager['value'];
+            if ($manager['exists']) {
+                $batchId = (int)$batch['id'];
+                $managerValues[$batchId] = (string)$manager['value'];
+                $matches = array_values(array_filter($purchaseRecipients, static function (array $recipient) use ($manager): bool {
+                    $identity = normalizePurchaseManagerIdentity((string)$manager['value']);
+                    return normalizePurchaseManagerIdentity((string)$recipient['email']) === $identity
+                        || normalizePurchaseManagerIdentity((string)$recipient['full_name']) === $identity
+                        || purchaseManagerNamesMatch($identity, (string)$recipient['full_name'])
+                        || (ctype_digit($identity) && (int)$recipient['id'] === (int)$identity);
+                }));
+                if (count($matches) === 1) $managerEmails[$batchId] = (string)$matches[0]['email'];
+            }
             $catalogName = vrCatalogProductName($products[0]);
             if ($catalogName !== '') $catalogNames[(int)$batch['id']] = $catalogName;
         }
@@ -1965,7 +2012,7 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
         }
         $displayName = trim((string)($catalogNames[(int)$batch['id']] ?? $batch['name'] ?? ''));
         if ($displayName === '') $displayName = (string)$batch['article'];
-        $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'total' => $total, 'status' => $batch['status'], 'quantities' => $quantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
+        $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'total' => $total, 'status' => $batch['status'], 'quantities' => $quantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'manager_email' => $managerEmails[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
     }
     usort($rows, static fn (array $left, array $right): int => ($left['section'] <=> $right['section']) ?: ($left['id'] <=> $right['id']));
     return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES)];
@@ -2070,7 +2117,8 @@ function downloadPurchaseEventXls(PDO $pdo, string $token): array
     foreach ($summary['warehouses'] as $warehouse) $headers[] = (string)$warehouse['name'];
     $rows = [$headers];
     foreach ($summary['rows'] as $row) {
-        $values = [$row['section'] === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары', $row['code'], $row['name'], $summary['event_days'] . ' дней', $row['section'] === 'unassigned' ? $row['manager_value'] : '', $row['total'], $row['status']];
+        $managerText = trim((string)$row['manager_value'] . ((string)$row['manager_email'] !== '' ? "\n" . (string)$row['manager_email'] : ''));
+        $values = [$row['section'] === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары', $row['code'], $row['name'], $summary['event_days'] . ' дней', $managerText, $row['total'], $row['status']];
         foreach ($summary['warehouses'] as $warehouse) $values[] = $row['quantities'][(string)$warehouse['id']] ?? '';
         $rows[] = $values;
     }

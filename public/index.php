@@ -727,7 +727,7 @@ declare(strict_types=1);
     <dialog class="modal" id="purchaseRecipientDialog">
         <form class="card form modal-card" id="purchaseRecipientForm" method="dialog">
             <div class="modal-heading">
-                <h2>Получатель отдела закупок</h2>
+                <h2 id="purchaseRecipientDialogTitle">Получатель отдела закупок</h2>
                 <button class="icon-button" id="closePurchaseRecipientDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
             <label>ФИО<input id="purchaseRecipientName" required autocomplete="name"></label>
