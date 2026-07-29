@@ -1790,7 +1790,22 @@ function updatePurchaseEventRecipientResult(PDO $pdo, array $event, int $recipie
 
 function normalizePurchaseManagerIdentity(string $value): string
 {
-    return mb_strtolower(preg_replace('/\s+/u', ' ', trim($value)) ?? trim($value), 'UTF-8');
+    $value = mb_strtolower(trim($value), 'UTF-8');
+    $value = str_replace('ё', 'е', $value);
+    $value = preg_replace('/\([^)]*\)/u', ' ', $value) ?? $value;
+    $value = preg_replace('/[^\p{L}\p{N}@._+-]+/u', ' ', $value) ?? $value;
+    return trim(preg_replace('/\s+/u', ' ', $value) ?? $value);
+}
+
+function purchaseManagerNamesMatch(string $catalogName, string $recipientName): bool
+{
+    $catalogParts = preg_split('/\s+/u', normalizePurchaseManagerIdentity($catalogName), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $recipientParts = preg_split('/\s+/u', normalizePurchaseManagerIdentity($recipientName), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    // Частичное совпадение разрешено только минимум по фамилии и имени.
+    // Одна фамилия не считается достаточной, чтобы не отправить письмо не тому сотруднику.
+    $commonLength = min(count($catalogParts), count($recipientParts));
+    if ($commonLength < 2) return false;
+    return array_slice($catalogParts, 0, $commonLength) === array_slice($recipientParts, 0, $commonLength);
 }
 
 function distributePurchaseEventBatches(array $event, array $recipients, ?PDO $pdo = null): array
@@ -1833,6 +1848,7 @@ function distributePurchaseEventBatches(array $event, array $recipients, ?PDO $p
                     $matches = array_values(array_filter($recipients, static function (array $recipient) use ($identity): bool {
                         return normalizePurchaseManagerIdentity((string)$recipient['email']) === $identity
                             || normalizePurchaseManagerIdentity((string)$recipient['full_name']) === $identity
+                            || purchaseManagerNamesMatch($identity, (string)$recipient['full_name'])
                             || (ctype_digit($identity) && (int)$recipient['id'] === (int)$identity);
                     }));
                     if (!$matches) $reason = 'Менеджер не найден среди получателей отдела закупок.';
