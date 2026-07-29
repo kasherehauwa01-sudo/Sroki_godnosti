@@ -1763,8 +1763,8 @@ function getOrCreatePurchaseEventSummaryToken(PDO $pdo, array $event, ?int $reci
         ':event_key' => $event['event_key'], ':event_date' => $event['event_date'],
         ':event_days' => parsePurchaseEventDays((string)$event['event_key']), ':expiry_date' => $event['expiry_date'],
         ':recipient_id' => $recipientId, ':access_token' => $token, ':token_hash' => hash('sha256', $token),
-        ':assigned' => json_encode(array_values(array_unique($assignedBatchIds))),
-        ':unassigned' => json_encode(array_values(array_unique($unassignedBatchIds))),
+        ':assigned' => $recipientId === null ? null : json_encode(array_values(array_unique($assignedBatchIds))),
+        ':unassigned' => $recipientId === null ? null : json_encode(array_values(array_unique($unassignedBatchIds))),
     ]);
     return $token;
 }
@@ -2004,7 +2004,10 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
     $event = getPurchaseEventData($pdo, (string)$log['event_key'], (string)$log['event_date'], true);
     $assignedIds = json_decode((string)($log['assigned_batch_ids'] ?? ''), true);
     $unassignedIds = json_decode((string)($log['unassigned_batch_ids'] ?? ''), true);
-    $personal = is_array($assignedIds) || is_array($unassignedIds);
+    // Общая ссылка из вкладки «Уведомления» имеет recipient_id = NULL и должна
+    // показывать все партии события. Массивы партий ограничивают только
+    // персональные ссылки, отправленные конкретным менеджерам.
+    $personal = isset($log['recipient_id']) && $log['recipient_id'] !== null;
     $assignedIds = array_map('intval', is_array($assignedIds) ? $assignedIds : []);
     $unassignedIds = array_map('intval', is_array($unassignedIds) ? $unassignedIds : []);
     $allowedIds = array_values(array_unique(array_merge($assignedIds, $unassignedIds)));
