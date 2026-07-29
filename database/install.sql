@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS batches (
     expiry_invalid TINYINT(1) NOT NULL DEFAULT 0,
     expiry_raw VARCHAR(32) NULL,
     days_left INT NOT NULL DEFAULT 0,
-    status ENUM('В наличии', 'Реализована', 'Списана') NOT NULL DEFAULT 'В наличии',
+    status ENUM('В наличии', 'Реализована', 'Списана', 'Нет в наличии') NOT NULL DEFAULT 'В наличии',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     INDEX idx_batches_article (article),
@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS settings (
     notification_time CHAR(5) NOT NULL DEFAULT '09:00',
     auto_import_time CHAR(5) NOT NULL DEFAULT '23:50',
     missing_filter_email TEXT NULL,
+    email_log_retention_days SMALLINT UNSIGNED NOT NULL DEFAULT 365,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -92,9 +93,31 @@ INSERT INTO settings (
     smtp_from_name,
     notification_time,
     auto_import_time,
-    missing_filter_email
-) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00', '23:50', NULL)
+    missing_filter_email,
+    email_log_retention_days
+) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00', '23:50', NULL, 365)
 ON DUPLICATE KEY UPDATE id = id;
+
+CREATE TABLE IF NOT EXISTS email_notification_log (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    notification_type VARCHAR(128) NOT NULL,
+    subject VARCHAR(998) NOT NULL,
+    recipients JSON NOT NULL,
+    status ENUM('PENDING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
+    smtp_code VARCHAR(16) NULL,
+    diagnostic_code TEXT NULL,
+    error_reason VARCHAR(255) NULL,
+    smtp_response MEDIUMTEXT NULL,
+    message_id VARCHAR(255) NULL,
+    duration_ms INT UNSIGNED NULL,
+    retry_payload LONGTEXT NULL,
+    distribution_details JSON NULL,
+    PRIMARY KEY (id),
+    INDEX idx_email_log_created_at (created_at),
+    INDEX idx_email_log_status (status),
+    INDEX idx_email_log_type (notification_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS warehouses (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -213,4 +236,97 @@ CREATE TABLE IF NOT EXISTS stock_batch_notification_views (
     viewed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (batch_id),
     CONSTRAINT fk_stock_batch_views_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_notification_recipients (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    full_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_purchase_recipient_email (email),
+    INDEX idx_purchase_recipient_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_notification_log (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    batch_id BIGINT UNSIGNED NOT NULL,
+    event_days INT NOT NULL,
+    sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    recipients JSON NULL,
+    status ENUM('SUCCESS', 'ERROR') NOT NULL,
+    error_message TEXT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_purchase_batch_event (batch_id, event_days),
+    INDEX idx_purchase_log_status (status),
+    CONSTRAINT fk_purchase_log_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_event_notification_log (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    event_key VARCHAR(128) NOT NULL,
+    event_date DATE NOT NULL,
+    event_days INT NOT NULL,
+    expiry_date DATE NOT NULL,
+    access_token_hash CHAR(64) NOT NULL,
+    recipients JSON NULL,
+    status ENUM('PENDING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
+    error_message TEXT NULL,
+    sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_purchase_event (event_key, event_date),
+    UNIQUE KEY uniq_purchase_event_token (access_token_hash),
+    INDEX idx_purchase_event_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_event_summary_links (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    event_key VARCHAR(128) NOT NULL,
+    event_date DATE NOT NULL,
+    event_days INT NOT NULL,
+    expiry_date DATE NOT NULL,
+    recipient_id BIGINT UNSIGNED NULL,
+    access_token VARCHAR(64) NULL,
+    access_token_hash CHAR(64) NOT NULL,
+    assigned_batch_ids JSON NULL,
+    unassigned_batch_ids JSON NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_purchase_summary_token (access_token_hash),
+    INDEX idx_purchase_summary_event (event_key, event_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_event_distribution_log (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    event_key VARCHAR(128) NOT NULL,
+    event_date DATE NOT NULL,
+    batch_id BIGINT UNSIGNED NOT NULL,
+    article VARCHAR(128) NOT NULL,
+    manager_value VARCHAR(255) NULL,
+    matched_recipient_id BIGINT UNSIGNED NULL,
+    distribution_type ENUM('PERSONAL', 'UNASSIGNED') NOT NULL,
+    distribution_reason VARCHAR(255) NOT NULL,
+    actual_recipients JSON NOT NULL,
+    send_status ENUM('PENDING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
+    smtp_error TEXT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_purchase_distribution (event_key, event_date, batch_id),
+    INDEX idx_purchase_distribution_created (created_at),
+    INDEX idx_purchase_distribution_batch (batch_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_event_recipient_log (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    event_key VARCHAR(128) NOT NULL,
+    event_date DATE NOT NULL,
+    recipient_id BIGINT UNSIGNED NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    status ENUM('PENDING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
+    error_message TEXT NULL,
+    sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_purchase_event_recipient (event_key, event_date, recipient_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
