@@ -132,7 +132,6 @@ declare(strict_types=1);
                 <button class="settings-subtab active" data-settings-tab="main" type="button">Основные</button>
                 <button class="settings-subtab" data-settings-tab="notifications" type="button">Уведомления</button>
                 <button class="settings-subtab" data-settings-tab="warehouses" type="button">Склады</button>
-                <button class="settings-subtab" data-settings-tab="stock-fill" type="button">Заполнение остатков</button>
             </div>
             <div class="settings-subpanel" data-settings-panel="warehouses" hidden>
                 <div class="card form settings-warehouses-card">
@@ -260,24 +259,6 @@ declare(strict_types=1);
                     <button class="primary" type="submit">Сохранить настройки</button>
                 </div>
             </form>
-
-            <div class="settings-subpanel" data-settings-panel="stock-fill" hidden>
-                <div class="card form settings-stock-fill-card">
-                    <div class="section-heading registry-heading">
-                        <div>
-                            <h3>Заполнение остатков</h3>
-                            <p>Отслеживайте формы, отправленные складам для заполнения остатков партий.</p>
-                        </div>
-                        <button class="primary" id="openTestStockFillButton" type="button">Тест</button>
-                    </div>
-                    <div class="table-wrap">
-                        <table>
-                            <thead><tr><th>Дата отправки</th><th>Тип события</th><th>Склад</th><th>Партий</th><th>Заполнено</th><th>Статус</th><th>Последнее изменение</th><th>Действия</th></tr></thead>
-                            <tbody id="stockNotificationsBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
 
         </section>
 

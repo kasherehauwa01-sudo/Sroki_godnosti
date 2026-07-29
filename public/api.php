@@ -57,6 +57,7 @@ function handleApiRequest(): void
         }
 
         refreshDaysLeft($pdo);
+        sendDueOverdueStockCheckNotifications($pdo);
         if (!in_array($action, ['test_notification', 'test_purchase_notification'], true)) {
             runDueExpiryNotifications($pdo);
             sendExpiredPurchaseEventNotifications($pdo);
@@ -1166,6 +1167,56 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
     ]);
 }
 
+function sendDueOverdueStockCheckNotifications(PDO $pdo): void
+{
+    if ((int)$pdo->query("SELECT GET_LOCK('sroki_godnosti_overdue_stock_check', 0)")->fetchColumn() !== 1) return;
+    try {
+        $warehouses = getActiveWarehousesWithEmails($pdo);
+        if (!$warehouses) return;
+        $statement = $pdo->query(
+            "SELECT b.id, b.article, b.code, b.name, b.expiry_date, b.expiry_full_date, b.days_left
+             FROM batches b
+             WHERE b.status = 'В наличии'
+               AND b.expiry_invalid = 0
+               AND b.expiry_date < CURDATE()
+               AND NOT EXISTS (SELECT 1 FROM batch_stock bs WHERE bs.batch_id = b.id)
+             ORDER BY b.expiry_date, b.article, b.id"
+        );
+        $batches = $statement->fetchAll();
+        if (!$batches) return;
+
+        $settings = getRawSettings($pdo);
+        $subject = 'Проверка наличия товара';
+        $sent = [];
+        foreach ($warehouses as $warehouse) {
+            $pendingBatches = array_values(array_filter($batches, static function (array $batch) use ($pdo, $warehouse): bool {
+                $check = $pdo->prepare(
+                    "SELECT COUNT(*) FROM stock_notification_items i
+                     INNER JOIN stock_notifications n ON n.id = i.notification_id
+                     WHERE i.batch_id = :batch_id AND n.warehouse_id = :warehouse_id AND n.event_key = 'overdue_stock_check'"
+                );
+                $check->execute([':batch_id' => (int)$batch['id'], ':warehouse_id' => (int)$warehouse['id']]);
+                return (int)$check->fetchColumn() === 0;
+            }));
+            if (!$pendingBatches) continue;
+            $form = createStockNotification($pdo, $warehouse, $pendingBatches, 'overdue_stock_check', $subject, publicBaseUrl());
+            $body = "Просьба заполнить остатки по данному товара.\n\n" . (string)$form['url'];
+            $emailError = '';
+            try {
+                sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings);
+            } catch (Throwable $error) {
+                $emailError = $error->getMessage();
+            }
+            $sent[] = ['warehouse_id' => (int)$warehouse['id'], 'notification_id' => (int)$form['id'], 'batch_ids' => array_map('intval', array_column($pendingBatches, 'id')), 'email_error' => $emailError];
+        }
+        if ($sent) writeLog($pdo, 'overdue_stock_check_sent', ['subject' => $subject, 'notifications' => $sent]);
+    } catch (Throwable $error) {
+        writeLog($pdo, 'overdue_stock_check_failed', ['error' => $error->getMessage()]);
+    } finally {
+        $pdo->query("SELECT RELEASE_LOCK('sroki_godnosti_overdue_stock_check')");
+    }
+}
+
 function expiryCodesXlsAttachment(array $batches, int $daysLeft): array
 {
     $rows = array_map(static function (array $batch): string {
@@ -1468,7 +1519,8 @@ function maybeSendPurchaseNotifications(PDO $pdo, array $notification, array $su
 {
     if (!$submittedBatchIds) return;
     $eventDays = parsePurchaseEventDays((string)($notification['event_key'] ?? ''));
-    if ($eventDays <= 0) return;
+    $isOverdueStockCheck = (string)($notification['event_key'] ?? '') === 'overdue_stock_check';
+    if ($eventDays <= 0 && !$isOverdueStockCheck) return;
     $eventDate = substr((string)($notification['sent_at'] ?? $notification['created_at'] ?? ''), 0, 10);
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $eventDate)) return;
     $event = getPurchaseEventData($pdo, (string)$notification['event_key'], $eventDate, false);
@@ -1642,7 +1694,7 @@ function listPurchaseEventNotifications(PDO $pdo): array
     $statement = $pdo->query(
         "SELECT event_key, DATE(sent_at) AS event_date, MAX(sent_at) AS sent_at
          FROM stock_notifications
-         WHERE event_key REGEXP '^expiry_[0-9]+$'
+         WHERE event_key REGEXP '^expiry_[0-9]+$' OR event_key = 'overdue_stock_check'
          GROUP BY event_key, DATE(sent_at)
          ORDER BY sent_at DESC"
     );
@@ -2113,12 +2165,12 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
 function downloadPurchaseEventXls(PDO $pdo, string $token): array
 {
     $summary = getPurchaseEventSummary($pdo, $token);
-    $headers = ['Раздел', 'Код', 'Наименование', 'Остаток срока годности', 'Менеджер', 'Общий остаток', 'Статус'];
+    $headers = ['Раздел', 'Код', 'Наименование', 'Менеджер', 'Общий остаток', 'Статус'];
     foreach ($summary['warehouses'] as $warehouse) $headers[] = (string)$warehouse['name'];
     $rows = [$headers];
     foreach ($summary['rows'] as $row) {
         $managerText = trim((string)$row['manager_value'] . ((string)$row['manager_email'] !== '' ? "\n" . (string)$row['manager_email'] : ''));
-        $values = [$row['section'] === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары', $row['code'], $row['name'], $summary['event_days'] . ' дней', $managerText, $row['total'], $row['status']];
+        $values = [$row['section'] === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары', $row['code'], $row['name'], $managerText, $row['total'], $row['status']];
         foreach ($summary['warehouses'] as $warehouse) $values[] = $row['quantities'][(string)$warehouse['id']] ?? '';
         $rows[] = $values;
     }

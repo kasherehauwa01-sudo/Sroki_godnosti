@@ -1162,7 +1162,7 @@ function renderStockBatchNotifications() {
     qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnreadChanges);
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
         <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification' : ''}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
-            <td>${Number(notification.event_days || 0)} дней</td>
+            <td>${notification.event_key === 'overdue_stock_check' ? 'Проверка наличия товара' : `${Number(notification.event_days || 0)} дней`}</td>
             <td>${escapeHtml(formatDateRu(notification.event_date))}</td>
             <td>${escapeHtml(formatDateRu(notification.expiry_date))}</td>
             <td>${Number(notification.batch_count || 0)}</td>
@@ -2261,11 +2261,7 @@ function bindEvents() {
     qsa('.settings-subtab').forEach((button) => button.addEventListener('click', () => switchSettingsTab(button.dataset.settingsTab)));
     qsa('.help-subtab').forEach((button) => button.addEventListener('click', () => switchHelpTab(button.dataset.helpTab)));
 
-    qs('#openTestStockFillButton').addEventListener('click', openTestStockFillDialog);
-    qs('#openPurchaseRecipientButton').addEventListener('click', openPurchaseRecipientDialog);
-    qs('#purchaseRecipientForm').addEventListener('submit', submitPurchaseRecipient);
-    qs('#closePurchaseRecipientDialogButton').addEventListener('click', closePurchaseRecipientDialog);
-    qs('#cancelPurchaseRecipientButton').addEventListener('click', closePurchaseRecipientDialog);
+    qs('#openTestStockFillButton')?.addEventListener('click', openTestStockFillDialog);
     qs('#testStockFillForm').addEventListener('submit', submitTestStockFillForm);
     qs('#closeTestStockFillDialogButton').addEventListener('click', closeTestStockFillDialog);
     qs('#cancelTestStockFillButton').addEventListener('click', closeTestStockFillDialog);
