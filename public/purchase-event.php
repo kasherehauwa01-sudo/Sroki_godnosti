@@ -51,13 +51,13 @@ const formatDate = (value) => {
 function renderPurchaseEventTable(result) {
     document.querySelector('#purchaseEventHead').innerHTML = ['Код', 'Наименование', 'Общий остаток', 'Статус']
         .map((title) => `<th class="purchase-event-main-column">${title}</th>`).join('')
-        + '<th>Остаток срока годности</th><th>Менеджер</th><th>Ссылка на партию</th>'
+        + '<th class="purchase-event-main-column">Остаток срока годности</th><th class="purchase-event-main-column">Менеджер</th>'
         + result.warehouses.map((warehouse) => `<th>${escapeHtml(warehouse.name)}</th>`).join('');
     let lastSection = '';
     document.querySelector('#purchaseEventBody').innerHTML = result.rows.map((row) => {
         const section = row.section || 'assigned';
         const sectionHeading = section !== lastSection
-            ? `<tr class="purchase-event-section"><th colspan="${7 + result.warehouses.length}">${section === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары'}</th></tr>`
+            ? `<tr class="purchase-event-section"><th colspan="${6 + result.warehouses.length}">${section === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары'}</th></tr>`
             : '';
         lastSection = section;
         return `${sectionHeading}<tr id="batch-${Number(row.id)}">
@@ -65,9 +65,8 @@ function renderPurchaseEventTable(result) {
         <td class="purchase-event-main-column">${escapeHtml(row.name)}</td>
         <td class="purchase-event-main-column numeric-cell">${formatQuantity(row.total)}</td>
         <td class="purchase-event-main-column"><select class="purchase-event-status" data-batch-id="${row.id}" data-current-status="${escapeHtml(row.status)}">${result.statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === row.status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}</select></td>
-        <td>${Number(result.event_days)} дней</td>
-        <td>${section === 'unassigned' ? escapeHtml(row.manager_value || '—') : '—'}</td>
-        <td><a href="#batch-${Number(row.id)}">Открыть партию</a></td>
+        <td class="purchase-event-main-column">${Number(result.event_days)} дней</td>
+        <td class="purchase-event-main-column">${escapeHtml(row.manager_value || '—')}</td>
         ${result.warehouses.map((warehouse) => {
             const value = row.quantities[warehouse.id];
             return `<td class="numeric-cell">${purchaseEventEditing

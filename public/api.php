@@ -1916,6 +1916,21 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
     $auditStatement = $pdo->prepare('SELECT batch_id, manager_value FROM purchase_event_distribution_log WHERE event_key = :event_key AND event_date = :event_date');
     $auditStatement->execute([':event_key' => $log['event_key'], ':event_date' => $log['event_date']]);
     foreach ($auditStatement->fetchAll() as $auditRow) $managerValues[(int)$auditRow['batch_id']] = (string)($auditRow['manager_value'] ?? '');
+    // Для сводной таблицы повторно читаем актуальную характеристику из vrcatalog.
+    // Аудит остаётся резервным источником, если каталог временно недоступен.
+    try {
+        $catalogProducts = fetchVrCatalogProductsByArticles(array_column($event['batches'], 'article'));
+        $catalogByArticle = [];
+        foreach ($catalogProducts as $product) $catalogByArticle[vrCatalogProductArticle($product)][] = $product;
+        foreach ($event['batches'] as $batch) {
+            $products = $catalogByArticle[trim((string)$batch['article'])] ?? [];
+            if (count($products) !== 1) continue;
+            $manager = vrCatalogManagerValue($products[0]);
+            if ($manager['exists']) $managerValues[(int)$batch['id']] = (string)$manager['value'];
+        }
+    } catch (Throwable $error) {
+        error_log('Не удалось обновить менеджеров сводной таблицы из vrcatalog: ' . $error->getMessage());
+    }
     $rows = [];
     foreach ($event['batches'] as $batch) {
         if ($personal && !in_array((int)$batch['id'], $allowedIds, true)) continue;
