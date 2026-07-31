@@ -107,15 +107,31 @@ function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = 
     $result = [];
     foreach ($articles as $article) {
         $articleProducts = $byArticle[$article] ?? [];
+        $fallbackArticle = $fallbackByArticle[$article] ?? '';
+        $fallbackProducts = $fallbackArticle !== '' ? ($byArticle[$fallbackArticle] ?? []) : [];
+        // Некоторые версии каталога не возвращают запись варианта вообще. В этом
+        // случае создаём результат для исходного кода из однозначного базового товара.
+        if (!$articleProducts && count($fallbackProducts) === 1 && vrCatalogProductFound($fallbackProducts[0])) {
+            $fallbackManager = vrCatalogManagerValue($fallbackProducts[0]);
+            if ($fallbackManager['exists'] && $fallbackManager['value'] !== '') {
+                $product = $fallbackProducts[0];
+                $product['article'] = $article;
+                $product['found'] = true;
+                $product['manager_name'] = $fallbackManager['value'];
+                $product['manager_source_article'] = $fallbackArticle;
+                $articleProducts[] = $product;
+            }
+        }
         foreach ($articleProducts as $product) {
             $manager = vrCatalogManagerValue($product);
-            $fallbackArticle = $fallbackByArticle[$article] ?? '';
-            if (vrCatalogProductFound($product) && (!$manager['exists'] || $manager['value'] === '') && $fallbackArticle !== '') {
-                $fallbackProducts = $byArticle[$fallbackArticle] ?? [];
+            if ((!$manager['exists'] || $manager['value'] === '') && $fallbackArticle !== '') {
                 if (count($fallbackProducts) === 1 && vrCatalogProductFound($fallbackProducts[0])) {
                     $fallbackManager = vrCatalogManagerValue($fallbackProducts[0]);
                     if ($fallbackManager['exists'] && $fallbackManager['value'] !== '') {
                         // Официальное поле имеет приоритет над legacy-структурами.
+                        // Базовый товар подтверждает существование варианта для целей
+                        // распределения и отображения менеджера в сводной таблице.
+                        $product['found'] = true;
                         $product['manager_name'] = $fallbackManager['value'];
                         $product['manager_source_article'] = $fallbackArticle;
                     }
