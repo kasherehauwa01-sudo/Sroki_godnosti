@@ -539,6 +539,7 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
             'INSERT INTO stock_change_logs (notification_id, warehouse_id, batch_id, old_quantity, new_quantity, ip, user_agent)
              VALUES (:notification_id, :warehouse_id, :batch_id, :old_quantity, :new_quantity, :ip, :user_agent)'
         );
+        $submittedBatchIds = [];
         foreach ($quantities as $itemId => $quantity) {
             $itemId = (int)$itemId;
             if (!isset($itemsById[$itemId]) || empty($itemsById[$itemId]['batch_id'])) {
@@ -572,6 +573,9 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
             }
         }
         updateStockNotificationProgress($pdo, (int)$notification['id']);
+        if (function_exists('maybeSendPurchaseNotifications')) {
+            maybeSendPurchaseNotifications($pdo, $notification, $submittedBatchIds);
+        }
         $pdo->commit();
     } catch (Throwable $error) {
         if ($pdo->inTransaction()) {
