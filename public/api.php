@@ -58,6 +58,7 @@ function handleApiRequest(): void
 
         refreshDaysLeft($pdo);
         sendDueOverdueStockCheckNotifications($pdo);
+        sendDueStockReminderNotifications($pdo);
         if (!in_array($action, ['test_notification', 'test_purchase_notification'], true)) {
             runDueExpiryNotifications($pdo);
             sendExpiredPurchaseEventNotifications($pdo);
@@ -110,6 +111,7 @@ function handleApiRequest(): void
                 'purchase_recipient_delete' => deletePurchaseRecipient($pdo, $payload),
                 'purchase_event_batch_status' => updatePurchaseEventBatchStatus($pdo, $payload),
                 'purchase_event_stocks' => updatePurchaseEventStocks($pdo, $payload),
+                'purchase_event_remind' => remindPurchaseEventWarehouses($pdo, $payload),
                 'email_notification_retry' => retryEmailNotification($pdo, $payload),
                 default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
             };
@@ -331,6 +333,24 @@ function ensurePurchaseNotificationSchema(PDO $pdo): void
             sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             UNIQUE KEY uniq_purchase_event_recipient (event_key, event_date, recipient_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS stock_notification_reminder_log (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            event_key VARCHAR(128) NOT NULL,
+            event_date DATE NOT NULL,
+            warehouse_id BIGINT UNSIGNED NOT NULL,
+            notification_id BIGINT UNSIGNED NOT NULL,
+            reminder_number INT UNSIGNED NOT NULL,
+            status ENUM('PENDING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
+            error_message TEXT NULL,
+            sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_stock_event_reminder (event_key, event_date, warehouse_id, reminder_number),
+            INDEX idx_stock_reminder_due (event_key, event_date, warehouse_id, sent_at),
+            CONSTRAINT fk_stock_reminder_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT,
+            CONSTRAINT fk_stock_reminder_notification FOREIGN KEY (notification_id) REFERENCES stock_notifications(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 }
@@ -1541,6 +1561,141 @@ function maybeSendPurchaseNotifications(PDO $pdo, array $notification, array $su
     sendPurchaseNotificationForEvent($pdo, $event, $eventDays);
 }
 
+/** Возвращает склады, которые не заполнили хотя бы одну партию события. */
+function purchaseEventMissingWarehouses(array $event): array
+{
+    return array_values(array_filter($event['warehouses'], static function (array $warehouse) use ($event): bool {
+        $warehouseId = (int)$warehouse['id'];
+        foreach ($event['batches'] as $batch) {
+            if (!array_key_exists($warehouseId, $event['stock'][(int)$batch['id']] ?? [])) return true;
+        }
+        return false;
+    }));
+}
+
+/** Обновляет персональную ссылку склада, чтобы просроченную форму снова можно было заполнить. */
+function refreshStockReminderForm(PDO $pdo, array $event, int $warehouseId): array
+{
+    $statement = $pdo->prepare(
+        "SELECT n.id, n.email, t.id AS token_id
+         FROM stock_notifications n
+         INNER JOIN stock_notification_tokens t ON t.notification_id = n.id
+         WHERE n.event_key = :event_key AND DATE(n.sent_at) = :event_date AND n.warehouse_id = :warehouse_id
+         ORDER BY n.id DESC LIMIT 1"
+    );
+    $statement->execute([':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':warehouse_id' => $warehouseId]);
+    $row = $statement->fetch();
+    if (!$row) throw new RuntimeException('Не найдена индивидуальная форма склада для данного события.');
+
+    $token = bin2hex(random_bytes(32));
+    $expiresAt = (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->modify('+3 days')->setTime(18, 0)->format('Y-m-d H:i:s');
+    $pdo->prepare("UPDATE stock_notification_tokens SET token = :token, token_hash = :token_hash, expires_at = :expires_at, status = 'Активна' WHERE id = :id")
+        ->execute([':token' => $token, ':token_hash' => hash('sha256', $token), ':expires_at' => $expiresAt, ':id' => (int)$row['token_id']]);
+    $pdo->prepare("UPDATE stock_notifications SET status = IF(status = 'Просрочена', 'Не открыта', status) WHERE id = :id")
+        ->execute([':id' => (int)$row['id']]);
+
+    return [
+        'notification_id' => (int)$row['id'],
+        'emails' => preg_split('/[\r\n,;]+/', (string)$row['email'], -1, PREG_SPLIT_NO_EMPTY) ?: [],
+        'url' => publicBaseUrl() . '/fill-stock.php?token=' . rawurlencode($token),
+    ];
+}
+
+function sendStockReminderForWarehouse(PDO $pdo, array $event, array $warehouse): int
+{
+    $warehouseId = (int)$warehouse['id'];
+    $numberStatement = $pdo->prepare(
+        'SELECT COALESCE(MAX(reminder_number), 0) + 1 FROM stock_notification_reminder_log
+         WHERE event_key = :event_key AND event_date = :event_date AND warehouse_id = :warehouse_id'
+    );
+    $numberStatement->execute([':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':warehouse_id' => $warehouseId]);
+    $reminderNumber = (int)$numberStatement->fetchColumn();
+    $form = refreshStockReminderForm($pdo, $event, $warehouseId);
+    $insert = $pdo->prepare(
+        "INSERT INTO stock_notification_reminder_log
+         (event_key, event_date, warehouse_id, notification_id, reminder_number, status)
+         VALUES (:event_key, :event_date, :warehouse_id, :notification_id, :reminder_number, 'PENDING')"
+    );
+    $insert->execute([
+        ':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':warehouse_id' => $warehouseId,
+        ':notification_id' => $form['notification_id'], ':reminder_number' => $reminderNumber,
+    ]);
+    $logId = (int)$pdo->lastInsertId();
+    $subject = 'Не заполнены остатки.';
+    $body = "Остатки не были заполнены в установленный срок. Просим в кратчайшие сроки внести актуальные данные и в дальнейшем соблюдать установленные сроки заполнения.\n\n" . $form['url'];
+    try {
+        sendNotificationEmail($pdo, $form['emails'], $subject, $body, getRawSettings($pdo), [], [
+            'notification_type' => 'Повторное уведомление ' . $reminderNumber,
+            'event_key' => $event['event_key'], 'event_date' => $event['event_date'],
+            'warehouse_id' => $warehouseId, 'reminder_number' => $reminderNumber,
+        ]);
+        $pdo->prepare("UPDATE stock_notification_reminder_log SET status = 'SUCCESS' WHERE id = :id")->execute([':id' => $logId]);
+    } catch (Throwable $error) {
+        $pdo->prepare("UPDATE stock_notification_reminder_log SET status = 'ERROR', error_message = :error WHERE id = :id")
+            ->execute([':error' => $error->getMessage(), ':id' => $logId]);
+        throw $error;
+    }
+    return $reminderNumber;
+}
+
+function remindPurchaseEventWarehouses(PDO $pdo, array $payload): array
+{
+    $link = findPurchaseEventByToken($pdo, trim((string)($payload['token'] ?? '')));
+    $event = getPurchaseEventData($pdo, (string)$link['event_key'], (string)$link['event_date'], false);
+    $missing = purchaseEventMissingWarehouses($event);
+    if (!$missing) return ['ok' => true, 'message' => 'Все склады уже заполнили остатки.', 'sent' => 0];
+    $sent = 0;
+    $errors = [];
+    foreach ($missing as $warehouse) {
+        try {
+            sendStockReminderForWarehouse($pdo, $event, $warehouse);
+            $sent++;
+        } catch (Throwable $error) {
+            $errors[] = (string)$warehouse['name'] . ': ' . $error->getMessage();
+        }
+    }
+    if ($errors) throw new RuntimeException('Часть напоминаний не отправлена: ' . implode('; ', $errors));
+    return ['ok' => true, 'message' => 'Напоминания отправлены складам: ' . $sent . '.', 'sent' => $sent];
+}
+
+/** Запускается при обращениях к API; cron может вызывать action=tick после 12:00 МСК. */
+function sendDueStockReminderNotifications(PDO $pdo): void
+{
+    $now = new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE));
+    if ((int)$now->format('H') < 12) return;
+    if ((int)$pdo->query("SELECT GET_LOCK('sroki_godnosti_stock_reminders', 0)")->fetchColumn() !== 1) return;
+    try {
+        $statement = $pdo->query(
+            "SELECT event_key, DATE(sent_at) AS event_date, MIN(sent_at) AS first_sent_at
+             FROM stock_notifications
+             WHERE event_key REGEXP '^expiry_[0-9]+$' OR event_key = 'overdue_stock_check'
+             GROUP BY event_key, DATE(sent_at)"
+        );
+        foreach ($statement->fetchAll() as $row) {
+            $firstDue = (new DateTimeImmutable((string)$row['first_sent_at'], new DateTimeZone(APP_TIMEZONE)))->modify('+3 days')->setTime(12, 0);
+            if ($now < $firstDue) continue;
+            $event = getPurchaseEventData($pdo, (string)$row['event_key'], (string)$row['event_date'], false);
+            foreach (purchaseEventMissingWarehouses($event) as $warehouse) {
+                $last = $pdo->prepare(
+                    'SELECT sent_at FROM stock_notification_reminder_log
+                     WHERE event_key = :event_key AND event_date = :event_date AND warehouse_id = :warehouse_id
+                     ORDER BY reminder_number DESC LIMIT 1'
+                );
+                $last->execute([':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':warehouse_id' => (int)$warehouse['id']]);
+                $lastSentAt = (string)($last->fetchColumn() ?: '');
+                if ($lastSentAt !== '' && $now < (new DateTimeImmutable($lastSentAt, new DateTimeZone(APP_TIMEZONE)))->modify('+24 hours')) continue;
+                try {
+                    sendStockReminderForWarehouse($pdo, $event, $warehouse);
+                } catch (Throwable $error) {
+                    writeLog($pdo, 'stock_reminder_failed', ['event_key' => $event['event_key'], 'event_date' => $event['event_date'], 'warehouse_id' => (int)$warehouse['id'], 'error' => $error->getMessage()]);
+                }
+            }
+        }
+    } finally {
+        $pdo->query("SELECT RELEASE_LOCK('sroki_godnosti_stock_reminders')");
+    }
+}
+
 function sendExpiredPurchaseEventNotifications(PDO $pdo): void
 {
     ensurePurchaseNotificationSchema($pdo);
@@ -2082,7 +2237,7 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
         $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'total' => $total, 'status' => $batch['status'], 'quantities' => $quantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'manager_email' => $managerEmails[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
     }
     usort($rows, static fn (array $left, array $right): int => ($left['section'] <=> $right['section']) ?: ($left['id'] <=> $right['id']));
-    return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES)];
+    return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES), 'can_remind' => purchaseEventMissingWarehouses($event) !== []];
 }
 
 function findPurchaseEventByToken(PDO $pdo, string $token): array

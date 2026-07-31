@@ -11,7 +11,9 @@ function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string 
     ensureEmailNotificationLogSchema($pdo);
     $startedAt = microtime(true);
     $messageId = sprintf('<%s@sroki-godnosti.local>', bin2hex(random_bytes(16)));
-    $notificationType = emailNotificationType($subject);
+    // Служебные отправители могут передать более точное пользовательское название
+    // события. Оно попадёт в единый журнал и сохранится при повторной отправке.
+    $notificationType = trim((string)($context['notification_type'] ?? '')) ?: emailNotificationType($subject);
     $logId = createEmailNotificationLog($pdo, $notificationType, $emails, $subject, $body, $attachments, $messageId, $context);
 
     try {

@@ -23,6 +23,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
                 <button class="ghost-button" id="editPurchaseEventButton" type="button">Редактировать</button>
                 <button class="primary hidden" id="savePurchaseEventStocksButton" type="button">Сохранить</button>
                 <button class="primary" id="downloadPurchaseEventXlsButton" type="button">Скачать XLS</button>
+                <button class="ghost-button hidden" id="remindPurchaseEventButton" type="button">Напомнить</button>
             </div>
         </div>
         <p class="subtitle" id="purchaseEventInfo">Загрузка сводной таблицы...</p>
@@ -87,6 +88,7 @@ async function loadPurchaseEvent() {
         const result = await response.json();
         if (!response.ok || !result.ok) throw new Error(result.error || 'Не удалось загрузить сводную таблицу.');
         purchaseEventData = result;
+        document.querySelector('#remindPurchaseEventButton').classList.toggle('hidden', !result.can_remind);
         document.querySelector('#purchaseEventInfo').textContent = `Срок годности до ${formatDate(result.expiry_date)}. Событие: ${result.event_days} дней.`;
         renderPurchaseEventTable(result);
         document.querySelector('#purchaseEventTableWrap').classList.remove('hidden');
@@ -181,6 +183,26 @@ document.querySelector('#downloadPurchaseEventXlsButton').addEventListener('clic
     url.searchParams.set('action', 'purchase_event_xls');
     url.searchParams.set('token', purchaseEventToken);
     window.location.href = url.toString();
+});
+document.querySelector('#remindPurchaseEventButton').addEventListener('click', async () => {
+    const button = document.querySelector('#remindPurchaseEventButton');
+    button.disabled = true;
+    document.querySelector('#purchaseEventError').textContent = '';
+    try {
+        const response = await fetch(`${purchaseEventApiUrl}?action=purchase_event_remind`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: purchaseEventToken }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || 'Не удалось отправить напоминания.');
+        alert(result.message);
+        await loadPurchaseEvent();
+    } catch (error) {
+        document.querySelector('#purchaseEventError').textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
 });
 loadPurchaseEvent();
 </script>

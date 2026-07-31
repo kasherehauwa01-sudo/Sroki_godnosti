@@ -244,17 +244,6 @@ declare(strict_types=1);
                     <p class="subtitle" id="testMissingFilterStatus" role="status" aria-live="polite"></p>
                 </div>
 
-                <div class="card form">
-                    <h3>История отправки уведомлений</h3>
-                    <p class="subtitle">Журнал фиксирует каждую успешную и неуспешную попытку отправки через SMTP.</p>
-                    <label>Хранить журнал, дней
-                        <input id="emailLogRetentionDays" min="1" max="3650" name="email_log_retention_days" type="number" value="365">
-                    </label>
-                    <div class="settings-actions">
-                        <button class="ghost-button" id="openEmailNotificationLogButton" formnovalidate type="button">Открыть журнал</button>
-                    </div>
-                </div>
-
                 <div class="settings-save-bar">
                     <button class="primary" type="submit">Сохранить настройки</button>
                 </div>

@@ -2373,7 +2373,7 @@ function bindEvents() {
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
-    qs('#openEmailNotificationLogButton').addEventListener('click', showNotificationLogs);
+    qs('#openEmailNotificationLogButton')?.addEventListener('click', showNotificationLogs);
     qs('#closeNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
     qs('#confirmNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
     qs('#closeEmailNotificationLogDetailsButton').addEventListener('click', closeEmailNotificationLogDetails);

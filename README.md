@@ -307,6 +307,16 @@ mysql -u sroki -p sroki_godnosti < database/install.sql
 50 23 * * * /usr/bin/php /var/www/kvasmix.ru/vr/sroki_godnosti/scripts/auto_import.php >> /var/log/sroki_godnosti_auto_import.log 2>&1
 ```
 
+### Повторные уведомления о незаполненных остатках
+
+Запуск выполняется в 12:00 по московскому времени. После первого напоминания
+система повторяет отправку не чаще одного раза в 24 часа, пока склад не заполнит
+все партии события.
+
+```cron
+0 12 * * * /usr/bin/php /var/www/kvasmix.ru/vr/sroki_godnosti/scripts/send_stock_reminders.php >> /var/log/sroki_godnosti_stock_reminders.log 2>&1
+```
+
 ## API
 
 API находится в `public/api.php`.
