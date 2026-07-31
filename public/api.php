@@ -2073,9 +2073,8 @@ function purchaseEventCatalogProductsForBatch(array $catalogByArticle, array $ba
         if ($lookupCode === '') continue;
         $products = $catalogByArticle[vrCatalogArticleLookupKey($lookupCode)] ?? [];
         if (!$fallback && $products) $fallback = $products;
-        if (count($products) !== 1 || !vrCatalogProductFound($products[0])) continue;
-        $manager = vrCatalogManagerValue($products[0]);
-        if ($manager['exists'] && $manager['value'] !== '') return $products;
+        $product = vrCatalogProductWithUnambiguousManager($products);
+        if ($product !== null) return [$product];
     }
     return $fallback;
 }

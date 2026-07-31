@@ -109,12 +109,13 @@ function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = 
         $articleProducts = $byArticle[vrCatalogArticleLookupKey($article)] ?? [];
         $fallbackArticle = $fallbackByArticle[$article] ?? '';
         $fallbackProducts = $fallbackArticle !== '' ? ($byArticle[vrCatalogArticleLookupKey($fallbackArticle)] ?? []) : [];
+        $fallbackProduct = vrCatalogProductWithUnambiguousManager($fallbackProducts);
         // Некоторые версии каталога не возвращают запись варианта вообще. В этом
         // случае создаём результат для исходного кода из однозначного базового товара.
-        if (!$articleProducts && count($fallbackProducts) === 1 && vrCatalogProductFound($fallbackProducts[0])) {
-            $fallbackManager = vrCatalogManagerValue($fallbackProducts[0]);
+        if (!$articleProducts && $fallbackProduct !== null) {
+            $fallbackManager = vrCatalogManagerValue($fallbackProduct);
             if ($fallbackManager['exists'] && $fallbackManager['value'] !== '') {
-                $product = $fallbackProducts[0];
+                $product = $fallbackProduct;
                 $product['article'] = $article;
                 $product['found'] = true;
                 $product['manager_name'] = $fallbackManager['value'];
@@ -125,8 +126,8 @@ function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = 
         foreach ($articleProducts as $product) {
             $manager = vrCatalogManagerValue($product);
             if ((!$manager['exists'] || $manager['value'] === '') && $fallbackArticle !== '') {
-                if (count($fallbackProducts) === 1 && vrCatalogProductFound($fallbackProducts[0])) {
-                    $fallbackManager = vrCatalogManagerValue($fallbackProducts[0]);
+                if ($fallbackProduct !== null) {
+                    $fallbackManager = vrCatalogManagerValue($fallbackProduct);
                     if ($fallbackManager['exists'] && $fallbackManager['value'] !== '') {
                         // Официальное поле имеет приоритет над legacy-структурами.
                         // Базовый товар подтверждает существование варианта для целей
@@ -162,6 +163,20 @@ function vrCatalogArticleLookupKey(string $article): string
 function vrCatalogNormalizeArticleDashes(string $article): string
 {
     return str_replace(["‐", "‑", "‒", "–", "—", "−"], '-', $article);
+}
+
+/** Возвращает товар, если все найденные записи указывают одного менеджера. */
+function vrCatalogProductWithUnambiguousManager(array $products): ?array
+{
+    $matches = [];
+    foreach ($products as $product) {
+        if (!is_array($product) || !vrCatalogProductFound($product)) continue;
+        $manager = vrCatalogManagerValue($product);
+        if (!$manager['exists'] || $manager['value'] === '') continue;
+        $key = mb_strtolower(trim((string)$manager['value']), 'UTF-8');
+        $matches[$key] ??= $product;
+    }
+    return count($matches) === 1 ? reset($matches) : null;
 }
 
 function checkVrCatalogHealth(?PDO $pdo = null): array
