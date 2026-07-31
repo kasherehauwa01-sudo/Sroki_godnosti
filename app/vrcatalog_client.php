@@ -110,39 +110,44 @@ function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = 
         $fallbackArticle = $fallbackByArticle[$article] ?? '';
         $fallbackProducts = $fallbackArticle !== '' ? ($byArticle[vrCatalogArticleLookupKey($fallbackArticle)] ?? []) : [];
         $fallbackProduct = vrCatalogProductWithUnambiguousManager($fallbackProducts);
-        // Некоторые версии каталога не возвращают запись варианта вообще. В этом
-        // случае создаём результат для исходного кода из однозначного базового товара.
-        if (!$articleProducts && $fallbackProduct !== null) {
-            $fallbackManager = vrCatalogManagerValue($fallbackProduct);
-            if ($fallbackManager['exists'] && $fallbackManager['value'] !== '') {
-                $product = $fallbackProduct;
-                $product['article'] = $article;
-                $product['found'] = true;
-                $product['manager_name'] = $fallbackManager['value'];
-                $product['manager_source_article'] = $fallbackArticle;
-                $articleProducts[] = $product;
-            }
-        }
-        foreach ($articleProducts as $product) {
-            $manager = vrCatalogManagerValue($product);
-            if ((!$manager['exists'] || $manager['value'] === '') && $fallbackArticle !== '') {
-                if ($fallbackProduct !== null) {
-                    $fallbackManager = vrCatalogManagerValue($fallbackProduct);
-                    if ($fallbackManager['exists'] && $fallbackManager['value'] !== '') {
-                        // Официальное поле имеет приоритет над legacy-структурами.
-                        // Базовый товар подтверждает существование варианта для целей
-                        // распределения и отображения менеджера в сводной таблице.
-                        $product['found'] = true;
-                        $product['manager_name'] = $fallbackManager['value'];
-                        $product['manager_source_article'] = $fallbackArticle;
-                    }
-                }
-            }
+        foreach (vrCatalogApplyManagerFallback($article, $articleProducts, $fallbackArticle, $fallbackProduct) as $product) {
             $result[] = $product;
         }
     }
 
     return $result;
+}
+
+/**
+ * Подставляет менеджера базового товара, не перезаписывая менеджера специального кода.
+ * Отдельная функция делает одинаковое правило проверяемым без обращения к каталогу.
+ */
+function vrCatalogApplyManagerFallback(string $article, array $products, string $fallbackArticle, ?array $fallbackProduct): array
+{
+    if ($fallbackArticle === '' || $fallbackProduct === null) return $products;
+
+    $fallbackManager = vrCatalogManagerValue($fallbackProduct);
+    if (!$fallbackManager['exists'] || $fallbackManager['value'] === '') return $products;
+
+    // Каталог может не вернуть строку специального кода. Для распределения партия
+    // всё равно существует, поэтому связываем найденный базовый товар с её кодом.
+    if (!$products) {
+        $product = $fallbackProduct;
+        $product['article'] = $article;
+        $products[] = $product;
+    }
+
+    return array_map(static function (array $product) use ($fallbackArticle, $fallbackManager): array {
+        $manager = vrCatalogManagerValue($product);
+        if ($manager['exists'] && $manager['value'] !== '') return $product;
+
+        // Официальное поле имеет приоритет над legacy-структурами и используется
+        // как при распределении, так и при построении сводной таблицы.
+        $product['found'] = true;
+        $product['manager_name'] = $fallbackManager['value'];
+        $product['manager_source_article'] = $fallbackArticle;
+        return $product;
+    }, $products);
 }
 
 function vrCatalogManagerFallbackArticle(string $article): string
