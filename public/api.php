@@ -2059,7 +2059,7 @@ function distributePurchaseEventBatches(array $event, array $recipients, ?PDO $p
     $catalogProducts = [];
     $catalogError = '';
     try {
-        $catalogProducts = fetchVrCatalogProductsByArticles(array_column($event['batches'], 'article'), $pdo);
+        $catalogProducts = fetchVrCatalogProductsWithManagerFallback(array_column($event['batches'], 'article'), $pdo);
     } catch (VrCatalogUnavailableException $error) {
         $catalogError = 'Сервис vrcatalog временно недоступен.';
     } catch (Throwable $error) {
@@ -2197,7 +2197,7 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
     // Для сводной таблицы повторно читаем актуальную характеристику из vrcatalog.
     // Аудит остаётся резервным источником, если каталог временно недоступен.
     try {
-        $catalogProducts = fetchVrCatalogProductsByArticles(array_column($event['batches'], 'article'), $pdo);
+        $catalogProducts = fetchVrCatalogProductsWithManagerFallback(array_column($event['batches'], 'article'), $pdo);
         $catalogByArticle = [];
         foreach ($catalogProducts as $product) $catalogByArticle[vrCatalogProductArticle($product)][] = $product;
         foreach ($event['batches'] as $batch) {

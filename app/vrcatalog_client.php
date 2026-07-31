@@ -85,6 +85,56 @@ function fetchVrCatalogProductsByArticles(array $articles, ?PDO $pdo = null): ar
     return requestVrCatalogProducts($articles, $pdo)['items'];
 }
 
+/**
+ * Для специальных кодов каталог иногда хранит менеджера только у базового товара.
+ * Оригинальные и базовые артикулы отправляются одним пакетным запросом, после чего
+ * менеджер базового товара подставляется только при пустом менеджере варианта.
+ */
+function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = null): array
+{
+    $articles = array_values(array_unique(array_filter(array_map(static fn ($value): string => trim((string)$value), $articles))));
+    $fallbackByArticle = [];
+    foreach ($articles as $article) {
+        $fallback = vrCatalogManagerFallbackArticle($article);
+        if ($fallback !== '') $fallbackByArticle[$article] = $fallback;
+    }
+
+    $requestedArticles = array_values(array_unique(array_merge($articles, array_values($fallbackByArticle))));
+    $products = fetchVrCatalogProductsByArticles($requestedArticles, $pdo);
+    $byArticle = [];
+    foreach ($products as $product) $byArticle[vrCatalogProductArticle($product)][] = $product;
+
+    $result = [];
+    foreach ($articles as $article) {
+        $articleProducts = $byArticle[$article] ?? [];
+        foreach ($articleProducts as $product) {
+            $manager = vrCatalogManagerValue($product);
+            $fallbackArticle = $fallbackByArticle[$article] ?? '';
+            if (vrCatalogProductFound($product) && (!$manager['exists'] || $manager['value'] === '') && $fallbackArticle !== '') {
+                $fallbackProducts = $byArticle[$fallbackArticle] ?? [];
+                if (count($fallbackProducts) === 1 && vrCatalogProductFound($fallbackProducts[0])) {
+                    $fallbackManager = vrCatalogManagerValue($fallbackProducts[0]);
+                    if ($fallbackManager['exists'] && $fallbackManager['value'] !== '') {
+                        // Официальное поле имеет приоритет над legacy-структурами.
+                        $product['manager_name'] = $fallbackManager['value'];
+                        $product['manager_source_article'] = $fallbackArticle;
+                    }
+                }
+            }
+            $result[] = $product;
+        }
+    }
+
+    return $result;
+}
+
+function vrCatalogManagerFallbackArticle(string $article): string
+{
+    $article = trim($article);
+    if (!preg_match('/(?:-1-25|-1|-25)$/u', $article)) return '';
+    return trim((string)preg_replace('/(?:-1-25|-1|-25)$/u', '', $article));
+}
+
 function checkVrCatalogHealth(?PDO $pdo = null): array
 {
     try {
