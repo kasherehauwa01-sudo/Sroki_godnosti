@@ -2052,6 +2052,34 @@ function purchaseManagerNamesMatch(string $catalogName, string $recipientName): 
     return array_slice($catalogParts, 0, $commonLength) === array_slice($recipientParts, 0, $commonLength);
 }
 
+/** Артикул и код партии могут обозначать один и тот же каталожный код в разных выгрузках. */
+function purchaseEventCatalogLookupArticles(array $batches): array
+{
+    $values = [];
+    foreach ($batches as $batch) {
+        foreach (['article', 'code'] as $field) {
+            $value = trim((string)($batch[$field] ?? ''));
+            if ($value !== '') $values[] = $value;
+        }
+    }
+    return array_values(array_unique($values));
+}
+
+/** Выбирает запись с определённым менеджером, отдавая приоритет артикулу партии. */
+function purchaseEventCatalogProductsForBatch(array $catalogByArticle, array $batch): array
+{
+    $fallback = [];
+    foreach (array_values(array_unique([trim((string)($batch['article'] ?? '')), trim((string)($batch['code'] ?? ''))])) as $lookupCode) {
+        if ($lookupCode === '') continue;
+        $products = $catalogByArticle[$lookupCode] ?? [];
+        if (!$fallback && $products) $fallback = $products;
+        if (count($products) !== 1 || !vrCatalogProductFound($products[0])) continue;
+        $manager = vrCatalogManagerValue($products[0]);
+        if ($manager['exists'] && $manager['value'] !== '') return $products;
+    }
+    return $fallback;
+}
+
 function distributePurchaseEventBatches(array $event, array $recipients, ?PDO $pdo = null): array
 {
     $assigned = [];
@@ -2059,7 +2087,7 @@ function distributePurchaseEventBatches(array $event, array $recipients, ?PDO $p
     $catalogProducts = [];
     $catalogError = '';
     try {
-        $catalogProducts = fetchVrCatalogProductsWithManagerFallback(array_column($event['batches'], 'article'), $pdo);
+        $catalogProducts = fetchVrCatalogProductsWithManagerFallback(purchaseEventCatalogLookupArticles($event['batches']), $pdo);
     } catch (VrCatalogUnavailableException $error) {
         $catalogError = 'Сервис vrcatalog временно недоступен.';
     } catch (Throwable $error) {
@@ -2073,7 +2101,7 @@ function distributePurchaseEventBatches(array $event, array $recipients, ?PDO $p
         $matchedRecipient = null;
         $reason = $catalogError;
         if ($reason === '') {
-            $products = $byArticle[$article] ?? [];
+            $products = purchaseEventCatalogProductsForBatch($byArticle, $batch);
             if (!$products || !vrCatalogProductFound($products[0])) {
                 $reason = 'Товар отсутствует в vrcatalog.';
             } elseif (count($products) > 1) {
@@ -2197,11 +2225,11 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
     // Для сводной таблицы повторно читаем актуальную характеристику из vrcatalog.
     // Аудит остаётся резервным источником, если каталог временно недоступен.
     try {
-        $catalogProducts = fetchVrCatalogProductsWithManagerFallback(array_column($event['batches'], 'article'), $pdo);
+        $catalogProducts = fetchVrCatalogProductsWithManagerFallback(purchaseEventCatalogLookupArticles($event['batches']), $pdo);
         $catalogByArticle = [];
         foreach ($catalogProducts as $product) $catalogByArticle[vrCatalogProductArticle($product)][] = $product;
         foreach ($event['batches'] as $batch) {
-            $products = $catalogByArticle[trim((string)$batch['article'])] ?? [];
+            $products = purchaseEventCatalogProductsForBatch($catalogByArticle, $batch);
             if (count($products) !== 1 || !vrCatalogProductFound($products[0])) continue;
             $manager = vrCatalogManagerValue($products[0]);
             if ($manager['exists']) {
