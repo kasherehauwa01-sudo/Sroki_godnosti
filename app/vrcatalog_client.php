@@ -87,8 +87,8 @@ function fetchVrCatalogProductsByArticles(array $articles, ?PDO $pdo = null): ar
 
 /**
  * Для специальных кодов каталог иногда хранит менеджера только у базового товара.
- * Оригинальные и базовые артикулы отправляются одним пакетным запросом, после чего
- * менеджер базового товара подставляется только при пустом менеджере варианта.
+ * Сначала каталог запрашивается по исходным артикулам. Базовые артикулы отправляются
+ * отдельным запросом только для специальных товаров, у которых менеджер не найден.
  */
 function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = null): array
 {
@@ -99,16 +99,33 @@ function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = 
         if ($fallback !== '') $fallbackByArticle[$article] = $fallback;
     }
 
-    $requestedArticles = array_values(array_unique(array_merge($articles, array_values($fallbackByArticle))));
-    $products = fetchVrCatalogProductsByArticles($requestedArticles, $pdo);
+    $products = fetchVrCatalogProductsByArticles($articles, $pdo);
     $byArticle = [];
     foreach ($products as $product) $byArticle[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
+
+    $unresolvedFallbackArticles = [];
+    foreach ($fallbackByArticle as $article => $fallbackArticle) {
+        $articleProducts = $byArticle[vrCatalogArticleLookupKey($article)] ?? [];
+        if (vrCatalogProductWithUnambiguousManager($articleProducts) === null) {
+            $unresolvedFallbackArticles[] = $fallbackArticle;
+        }
+    }
+
+    // Важно выполнять именно повторный поиск: endpoint каталога может вернуть
+    // только результаты для исходных кодов из первого пакетного запроса.
+    $fallbackByLookupKey = [];
+    if ($unresolvedFallbackArticles) {
+        $fallbackProducts = fetchVrCatalogProductsByArticles(array_values(array_unique($unresolvedFallbackArticles)), $pdo);
+        foreach ($fallbackProducts as $product) {
+            $fallbackByLookupKey[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
+        }
+    }
 
     $result = [];
     foreach ($articles as $article) {
         $articleProducts = $byArticle[vrCatalogArticleLookupKey($article)] ?? [];
         $fallbackArticle = $fallbackByArticle[$article] ?? '';
-        $fallbackProducts = $fallbackArticle !== '' ? ($byArticle[vrCatalogArticleLookupKey($fallbackArticle)] ?? []) : [];
+        $fallbackProducts = $fallbackArticle !== '' ? ($fallbackByLookupKey[vrCatalogArticleLookupKey($fallbackArticle)] ?? []) : [];
         $fallbackProduct = vrCatalogProductWithUnambiguousManager($fallbackProducts);
         foreach (vrCatalogApplyManagerFallback($article, $articleProducts, $fallbackArticle, $fallbackProduct) as $product) {
             $result[] = $product;
