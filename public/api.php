@@ -2362,12 +2362,12 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
 function downloadPurchaseEventXls(PDO $pdo, string $token): array
 {
     $summary = getPurchaseEventSummary($pdo, $token);
-    $headers = ['Раздел', 'Код', 'Наименование', 'Менеджер', 'Общий остаток', 'Статус'];
+    $headers = ['Раздел', "Код\nМенеджер", 'Наименование', 'Общий остаток', 'Статус'];
     foreach ($summary['warehouses'] as $warehouse) $headers[] = (string)$warehouse['name'];
     $rows = [$headers];
     foreach ($summary['rows'] as $row) {
-        $managerText = trim((string)$row['manager_value'] . ((string)$row['manager_email'] !== '' ? "\n" . (string)$row['manager_email'] : ''));
-        $values = [$row['section'] === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары', $row['code'], $row['name'], $managerText, $row['total'], $row['status']];
+        $codeAndManager = (string)$row['code'] . "\n" . ((string)$row['manager_value'] !== '' ? (string)$row['manager_value'] : '—');
+        $values = [$row['section'] === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары', $codeAndManager, $row['name'], $row['total'], $row['status']];
         foreach ($summary['warehouses'] as $warehouse) $values[] = $row['quantities'][(string)$warehouse['id']] ?? '';
         $rows[] = $values;
     }
