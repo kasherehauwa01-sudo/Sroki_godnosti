@@ -1622,7 +1622,7 @@ function sendStockReminderForWarehouse(PDO $pdo, array $event, array $warehouse)
     ]);
     $logId = (int)$pdo->lastInsertId();
     $subject = 'Не заполнены остатки.';
-    $body = "Вами не были заполнены остатки в установленный срок. Просьба срочно заполнить остатки и в следующий раз соблюдать сроки.\n\n" . $form['url'];
+    $body = "Остатки не были заполнены в установленный срок. Просим в кратчайшие сроки внести актуальные данные и в дальнейшем соблюдать установленные сроки заполнения.\n\n" . $form['url'];
     try {
         sendNotificationEmail($pdo, $form['emails'], $subject, $body, getRawSettings($pdo), [], [
             'notification_type' => 'Повторное уведомление ' . $reminderNumber,
