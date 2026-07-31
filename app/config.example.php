@@ -28,3 +28,9 @@ putenv('APP_URL=https://kvasmix.ru/vr/sroki_godnosti/');
 //     'db_password' => 'YOUR_DB_PASSWORD',
 //     'db_charset' => 'utf8mb4',
 // ];
+
+// Внутренний API каталога. Токен должен задаваться только в окружении сервера.
+putenv('VRCATALOG_INTERNAL_API_URL=http://127.0.0.1/vr/catalog/api/internal/products/by-articles');
+putenv('VRCATALOG_INTERNAL_API_TOKEN=CHANGE_ME');
+putenv('VRCATALOG_CONNECT_TIMEOUT=3');
+putenv('VRCATALOG_REQUEST_TIMEOUT=10');
