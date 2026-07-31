@@ -102,13 +102,13 @@ function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = 
     $requestedArticles = array_values(array_unique(array_merge($articles, array_values($fallbackByArticle))));
     $products = fetchVrCatalogProductsByArticles($requestedArticles, $pdo);
     $byArticle = [];
-    foreach ($products as $product) $byArticle[vrCatalogProductArticle($product)][] = $product;
+    foreach ($products as $product) $byArticle[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
 
     $result = [];
     foreach ($articles as $article) {
-        $articleProducts = $byArticle[$article] ?? [];
+        $articleProducts = $byArticle[vrCatalogArticleLookupKey($article)] ?? [];
         $fallbackArticle = $fallbackByArticle[$article] ?? '';
-        $fallbackProducts = $fallbackArticle !== '' ? ($byArticle[$fallbackArticle] ?? []) : [];
+        $fallbackProducts = $fallbackArticle !== '' ? ($byArticle[vrCatalogArticleLookupKey($fallbackArticle)] ?? []) : [];
         // Некоторые версии каталога не возвращают запись варианта вообще. В этом
         // случае создаём результат для исходного кода из однозначного базового товара.
         if (!$articleProducts && count($fallbackProducts) === 1 && vrCatalogProductFound($fallbackProducts[0])) {
@@ -146,9 +146,22 @@ function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = 
 
 function vrCatalogManagerFallbackArticle(string $article): string
 {
-    $article = trim($article);
+    $article = vrCatalogNormalizeArticleDashes(trim($article));
     if (!preg_match('/(?:-1-25|-1|-25)$/u', $article)) return '';
     return trim((string)preg_replace('/(?:-1-25|-1|-25)$/u', '', $article));
+}
+
+/** Нормализует только формат сравнения, не изменяя код в запросе к каталогу. */
+function vrCatalogArticleLookupKey(string $article): string
+{
+    $article = vrCatalogNormalizeArticleDashes(trim($article));
+    $article = preg_replace('/\s+/u', '', $article) ?? $article;
+    return mb_strtoupper($article, 'UTF-8');
+}
+
+function vrCatalogNormalizeArticleDashes(string $article): string
+{
+    return str_replace(["‐", "‑", "‒", "–", "—", "−"], '-', $article);
 }
 
 function checkVrCatalogHealth(?PDO $pdo = null): array

@@ -2071,7 +2071,7 @@ function purchaseEventCatalogProductsForBatch(array $catalogByArticle, array $ba
     $fallback = [];
     foreach (array_values(array_unique([trim((string)($batch['article'] ?? '')), trim((string)($batch['code'] ?? ''))])) as $lookupCode) {
         if ($lookupCode === '') continue;
-        $products = $catalogByArticle[$lookupCode] ?? [];
+        $products = $catalogByArticle[vrCatalogArticleLookupKey($lookupCode)] ?? [];
         if (!$fallback && $products) $fallback = $products;
         if (count($products) !== 1 || !vrCatalogProductFound($products[0])) continue;
         $manager = vrCatalogManagerValue($products[0]);
@@ -2094,7 +2094,7 @@ function distributePurchaseEventBatches(array $event, array $recipients, ?PDO $p
         $catalogError = 'Ошибка получения данных из vrcatalog.';
     }
     $byArticle = [];
-    foreach ($catalogProducts as $product) $byArticle[vrCatalogProductArticle($product)][] = $product;
+    foreach ($catalogProducts as $product) $byArticle[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
     foreach ($event['batches'] as $batch) {
         $article = trim((string)$batch['article']);
         $managerValue = '';
@@ -2227,7 +2227,7 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
     try {
         $catalogProducts = fetchVrCatalogProductsWithManagerFallback(purchaseEventCatalogLookupArticles($event['batches']), $pdo);
         $catalogByArticle = [];
-        foreach ($catalogProducts as $product) $catalogByArticle[vrCatalogProductArticle($product)][] = $product;
+        foreach ($catalogProducts as $product) $catalogByArticle[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
         foreach ($event['batches'] as $batch) {
             $products = purchaseEventCatalogProductsForBatch($catalogByArticle, $batch);
             if (count($products) !== 1 || !vrCatalogProductFound($products[0])) continue;
