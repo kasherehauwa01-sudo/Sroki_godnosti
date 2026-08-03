@@ -9,6 +9,12 @@ function assertEmailDiagnosticsSame(mixed $expected, mixed $actual, string $mess
     throw new RuntimeException($message . ': ожидалось ' . var_export($expected, true) . ', получено ' . var_export($actual, true));
 }
 
+assertEmailDiagnosticsSame(
+    'Отдел претензий | Контроль сроков годности',
+    notificationEmailFromName(),
+    'Для всех уведомлений должно использоваться утверждённое имя отправителя'
+);
+
 $problemRecipients = [
     'az@volgorost.ru',
     'kvr@volgorost.ru',

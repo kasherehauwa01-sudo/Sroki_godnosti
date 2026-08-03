@@ -192,6 +192,10 @@ function ensureSettingsSchema(PDO $pdo): void
             $pdo->exec($sql);
         }
     }
+    // Поле оставлено для совместимости со старыми установками, но все письма
+    // используют единое утверждённое имя отправителя.
+    $pdo->prepare("UPDATE settings SET smtp_from_name = :name WHERE id = 1 AND COALESCE(smtp_from_name, '') <> :name_check")
+        ->execute([':name' => notificationEmailFromName(), ':name_check' => notificationEmailFromName()]);
 }
 
 
@@ -2669,7 +2673,7 @@ function normalizeSettings(array $settings): array
         'smtp_password' => '',
         'smtp_password_set' => $smtpPassword !== '',
         'smtp_from_email' => (string)($settings['smtp_from_email'] ?? SENDER_EMAIL),
-        'smtp_from_name' => (string)($settings['smtp_from_name'] ?? 'Сроки годности'),
+        'smtp_from_name' => notificationEmailFromName(),
         'notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
         'auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? '23:50'), '23:50'),
         'auto_import' => getAutoImportInfo($GLOBALS['pdo_for_settings_info'] ?? null),
@@ -2725,7 +2729,7 @@ function saveSettings(PDO $pdo, array $settings): array
         ':smtp_username' => trim((string)($settings['smtp_username'] ?? $current['smtp_username'] ?? SENDER_EMAIL)),
         ':smtp_password' => $smtpPassword,
         ':smtp_from_email' => trim((string)($settings['smtp_from_email'] ?? $current['smtp_from_email'] ?? SENDER_EMAIL)),
-        ':smtp_from_name' => trim((string)($settings['smtp_from_name'] ?? $current['smtp_from_name'] ?? 'Сроки годности')),
+        ':smtp_from_name' => notificationEmailFromName(),
         ':notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? $current['notification_time'] ?? '09:00')),
         ':auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? $current['auto_import_time'] ?? '23:50'), '23:50'),
         ':missing_filter_email' => implode(',', splitEmails((string)($settings['missing_filter_email'] ?? $current['missing_filter_email'] ?? ''))),

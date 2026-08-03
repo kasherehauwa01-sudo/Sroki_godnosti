@@ -6,6 +6,8 @@
  */
 declare(strict_types=1);
 
+const NOTIFICATION_EMAIL_FROM_NAME = 'Отдел претензий | Контроль сроков годности';
+
 function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings, array $attachments = [], array $context = []): array
 {
     ensureEmailNotificationLogSchema($pdo);
@@ -79,6 +81,12 @@ function createEmailMessageId(array $settings): string
     return sprintf('<%s@%s>', bin2hex(random_bytes(16)), strtolower($domain));
 }
 
+/** Единое отображаемое имя отправителя для всех типов уведомлений. */
+function notificationEmailFromName(): string
+{
+    return NOTIFICATION_EMAIL_FROM_NAME;
+}
+
 /** Нормализует адресатов перед SMTP и удаляет только точные дубликаты email. */
 function normalizeSmtpRecipients(array $emails): array
 {
@@ -112,7 +120,7 @@ function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, a
     $username = trim((string)($settings['smtp_username'] ?? ''));
     $password = (string)($settings['smtp_password'] ?? '');
     $fromEmail = trim((string)($settings['smtp_from_email'] ?? '')) ?: $defaultSender;
-    $fromName = trim((string)($settings['smtp_from_name'] ?? '')) ?: 'Сроки годности';
+    $fromName = notificationEmailFromName();
 
     if ($host === '') {
         throw new RuntimeException('В настройках SMTP не указан сервер.');
