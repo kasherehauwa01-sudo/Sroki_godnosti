@@ -1,9 +1,10 @@
-const STOCK_EVENTS_VIEWED_AT_KEY = 'stockEventsViewedAt';
-const storedStockEventsViewedAt = (() => {
+const STOCK_EVENT_VIEWS_KEY = 'stockEventViews';
+const storedStockEventViews = (() => {
     try {
-        return window.localStorage.getItem(STOCK_EVENTS_VIEWED_AT_KEY) || '';
+        const value = JSON.parse(window.localStorage.getItem(STOCK_EVENT_VIEWS_KEY) || '{}');
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     } catch {
-        return '';
+        return {};
     }
 })();
 
@@ -28,7 +29,7 @@ const state = {
     stockNotifications: [],
     expandedStockNotificationGroups: new Set(),
     stockBatchNotifications: [],
-    stockEventsViewedAt: storedStockEventsViewedAt,
+    stockEventViews: storedStockEventViews,
     selectedStockBatchId: null,
     events: [],
     eventPeriodFilters: new Set(['today', 'future']),
@@ -1135,33 +1136,36 @@ async function loadStockBatchNotifications() {
     const result = await api('stock_batch_notifications');
     state.stockBatchNotifications = result.notifications || [];
     renderStockBatchNotifications();
-    if (document.body.dataset.activeTab === 'notifications') markStockEventsViewed();
 }
 
-function markStockEventsViewed() {
-    const latestChange = state.stockBatchNotifications.reduce((latest, notification) => {
-        const changedAt = String(notification.last_stock_at || '');
-        return changedAt > latest ? changedAt : latest;
-    }, state.stockEventsViewedAt);
-    state.stockEventsViewedAt = latestChange;
+function stockEventViewKey(notification) {
+    return `${notification.event_key || ''}|${notification.event_date || ''}`;
+}
+
+function stockEventHasUnreadChanges(notification) {
+    const changedAt = String(notification.last_stock_at || '');
+    return changedAt !== '' && changedAt > String(state.stockEventViews[stockEventViewKey(notification)] || '');
+}
+
+function markStockEventViewed(notification, row) {
+    const changedAt = String(notification.last_stock_at || '');
+    if (changedAt === '') return;
+    state.stockEventViews[stockEventViewKey(notification)] = changedAt;
     try {
-        window.localStorage.setItem(STOCK_EVENTS_VIEWED_AT_KEY, latestChange);
+        window.localStorage.setItem(STOCK_EVENT_VIEWS_KEY, JSON.stringify(state.stockEventViews));
     } catch {
-        // В закрытом режиме браузер может запрещать localStorage — точку всё равно скрываем на текущей странице.
+        // В закрытом режиме браузер может запрещать localStorage — строка всё равно обновится до перехода.
     }
-    qs('#notificationsUnreadDot')?.classList.add('hidden');
+    row?.classList.remove('stock-event-unread');
 }
 
 function renderStockBatchNotifications() {
     const body = qs('#stockBatchNotificationsBody');
     if (!body) return;
-    const hasUnreadChanges = state.stockBatchNotifications.some((notification) => {
-        const changedAt = String(notification.last_stock_at || '');
-        return changedAt !== '' && changedAt > state.stockEventsViewedAt;
-    });
+    const hasUnreadChanges = state.stockBatchNotifications.some(stockEventHasUnreadChanges);
     qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnreadChanges);
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
-        <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification' : ''}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
+        <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification ' : ''}${stockEventHasUnreadChanges(notification) ? 'stock-event-unread' : ''}" data-stock-event-key="${escapeHtml(stockEventViewKey(notification))}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
             <td>${notification.event_key === 'overdue_stock_check' ? 'Проверка наличия товара' : `${Number(notification.event_days || 0)} дней`}</td>
             <td>${escapeHtml(formatDateRu(notification.event_date))}</td>
             <td>${escapeHtml(formatDateRu(notification.expiry_date))}</td>
@@ -1171,7 +1175,12 @@ function renderStockBatchNotifications() {
         </tr>
     `).join('') || '<tr><td colspan="6">Событий с остатками пока нет.</td></tr>';
     qsa('[data-stock-event-url]').forEach((row) => {
-        const openEvent = () => { window.location.assign(row.dataset.stockEventUrl); };
+        const notification = state.stockBatchNotifications.find((item) => stockEventViewKey(item) === row.dataset.stockEventKey);
+        const openEvent = () => {
+            if (notification) markStockEventViewed(notification, row);
+            qs('#notificationsUnreadDot')?.classList.toggle('hidden', !state.stockBatchNotifications.some(stockEventHasUnreadChanges));
+            window.location.assign(row.dataset.stockEventUrl);
+        };
         row.addEventListener('click', () => {
             openEvent();
         });
