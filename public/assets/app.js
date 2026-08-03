@@ -158,7 +158,10 @@ async function api(action, data = {}) {
         if (response.status === 413) {
             throw new Error('Файл слишком большой для одной загрузки. Попробуйте загрузить его частями или обратитесь к администратору.');
         }
-        throw new Error(text || 'API вернул некорректный JSON.');
+        const details = text.trim();
+        throw new Error(details
+            ? `API вернул некорректный JSON: ${details.slice(0, 500)}`
+            : `API вернул пустой ответ (HTTP ${response.status}). Обновите страницу; если ошибка повторится, сообщите администратору.`);
     }
     if (!response.ok || !json.ok) {
         // Некоторые служебные действия API (например, тест автозагрузки)

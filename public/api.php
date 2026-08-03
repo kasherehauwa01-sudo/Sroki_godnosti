@@ -120,7 +120,7 @@ function handleApiRequest(): void
             };
         }
 
-        $json = json_encode($result, JSON_UNESCAPED_UNICODE);
+        $json = encodeApiResponse($result);
         while (ob_get_level() > $outputBufferLevel) {
             ob_end_clean();
         }
@@ -130,8 +130,17 @@ function handleApiRequest(): void
             ob_end_clean();
         }
         http_response_code(500);
-        echo json_encode(['ok' => false, 'error' => $error->getMessage()], JSON_UNESCAPED_UNICODE);
+        echo encodeApiResponse(['ok' => false, 'error' => $error->getMessage()]);
     }
+}
+
+/** Гарантирует валидный JSON даже при повреждённой кодировке старых данных. */
+function encodeApiResponse(array $result): string
+{
+    return json_encode(
+        $result,
+        JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
+    );
 }
 
 
@@ -1386,22 +1395,6 @@ function testEmailDelivery(PDO $pdo, array $payload): array
     return ['ok' => true, 'message' => 'SMTP-сервер принял письмо. Это ещё не подтверждает доставку в ящик.', 'delivery' => $result];
 }
 
-/** Отправляет диагностическое письмо на один явно выбранный адрес. */
-function testEmailDelivery(PDO $pdo, array $payload): array
-{
-    assertSettingsPassword($payload);
-    $email = trim((string)($payload['email'] ?? ''));
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        throw new InvalidArgumentException('Укажите корректный email для проверки доставки.');
-    }
-    $subject = 'Проверка доставки email — Сроки годности';
-    $body = "Это диагностическое письмо сервиса «Сроки годности».\n\nАдрес проверки: {$email}\nВремя UTC: " . gmdate('Y-m-d H:i:s');
-    $result = sendNotificationEmail($pdo, [$email], $subject, $body, getRawSettings($pdo), [], [
-        'notification_type' => 'Проверка доставки email', 'recipient_name' => $email,
-    ]);
-    return ['ok' => true, 'message' => 'SMTP-сервер принял письмо. Это ещё не подтверждает доставку в ящик.', 'delivery' => $result];
-}
-
 
 function sendTestStockFillNotification(PDO $pdo, array $payload): array
 {
@@ -2259,6 +2252,15 @@ function updatePurchaseDistributionSendResult(PDO $pdo, array $event, string $em
     ];
 
     return [$sql, $params];
+}
+
+/** В native prepare каждое вхождение должно иметь собственный placeholder. */
+function purchaseDistributionSendResultSql(): string
+{
+    return 'UPDATE purchase_event_distribution_log
+            SET send_status = CASE WHEN send_status = \'ERROR\' OR :status_current = \'ERROR\' THEN \'ERROR\' ELSE \'SUCCESS\' END,
+                smtp_error = CASE WHEN :status_error = \'ERROR\' THEN :error ELSE smtp_error END
+            WHERE event_key = :event_key AND event_date = :event_date AND CAST(actual_recipients AS CHAR) LIKE :email';
 }
 
 /** В native prepare каждое вхождение должно иметь собственный placeholder. */
