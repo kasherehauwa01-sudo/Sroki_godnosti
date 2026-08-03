@@ -10,6 +10,9 @@ function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string 
 {
     ensureEmailNotificationLogSchema($pdo);
     $startedAt = microtime(true);
+    $baseSubject = trim((string)($context['subject_base'] ?? $subject));
+    $context['subject_base'] = $baseSubject;
+    $subject = formatNotificationEmailSubject($baseSubject, $emails, $context);
     $messageId = createEmailMessageId($settings);
     $recipientsBeforeFilters = array_values(array_map(static fn ($email): string => (string)$email, $emails));
     $emails = normalizeSmtpRecipients($emails);
@@ -50,6 +53,20 @@ function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string 
         );
         throw $error;
     }
+}
+
+/** Формирует фактическую уникальную тему непосредственно перед отправкой. */
+function formatNotificationEmailSubject(string $type, array $emails, array $context = [], ?DateTimeInterface $sentAt = null): string
+{
+    $type = rtrim(trim($type), ". \t\n\r\0\x0B");
+    if ($type === '') $type = 'Уведомление';
+    $destination = trim((string)($context['warehouse_name'] ?? $context['recipient_name'] ?? ''));
+    if ($destination === '') {
+        $normalizedEmails = normalizeSmtpRecipients($emails);
+        $destination = count($normalizedEmails) === 1 ? $normalizedEmails[0] : 'Все получатели';
+    }
+    $sentAt ??= new DateTimeImmutable('now');
+    return $type . ' | ' . $destination . ' | ' . $sentAt->format('d.m.Y H:i');
 }
 
 /** Создаёт Message-ID в домене реального отправителя, а не в локальном .local. */

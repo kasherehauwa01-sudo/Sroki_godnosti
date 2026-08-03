@@ -46,5 +46,25 @@ assertEmailDiagnosticsSame(
     normalizeSmtpData("Первая строка\n.Строка с точкой\rПоследняя строка"),
     'SMTP DATA должен использовать CRLF и dot-stuffing по RFC 5321'
 );
+assertEmailDiagnosticsSame(
+    'Не заполнены остатки | ТЦ Европа | 03.08.2026 12:57',
+    formatNotificationEmailSubject(
+        'Не заполнены остатки.',
+        ['az@volgorost.ru'],
+        ['warehouse_name' => 'ТЦ Европа'],
+        new DateTimeImmutable('2026-08-03 12:57:00')
+    ),
+    'Тема складского уведомления должна содержать тип, склад и время отправки'
+);
+assertEmailDiagnosticsSame(
+    'Проверка доставки email — Сроки годности | az@volgorost.ru | 03.08.2026 12:57',
+    formatNotificationEmailSubject(
+        'Проверка доставки email — Сроки годности',
+        ['az@volgorost.ru'],
+        [],
+        new DateTimeImmutable('2026-08-03 12:57:00')
+    ),
+    'Для одиночного получателя без склада тема должна использовать его email'
+);
 
 echo "Проверки диагностики email пройдены.\n";
