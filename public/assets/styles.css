@@ -155,6 +155,7 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .purchase-notification-logs-dialog { width: min(980px, calc(100vw - 28px)); }
 .purchase-notification-logs-dialog .notification-dialog-body { padding: 0; white-space: normal; }
 .notification-history-dialog { width: min(1100px, calc(100vw - 28px)); }
+.smtp-test-output { white-space: pre-wrap; overflow-wrap: anywhere; }
 .notification-history-dialog .notification-dialog-body { padding: 0; white-space: normal; }
 .help-card { max-width: 980px; line-height: 1.55; }
 .help-card h2 { margin-top: 0; }
@@ -189,11 +190,10 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .purchase-event-table th { position: sticky; top: 0; z-index: 3; }
 .purchase-event-table .purchase-event-main-column { position: sticky; z-index: 2; background: #dbeafe; }
 .purchase-event-table thead .purchase-event-main-column { top: 0; z-index: 5; }
-.purchase-event-table .purchase-event-main-column:nth-child(1) { left: 0; min-width: 120px; }
-.purchase-event-table .purchase-event-main-column:nth-child(2) { left: 120px; width: 200px; min-width: 200px; max-width: 200px; }
-.purchase-event-table .purchase-event-main-column:nth-child(3) { left: 320px; width: 80px; min-width: 80px; max-width: 80px; }
-.purchase-event-table .purchase-event-main-column:nth-child(4) { left: 400px; width: 180px; min-width: 180px; }
-.purchase-event-table .purchase-event-main-column:nth-child(5) { left: 580px; width: 200px; min-width: 200px; max-width: 200px; box-shadow: 8px 0 12px -10px rgba(15, 23, 42, .7); }
+.purchase-event-table .purchase-event-main-column:nth-child(1) { left: 0; min-width: 180px; }
+.purchase-event-table .purchase-event-main-column:nth-child(2) { left: 180px; width: 200px; min-width: 200px; max-width: 200px; }
+.purchase-event-table .purchase-event-main-column:nth-child(3) { left: 380px; width: 80px; min-width: 80px; max-width: 80px; }
+.purchase-event-table .purchase-event-main-column:nth-child(4) { left: 460px; width: 180px; min-width: 180px; box-shadow: 8px 0 12px -10px rgba(15, 23, 42, .7); }
 .purchase-event-status { min-width: 160px; }
 .purchase-event-quantity { min-width: 110px; text-align: right; }
 [hidden] { display: none !important; }

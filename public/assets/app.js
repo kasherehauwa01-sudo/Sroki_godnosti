@@ -120,7 +120,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients', 'email_notification_logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -1875,6 +1875,40 @@ async function sendTestNotification() {
     }
 }
 
+async function testEmailDelivery() {
+    const button = qs('#testEmailDeliveryButton');
+    const output = qs('#emailDeliveryTestOutput');
+    const email = qs('#deliveryTestEmail').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        output.textContent = 'Укажите корректный email.';
+        return;
+    }
+    button.disabled = true;
+    output.textContent = 'Выполняется SMTP-отправка...';
+    try {
+        await persistSettings();
+        const result = await api('test_email_delivery', { settings_password: state.settingsPassword, email });
+        const delivery = result.delivery || {};
+        output.textContent = [
+            result.message,
+            `TO: ${(delivery.smtp_to || []).join(', ') || '—'}`,
+            `CC: ${(delivery.smtp_cc || []).join(', ') || '—'}`,
+            `BCC: ${(delivery.smtp_bcc || []).join(', ') || '—'}`,
+            `Количество: ${delivery.recipient_count ?? 0}`,
+            `Message-ID: ${delivery.message_id || '—'}`,
+            `SMTP-код: ${delivery.smtp_code || '—'}`,
+            `SMTP-ответ:\n${delivery.smtp_response || '—'}`,
+            `Полный SMTP-лог:\n${delivery.smtp_transcript || '—'}`,
+            `Заголовки письма:\n${delivery.message_headers || '—'}`,
+        ].join('\n');
+        await showNotificationLogs();
+    } catch (error) {
+        output.textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
+}
+
 async function sendTestMissingFilterNotification() {
     const button = qs('#testMissingFilterButton');
     const status = qs('#testMissingFilterStatus');
@@ -2018,13 +2052,20 @@ function showEmailNotificationLogDetails(id) {
     const details = [
         ['Дата', log.date],
         ['Тип уведомления', log.notification_type],
-        ['Получатели', (log.recipients || []).join('\n')],
+        ['Получатели до фильтров', (log.distribution_details?.email_delivery?.recipients_before_filters || log.recipients || []).join('\n')],
+        ['Получатели после фильтров', (log.distribution_details?.email_delivery?.recipients_after_filters || log.recipients || []).join('\n')],
+        ['TO', (log.distribution_details?.email_delivery?.smtp_to || log.recipients || []).join('\n')],
+        ['CC', (log.distribution_details?.email_delivery?.smtp_cc || []).join('\n') || '—'],
+        ['BCC', (log.distribution_details?.email_delivery?.smtp_bcc || []).join('\n') || '—'],
+        ['Количество адресатов', String(log.distribution_details?.email_delivery?.recipient_count ?? (log.recipients || []).length)],
         ['Тема письма', log.subject],
         ['Статус', log.status_text],
         ['SMTP-код', log.smtp_code || '—'],
         ['Diagnostic Code', log.diagnostic_code || '—'],
         ['Расшифровка', log.error_reason || '—'],
-        ['Полный текст ошибки SMTP', log.smtp_response || '—'],
+        ['Полный ответ SMTP', log.smtp_response || '—'],
+        ['Заголовки письма', log.message_headers || '—'],
+        ['Текстовая версия письма', log.message_body || '—'],
         ['ID сообщения', log.message_id || '—'],
         ['Время выполнения отправки', log.duration_ms == null ? '—' : `${log.duration_ms} мс`],
         ['Причина распределения', (log.distribution_details?.distribution || []).map((item) =>
@@ -2372,6 +2413,7 @@ function bindEvents() {
     qs('#confirmMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
+    qs('#testEmailDeliveryButton').addEventListener('click', testEmailDelivery);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
     qs('#openEmailNotificationLogButton')?.addEventListener('click', showNotificationLogs);
     qs('#closeNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);

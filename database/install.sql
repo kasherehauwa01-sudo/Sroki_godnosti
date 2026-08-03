@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS email_notification_log (
     duration_ms INT UNSIGNED NULL,
     retry_payload LONGTEXT NULL,
     distribution_details JSON NULL,
+    message_headers MEDIUMTEXT NULL,
+    message_body LONGTEXT NULL,
     PRIMARY KEY (id),
     INDEX idx_email_log_created_at (created_at),
     INDEX idx_email_log_status (status),
