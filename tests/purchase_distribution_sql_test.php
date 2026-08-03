@@ -17,4 +17,10 @@ if (($decoded['ok'] ?? false) !== true || !is_string($decoded['name'] ?? null)) 
     throw new RuntimeException('API должен возвращать валидный JSON при некорректной кодировке данных.');
 }
 
+runApiBackgroundTask(new class extends PDO {
+    public function __construct() {}
+}, 'test_failure', static function (): void {
+    throw new RuntimeException('Тестовая ошибка фоновой задачи');
+});
+
 echo "Проверка SQL журнала рассылки пройдена.\n";

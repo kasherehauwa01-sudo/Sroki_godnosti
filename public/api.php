@@ -55,15 +55,15 @@ function handleApiRequest(): void
         $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
 
         if (!in_array($action, ['test_auto_import', 'test_missing_filter_notification'], true)) {
-            runDueAutoImport($pdo);
+            runApiBackgroundTask($pdo, 'auto_import', static fn () => runDueAutoImport($pdo));
         }
 
         refreshDaysLeft($pdo);
-        sendDueOverdueStockCheckNotifications($pdo);
-        sendDueStockReminderNotifications($pdo);
+        runApiBackgroundTask($pdo, 'overdue_stock_check', static fn () => sendDueOverdueStockCheckNotifications($pdo));
+        runApiBackgroundTask($pdo, 'stock_reminders', static fn () => sendDueStockReminderNotifications($pdo));
         if (!in_array($action, ['test_notification', 'test_purchase_notification'], true)) {
-            runDueExpiryNotifications($pdo);
-            sendExpiredPurchaseEventNotifications($pdo);
+            runApiBackgroundTask($pdo, 'expiry_notifications', static fn () => runDueExpiryNotifications($pdo));
+            runApiBackgroundTask($pdo, 'expired_purchase_events', static fn () => sendExpiredPurchaseEventNotifications($pdo));
         }
 
         if ($method === 'GET') {
@@ -131,6 +131,21 @@ function handleApiRequest(): void
         }
         http_response_code(500);
         echo encodeApiResponse(['ok' => false, 'error' => $error->getMessage()]);
+    }
+}
+
+/** Ошибка фоновой рассылки не должна блокировать чтение реестра и настроек. */
+function runApiBackgroundTask(PDO $pdo, string $task, callable $callback): void
+{
+    try {
+        $callback();
+    } catch (Throwable $error) {
+        error_log("Ошибка фоновой задачи {$task}: " . $error->getMessage());
+        try {
+            writeLog($pdo, 'background_task_failed', ['task' => $task, 'error' => $error->getMessage()]);
+        } catch (Throwable) {
+            // Даже сбой таблицы logs не должен заменить ответ запрошенного API.
+        }
     }
 }
 
@@ -2252,6 +2267,15 @@ function updatePurchaseDistributionSendResult(PDO $pdo, array $event, string $em
     ];
 
     return [$sql, $params];
+}
+
+/** В native prepare каждое вхождение должно иметь собственный placeholder. */
+function purchaseDistributionSendResultSql(): string
+{
+    return 'UPDATE purchase_event_distribution_log
+            SET send_status = CASE WHEN send_status = \'ERROR\' OR :status_current = \'ERROR\' THEN \'ERROR\' ELSE \'SUCCESS\' END,
+                smtp_error = CASE WHEN :status_error = \'ERROR\' THEN :error ELSE smtp_error END
+            WHERE event_key = :event_key AND event_date = :event_date AND CAST(actual_recipients AS CHAR) LIKE :email';
 }
 
 /** В native prepare каждое вхождение должно иметь собственный placeholder. */
