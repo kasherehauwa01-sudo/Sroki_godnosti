@@ -90,8 +90,9 @@ function fetchVrCatalogProductsByArticles(array $articles, ?PDO $pdo = null): ar
  * Сначала каталог запрашивается по исходным артикулам. Базовые артикулы отправляются
  * отдельным запросом только для специальных товаров, у которых менеджер не найден.
  */
-function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = null): array
+function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = null, ?callable $requestProducts = null): array
 {
+    $requestProducts ??= static fn (array $requestedArticles): array => fetchVrCatalogProductsByArticles($requestedArticles, $pdo);
     $articles = array_values(array_unique(array_filter(array_map(static fn ($value): string => trim((string)$value), $articles))));
     $fallbackByArticle = [];
     foreach ($articles as $article) {
@@ -99,7 +100,7 @@ function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = 
         if ($fallback !== '') $fallbackByArticle[$article] = $fallback;
     }
 
-    $products = fetchVrCatalogProductsByArticles($articles, $pdo);
+    $products = $requestProducts($articles);
     $byArticle = [];
     foreach ($products as $product) $byArticle[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
 
@@ -115,7 +116,7 @@ function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = 
     // только результаты для исходных кодов из первого пакетного запроса.
     $fallbackByLookupKey = [];
     if ($unresolvedFallbackArticles) {
-        $fallbackProducts = fetchVrCatalogProductsByArticles(array_values(array_unique($unresolvedFallbackArticles)), $pdo);
+        $fallbackProducts = $requestProducts(array_values(array_unique($unresolvedFallbackArticles)));
         foreach ($fallbackProducts as $product) {
             $fallbackByLookupKey[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
         }

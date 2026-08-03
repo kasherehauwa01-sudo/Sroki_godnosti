@@ -49,4 +49,39 @@ $emptyBaseManager = vrCatalogApplyManagerFallback(
 );
 assertSameValue('', vrCatalogManagerValue($emptyBaseManager[0])['value'], 'Пустой менеджер базового товара не должен считаться найденным');
 
+// Проверяем весь сценарий из двух запросов, а не только подстановку готового
+// результата. Это защищает сводную таблицу от повторного появления прочерка.
+$requests = [];
+$requestProducts = static function (array $articles) use (&$requests): array {
+    $requests[] = $articles;
+    if (count($requests) === 1) {
+        return [
+            ['article' => 'Код-1', 'found' => false, 'manager_name' => ''],
+            ['article' => 'Код-25', 'found' => true, 'manager_name' => ''],
+            // Для «Код-1-25» каталог не вернул даже строку товара.
+        ];
+    }
+
+    return [['article' => 'Код', 'found' => true, 'manager_name' => 'Менеджер закупок']];
+};
+$resolvedProducts = fetchVrCatalogProductsWithManagerFallback(
+    ['Код-1', 'Код-25', 'Код-1-25'],
+    null,
+    $requestProducts
+);
+$resolvedByArticle = [];
+foreach ($resolvedProducts as $product) {
+    $resolvedByArticle[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))] = $product;
+}
+foreach (['Код-1', 'Код-25', 'Код-1-25'] as $article) {
+    $product = $resolvedByArticle[vrCatalogArticleLookupKey($article)] ?? [];
+    assertSameValue('Менеджер закупок', vrCatalogManagerValue($product)['value'], "Менеджер не найден для {$article}");
+    assertSameValue(true, vrCatalogProductFound($product), "Товар {$article} не отмечен найденным после подстановки");
+}
+assertSameValue(
+    [['Код-1', 'Код-25', 'Код-1-25'], ['Код']],
+    $requests,
+    'Базовый код должен запрашиваться отдельно после неудачного поиска вариантов'
+);
+
 echo "Проверки резервного определения менеджера пройдены.\n";
