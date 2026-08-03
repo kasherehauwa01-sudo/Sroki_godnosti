@@ -96,6 +96,7 @@ function handleApiRequest(): void
                 'delete_by_articles' => deleteBatchesByArticles($pdo, $payload),
                 'settings' => saveProtectedSettings($pdo, $payload),
                 'test_notification' => sendTestNotification($pdo, $payload),
+                'test_email_delivery' => testEmailDelivery($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
                 'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
                 'test_purchase_notification' => sendTestPurchaseNotification($pdo, $payload),
@@ -418,7 +419,7 @@ function getProtectedEmailNotificationLogs(PDO $pdo, array $payload): array
         $row['recipients'] = json_decode((string)$row['recipients'], true) ?: [];
         $row['distribution_details'] = json_decode((string)($row['distribution_details'] ?? ''), true) ?: [];
         $row['date'] = formatMoscowDateTime((string)$row['created_at']);
-        $row['status_text'] = (string)$row['status'] === 'SUCCESS' ? '✅ Отправлено' : '❌ Не отправлено';
+        $row['status_text'] = (string)$row['status'] === 'SUCCESS' ? '✅ Принято SMTP' : '❌ Не принято SMTP';
         return $row;
     }, $statement->fetchAll());
     return ['ok' => true, 'logs' => $logs];
@@ -1333,6 +1334,22 @@ function sendTestNotification(PDO $pdo, array $payload): array
     }
 
     return ['ok' => true, 'message' => 'Тестовое уведомление отправлено.'];
+}
+
+/** Отправляет диагностическое письмо на один явно выбранный адрес. */
+function testEmailDelivery(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $email = trim((string)($payload['email'] ?? ''));
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Укажите корректный email для проверки доставки.');
+    }
+    $subject = 'Проверка доставки email — Сроки годности';
+    $body = "Это диагностическое письмо сервиса «Сроки годности».\n\nАдрес проверки: {$email}\nВремя UTC: " . gmdate('Y-m-d H:i:s');
+    $result = sendNotificationEmail($pdo, [$email], $subject, $body, getRawSettings($pdo), [], [
+        'notification_type' => 'Проверка доставки email',
+    ]);
+    return ['ok' => true, 'message' => 'SMTP-сервер принял письмо. Это ещё не подтверждает доставку в ящик.', 'delivery' => $result];
 }
 
 
@@ -2362,12 +2379,12 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
 function downloadPurchaseEventXls(PDO $pdo, string $token): array
 {
     $summary = getPurchaseEventSummary($pdo, $token);
-    $headers = ['Раздел', 'Код', 'Наименование', 'Менеджер', 'Общий остаток', 'Статус'];
+    $headers = ['Раздел', "Код\nМенеджер", 'Наименование', 'Общий остаток', 'Статус'];
     foreach ($summary['warehouses'] as $warehouse) $headers[] = (string)$warehouse['name'];
     $rows = [$headers];
     foreach ($summary['rows'] as $row) {
-        $managerText = trim((string)$row['manager_value'] . ((string)$row['manager_email'] !== '' ? "\n" . (string)$row['manager_email'] : ''));
-        $values = [$row['section'] === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары', $row['code'], $row['name'], $managerText, $row['total'], $row['status']];
+        $codeAndManager = (string)$row['code'] . "\n" . ((string)$row['manager_value'] !== '' ? (string)$row['manager_value'] : '—');
+        $values = [$row['section'] === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары', $codeAndManager, $row['name'], $row['total'], $row['status']];
         foreach ($summary['warehouses'] as $warehouse) $values[] = $row['quantities'][(string)$warehouse['id']] ?? '';
         $rows[] = $values;
     }
