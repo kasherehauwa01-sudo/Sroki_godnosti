@@ -95,7 +95,7 @@ INSERT INTO settings (
     auto_import_time,
     missing_filter_email,
     email_log_retention_days
-) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Сроки годности', '09:00', '23:50', NULL, 365)
+) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Отдел претензий | Контроль сроков годности', '09:00', '23:50', NULL, 365)
 ON DUPLICATE KEY UPDATE id = id;
 
 CREATE TABLE IF NOT EXISTS email_notification_log (
@@ -113,10 +113,29 @@ CREATE TABLE IF NOT EXISTS email_notification_log (
     duration_ms INT UNSIGNED NULL,
     retry_payload LONGTEXT NULL,
     distribution_details JSON NULL,
+    message_headers MEDIUMTEXT NULL,
+    message_body LONGTEXT NULL,
     PRIMARY KEY (id),
     INDEX idx_email_log_created_at (created_at),
     INDEX idx_email_log_status (status),
     INDEX idx_email_log_type (notification_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS email_notification_queue (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    scheduled_at DATETIME NOT NULL,
+    started_at DATETIME NULL,
+    finished_at DATETIME NULL,
+    recipient VARCHAR(320) NOT NULL,
+    subject VARCHAR(998) NOT NULL,
+    body LONGTEXT NOT NULL,
+    attachments LONGTEXT NULL,
+    context JSON NULL,
+    status ENUM('PENDING', 'PROCESSING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
+    error_message TEXT NULL,
+    PRIMARY KEY (id),
+    INDEX idx_email_queue_due (status, scheduled_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS warehouses (

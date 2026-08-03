@@ -1,9 +1,10 @@
-const STOCK_EVENTS_VIEWED_AT_KEY = 'stockEventsViewedAt';
-const storedStockEventsViewedAt = (() => {
+const STOCK_EVENT_VIEWS_KEY = 'stockEventViews';
+const storedStockEventViews = (() => {
     try {
-        return window.localStorage.getItem(STOCK_EVENTS_VIEWED_AT_KEY) || '';
+        const value = JSON.parse(window.localStorage.getItem(STOCK_EVENT_VIEWS_KEY) || '{}');
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     } catch {
-        return '';
+        return {};
     }
 })();
 
@@ -28,7 +29,7 @@ const state = {
     stockNotifications: [],
     expandedStockNotificationGroups: new Set(),
     stockBatchNotifications: [],
-    stockEventsViewedAt: storedStockEventsViewedAt,
+    stockEventViews: storedStockEventViews,
     selectedStockBatchId: null,
     events: [],
     eventPeriodFilters: new Set(['today', 'future']),
@@ -120,7 +121,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients', 'email_notification_logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -1135,33 +1136,51 @@ async function loadStockBatchNotifications() {
     const result = await api('stock_batch_notifications');
     state.stockBatchNotifications = result.notifications || [];
     renderStockBatchNotifications();
-    if (document.body.dataset.activeTab === 'notifications') markStockEventsViewed();
 }
 
-function markStockEventsViewed() {
-    const latestChange = state.stockBatchNotifications.reduce((latest, notification) => {
-        const changedAt = String(notification.last_stock_at || '');
-        return changedAt > latest ? changedAt : latest;
-    }, state.stockEventsViewedAt);
-    state.stockEventsViewedAt = latestChange;
+function stockEventViewKey(notification) {
+    return `${notification.event_key || ''}|${notification.event_date || ''}`;
+}
+
+function stockEventHasUnreadChanges(notification) {
+    const changedAt = String(notification.last_stock_at || '');
+    return changedAt !== '' && changedAt > String(state.stockEventViews[stockEventViewKey(notification)] || '');
+}
+
+function markStockEventViewed(notification, row) {
+    const changedAt = String(notification.last_stock_at || '');
+    if (changedAt === '') return;
+    state.stockEventViews[stockEventViewKey(notification)] = changedAt;
     try {
-        window.localStorage.setItem(STOCK_EVENTS_VIEWED_AT_KEY, latestChange);
+        window.localStorage.setItem(STOCK_EVENT_VIEWS_KEY, JSON.stringify(state.stockEventViews));
     } catch {
-        // В закрытом режиме браузер может запрещать localStorage — точку всё равно скрываем на текущей странице.
+        // В закрытом режиме браузер может запрещать localStorage — строка всё равно обновится до перехода.
     }
-    qs('#notificationsUnreadDot')?.classList.add('hidden');
+    row?.classList.remove('stock-event-unread');
+}
+
+function markAllStockEventsViewed() {
+    state.stockBatchNotifications.forEach((notification) => {
+        const changedAt = String(notification.last_stock_at || '');
+        if (changedAt !== '') state.stockEventViews[stockEventViewKey(notification)] = changedAt;
+    });
+    try {
+        window.localStorage.setItem(STOCK_EVENT_VIEWS_KEY, JSON.stringify(state.stockEventViews));
+    } catch {
+        // Состояние всё равно обновлено для текущей страницы.
+    }
+    renderStockBatchNotifications();
 }
 
 function renderStockBatchNotifications() {
     const body = qs('#stockBatchNotificationsBody');
     if (!body) return;
-    const hasUnreadChanges = state.stockBatchNotifications.some((notification) => {
-        const changedAt = String(notification.last_stock_at || '');
-        return changedAt !== '' && changedAt > state.stockEventsViewedAt;
-    });
+    const hasUnreadChanges = state.stockBatchNotifications.some(stockEventHasUnreadChanges);
     qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnreadChanges);
+    const markAllButton = qs('#markAllStockEventsReadButton');
+    if (markAllButton) markAllButton.disabled = !hasUnreadChanges;
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
-        <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification' : ''}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
+        <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification ' : ''}${stockEventHasUnreadChanges(notification) ? 'stock-event-unread' : ''}" data-stock-event-key="${escapeHtml(stockEventViewKey(notification))}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
             <td>${notification.event_key === 'overdue_stock_check' ? 'Проверка наличия товара' : `${Number(notification.event_days || 0)} дней`}</td>
             <td>${escapeHtml(formatDateRu(notification.event_date))}</td>
             <td>${escapeHtml(formatDateRu(notification.expiry_date))}</td>
@@ -1171,7 +1190,12 @@ function renderStockBatchNotifications() {
         </tr>
     `).join('') || '<tr><td colspan="6">Событий с остатками пока нет.</td></tr>';
     qsa('[data-stock-event-url]').forEach((row) => {
-        const openEvent = () => { window.location.assign(row.dataset.stockEventUrl); };
+        const notification = state.stockBatchNotifications.find((item) => stockEventViewKey(item) === row.dataset.stockEventKey);
+        const openEvent = () => {
+            if (notification) markStockEventViewed(notification, row);
+            qs('#notificationsUnreadDot')?.classList.toggle('hidden', !state.stockBatchNotifications.some(stockEventHasUnreadChanges));
+            window.location.assign(row.dataset.stockEventUrl);
+        };
         row.addEventListener('click', () => {
             openEvent();
         });
@@ -1875,6 +1899,40 @@ async function sendTestNotification() {
     }
 }
 
+async function testEmailDelivery() {
+    const button = qs('#testEmailDeliveryButton');
+    const output = qs('#emailDeliveryTestOutput');
+    const email = qs('#deliveryTestEmail').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        output.textContent = 'Укажите корректный email.';
+        return;
+    }
+    button.disabled = true;
+    output.textContent = 'Выполняется SMTP-отправка...';
+    try {
+        await persistSettings();
+        const result = await api('test_email_delivery', { settings_password: state.settingsPassword, email });
+        const delivery = result.delivery || {};
+        output.textContent = [
+            result.message,
+            `TO: ${(delivery.smtp_to || []).join(', ') || '—'}`,
+            `CC: ${(delivery.smtp_cc || []).join(', ') || '—'}`,
+            `BCC: ${(delivery.smtp_bcc || []).join(', ') || '—'}`,
+            `Количество: ${delivery.recipient_count ?? 0}`,
+            `Message-ID: ${delivery.message_id || '—'}`,
+            `SMTP-код: ${delivery.smtp_code || '—'}`,
+            `SMTP-ответ:\n${delivery.smtp_response || '—'}`,
+            `Полный SMTP-лог:\n${delivery.smtp_transcript || '—'}`,
+            `Заголовки письма:\n${delivery.message_headers || '—'}`,
+        ].join('\n');
+        await showNotificationLogs();
+    } catch (error) {
+        output.textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
+}
+
 async function sendTestMissingFilterNotification() {
     const button = qs('#testMissingFilterButton');
     const status = qs('#testMissingFilterStatus');
@@ -2018,13 +2076,20 @@ function showEmailNotificationLogDetails(id) {
     const details = [
         ['Дата', log.date],
         ['Тип уведомления', log.notification_type],
-        ['Получатели', (log.recipients || []).join('\n')],
+        ['Получатели до фильтров', (log.distribution_details?.email_delivery?.recipients_before_filters || log.recipients || []).join('\n')],
+        ['Получатели после фильтров', (log.distribution_details?.email_delivery?.recipients_after_filters || log.recipients || []).join('\n')],
+        ['TO', (log.distribution_details?.email_delivery?.smtp_to || log.recipients || []).join('\n')],
+        ['CC', (log.distribution_details?.email_delivery?.smtp_cc || []).join('\n') || '—'],
+        ['BCC', (log.distribution_details?.email_delivery?.smtp_bcc || []).join('\n') || '—'],
+        ['Количество адресатов', String(log.distribution_details?.email_delivery?.recipient_count ?? (log.recipients || []).length)],
         ['Тема письма', log.subject],
         ['Статус', log.status_text],
         ['SMTP-код', log.smtp_code || '—'],
         ['Diagnostic Code', log.diagnostic_code || '—'],
         ['Расшифровка', log.error_reason || '—'],
-        ['Полный текст ошибки SMTP', log.smtp_response || '—'],
+        ['Полный ответ SMTP', log.smtp_response || '—'],
+        ['Заголовки письма', log.message_headers || '—'],
+        ['Текстовая версия письма', log.message_body || '—'],
         ['ID сообщения', log.message_id || '—'],
         ['Время выполнения отправки', log.duration_ms == null ? '—' : `${log.duration_ms} мс`],
         ['Причина распределения', (log.distribution_details?.distribution || []).map((item) =>
@@ -2051,7 +2116,7 @@ async function retryEmailNotification() {
         await api('email_notification_retry', { settings_password: state.settingsPassword, id: state.selectedEmailNotificationLogId });
         closeEmailNotificationLogDetails();
         await showNotificationLogs();
-        showToast('Письмо отправлено повторно. В журнал добавлена новая запись.');
+        showToast('Письмо поставлено в очередь повторной отправки.');
     } catch (error) {
         showToast(error.message, true);
         await showNotificationLogs();
@@ -2234,6 +2299,7 @@ async function importRowsInChunks(rows, chunkSize = 100) {
 }
 
 function bindEvents() {
+    qs('#markAllStockEventsReadButton')?.addEventListener('click', markAllStockEventsViewed);
     bindPurchaseRecipientEvents();
 
     qsa('.tab').forEach((button) => button.addEventListener('click', async () => {
@@ -2372,6 +2438,7 @@ function bindEvents() {
     qs('#confirmMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
+    qs('#testEmailDeliveryButton').addEventListener('click', testEmailDelivery);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
     qs('#openEmailNotificationLogButton')?.addEventListener('click', showNotificationLogs);
     qs('#closeNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
