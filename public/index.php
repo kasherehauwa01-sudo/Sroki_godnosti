@@ -116,8 +116,11 @@ declare(strict_types=1);
 
         <section class="panel" id="tab-notifications">
             <div class="section-heading">
-                <h2>Уведомления</h2>
-                <p>События по срокам годности и прогресс заполнения остатков складами.</p>
+                <div>
+                    <h2>Уведомления</h2>
+                    <p>События по срокам годности и прогресс заполнения остатков складами.</p>
+                </div>
+                <button class="ghost-button" id="markAllStockEventsReadButton" type="button">Пометить все как прочитанное</button>
             </div>
             <div class="table-wrap card">
                 <table>
@@ -219,6 +222,11 @@ declare(strict_types=1);
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
                         <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">История уведомлений</button>
                     </div>
+                    <label>Email для проверки доставки
+                        <input id="deliveryTestEmail" type="email" autocomplete="email" placeholder="user@example.ru">
+                    </label>
+                    <button class="ghost-button" id="testEmailDeliveryButton" formnovalidate type="button">Проверить доставку</button>
+                    <pre class="smtp-test-output" id="emailDeliveryTestOutput" aria-live="polite"></pre>
                     <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
                 </div>
 
