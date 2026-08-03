@@ -16,7 +16,7 @@ putenv('SMTP_HOST=smtp.yandex.ru');
 putenv('SMTP_PORT=465');
 putenv('SMTP_USERNAME=vr-vk@yandex.ru');
 putenv('SMTP_PASSWORD=YOUR_APP_PASSWORD');
-putenv('SMTP_FROM_NAME=Сроки годности');
+putenv('SMTP_FROM_NAME=Отдел претензий | Контроль сроков годности');
 putenv('APP_URL=https://kvasmix.ru/vr/sroki_godnosti/');
 
 // Альтернативно app/config.php может вернуть массив. Это удобно для веб-интерфейса,
