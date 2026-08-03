@@ -1898,6 +1898,8 @@ async function testEmailDelivery() {
             `Message-ID: ${delivery.message_id || '—'}`,
             `SMTP-код: ${delivery.smtp_code || '—'}`,
             `SMTP-ответ:\n${delivery.smtp_response || '—'}`,
+            `Полный SMTP-лог:\n${delivery.smtp_transcript || '—'}`,
+            `Заголовки письма:\n${delivery.message_headers || '—'}`,
         ].join('\n');
         await showNotificationLogs();
     } catch (error) {
@@ -2062,6 +2064,8 @@ function showEmailNotificationLogDetails(id) {
         ['Diagnostic Code', log.diagnostic_code || '—'],
         ['Расшифровка', log.error_reason || '—'],
         ['Полный ответ SMTP', log.smtp_response || '—'],
+        ['Заголовки письма', log.message_headers || '—'],
+        ['Текстовая версия письма', log.message_body || '—'],
         ['ID сообщения', log.message_id || '—'],
         ['Время выполнения отправки', log.duration_ms == null ? '—' : `${log.duration_ms} мс`],
         ['Причина распределения', (log.distribution_details?.distribution || []).map((item) =>

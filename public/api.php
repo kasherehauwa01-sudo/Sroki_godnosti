@@ -410,7 +410,7 @@ function getProtectedEmailNotificationLogs(PDO $pdo, array $payload): array
     $direction = strtoupper((string)($payload['direction'] ?? 'DESC')) === 'ASC' ? 'ASC' : 'DESC';
     $statement = $pdo->prepare(
         'SELECT id, created_at, notification_type, subject, recipients, status, smtp_code, diagnostic_code,
-                error_reason, smtp_response, message_id, duration_ms, distribution_details
+                error_reason, smtp_response, message_id, duration_ms, distribution_details, message_headers, message_body
          FROM email_notification_log' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') .
         ' ORDER BY created_at ' . $direction . ', id ' . $direction . ' LIMIT 500'
     );

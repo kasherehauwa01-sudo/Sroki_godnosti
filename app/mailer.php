@@ -10,7 +10,7 @@ function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string 
 {
     ensureEmailNotificationLogSchema($pdo);
     $startedAt = microtime(true);
-    $messageId = sprintf('<%s@sroki-godnosti.local>', bin2hex(random_bytes(16)));
+    $messageId = createEmailMessageId($settings);
     $recipientsBeforeFilters = array_values(array_map(static fn ($email): string => (string)$email, $emails));
     $emails = normalizeSmtpRecipients($emails);
     $deliveryContext = [
@@ -29,11 +29,13 @@ function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string 
 
     try {
         $smtpResult = sendSmtpEmail($pdo, $emails, $subject, $body, $settings, $attachments, $messageId);
-        finishEmailNotificationLog($pdo, $logId, 'SUCCESS', (string)$smtpResult['smtp_code'], '', '', (string)$smtpResult['smtp_response'], (int)round((microtime(true) - $startedAt) * 1000));
+        finishEmailNotificationLog($pdo, $logId, 'SUCCESS', (string)$smtpResult['smtp_code'], '', '', (string)$smtpResult['smtp_transcript'], (int)round((microtime(true) - $startedAt) * 1000), (string)$smtpResult['message_headers'], (string)$smtpResult['message_body']);
         writeLog($pdo, 'smtp_message_accepted', $deliveryContext + $smtpResult);
         return ['log_id' => $logId] + $deliveryContext + $smtpResult;
     } catch (Throwable $error) {
-        $smtpResponse = $error instanceof SmtpDeliveryException ? $error->smtpResponse : $error->getMessage();
+        $smtpResponse = $error instanceof SmtpDeliveryException
+            ? ($error->smtpTranscript !== '' ? $error->smtpTranscript : $error->smtpResponse)
+            : $error->getMessage();
         $smtpCode = $error instanceof SmtpDeliveryException ? (string)$error->smtpCode : extractSmtpCode($smtpResponse);
         $diagnosticCode = extractDiagnosticCode($smtpResponse);
         finishEmailNotificationLog(
@@ -48,6 +50,16 @@ function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string 
         );
         throw $error;
     }
+}
+
+/** Создаёт Message-ID в домене реального отправителя, а не в локальном .local. */
+function createEmailMessageId(array $settings): string
+{
+    $defaultSender = defined('SENDER_EMAIL') ? (string)constant('SENDER_EMAIL') : 'vr-vk@yandex.ru';
+    $fromEmail = trim((string)($settings['smtp_from_email'] ?? '')) ?: $defaultSender;
+    $domain = str_contains($fromEmail, '@') ? substr(strrchr($fromEmail, '@'), 1) : '';
+    if ($domain === '' || !preg_match('/^[a-z0-9.-]+$/i', $domain)) $domain = 'yandex.ru';
+    return sprintf('<%s@%s>', bin2hex(random_bytes(16)), strtolower($domain));
 }
 
 /** Нормализует адресатов перед SMTP и удаляет только точные дубликаты email. */
@@ -69,7 +81,7 @@ function normalizeSmtpRecipients(array $emails): array
 
 final class SmtpDeliveryException extends RuntimeException
 {
-    public function __construct(public readonly int $smtpCode, public readonly string $smtpResponse)
+    public function __construct(public readonly int $smtpCode, public readonly string $smtpResponse, public readonly string $smtpTranscript = '')
     {
         parent::__construct('SMTP вернул неожиданный ответ: ' . trim($smtpResponse), $smtpCode);
     }
@@ -100,6 +112,7 @@ function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, a
 
     $mode = $port === 465 ? 'SSL' : 'STARTTLS';
     $transportHost = $mode === 'SSL' ? 'ssl://' . $host : $host;
+    $transcript = [];
 
     writeLog($pdo, 'smtp_connection_attempt', ['host' => $host, 'port' => $port, 'mode' => $mode]);
     $socket = fsockopen($transportHost, $port, $errno, $errstr, 30);
@@ -109,10 +122,10 @@ function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, a
     }
     writeLog($pdo, 'smtp_connection_success', ['host' => $host, 'port' => $port, 'mode' => $mode]);
 
-    smtpExpect($socket, [220]);
-    smtpCommand($socket, 'EHLO kvasmix.ru', [250]);
+    smtpDiagnosticExpect($socket, [220], $transcript);
+    smtpDiagnosticCommand($socket, 'EHLO kvasmix.ru', [250], $transcript);
     if ($mode === 'STARTTLS') {
-        smtpCommand($socket, 'STARTTLS', [220]);
+        smtpDiagnosticCommand($socket, 'STARTTLS', [220], $transcript);
         $cryptoEnabled = stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
         if ($cryptoEnabled !== true) {
             fclose($socket);
@@ -120,13 +133,13 @@ function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, a
             throw new RuntimeException('Не удалось включить TLS для SMTP STARTTLS.');
         }
         writeLog($pdo, 'smtp_starttls_success', ['host' => $host, 'port' => $port, 'mode' => $mode]);
-        smtpCommand($socket, 'EHLO kvasmix.ru', [250]);
+        smtpDiagnosticCommand($socket, 'EHLO kvasmix.ru', [250], $transcript);
     }
 
     try {
-        smtpCommand($socket, 'AUTH LOGIN', [334]);
-        smtpCommand($socket, base64_encode($username), [334]);
-        smtpCommand($socket, base64_encode($password), [235]);
+        smtpDiagnosticCommand($socket, 'AUTH LOGIN', [334], $transcript);
+        smtpDiagnosticCommand($socket, base64_encode($username), [334], $transcript, '[логин скрыт]');
+        smtpDiagnosticCommand($socket, base64_encode($password), [235], $transcript, '[пароль скрыт]');
         writeLog($pdo, 'smtp_auth_success', ['host' => $host, 'port' => $port, 'mode' => $mode, 'username' => $username]);
     } catch (Throwable $error) {
         fclose($socket);
@@ -134,20 +147,22 @@ function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, a
         throw $error;
     }
 
-    smtpCommand($socket, 'MAIL FROM:<' . $fromEmail . '>', [250]);
+    smtpDiagnosticCommand($socket, 'MAIL FROM:<' . $fromEmail . '>', [250], $transcript);
     $recipientResponses = [];
     foreach ($emails as $email) {
-        $recipientResponses[$email] = trim(smtpCommand($socket, 'RCPT TO:<' . $email . '>', [250, 251]));
+        $recipientResponses[$email] = trim(smtpDiagnosticCommand($socket, 'RCPT TO:<' . $email . '>', [250, 251], $transcript));
     }
-    smtpCommand($socket, 'DATA', [354]);
+    smtpDiagnosticCommand($socket, 'DATA', [354], $transcript);
 
     $headers = [
         'From: ' . encodeMimeHeader($fromName) . ' <' . $fromEmail . '>',
+        'Reply-To: ' . $fromEmail,
         'To: ' . implode(', ', $emails),
         'Subject: ' . encodeMimeHeader($subject),
         'MIME-Version: 1.0',
         'Date: ' . date(DATE_RFC2822),
-        'Message-ID: ' . ($messageId !== '' ? $messageId : sprintf('<%s@sroki-godnosti.local>', bin2hex(random_bytes(16)))),
+        'Message-ID: ' . ($messageId !== '' ? $messageId : createEmailMessageId($settings)),
+        'X-Priority: 3',
     ];
 
     if ($attachments) {
@@ -157,12 +172,13 @@ function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, a
     } else {
         $headers[] = 'Content-Type: text/plain; charset=UTF-8';
         $headers[] = 'Content-Transfer-Encoding: 8bit';
-        $message = str_replace("\n.", "\n..", $body);
+        $message = normalizeSmtpData($body);
     }
 
     fwrite($socket, implode("\r\n", $headers) . "\r\n\r\n" . $message . "\r\n.\r\n");
-    $dataResponse = trim(smtpExpect($socket, [250]));
-    smtpCommand($socket, 'QUIT', [221]);
+    $transcript[] = 'C: [содержимое DATA: ' . strlen($message) . ' байт]';
+    $dataResponse = trim(smtpDiagnosticExpect($socket, [250], $transcript));
+    smtpDiagnosticCommand($socket, 'QUIT', [221], $transcript);
     fclose($socket);
     $fullResponse = implode("\n", array_map(
         static fn (string $email, string $response): string => 'RCPT TO <' . $email . '>: ' . $response,
@@ -173,8 +189,19 @@ function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, a
         'message_id' => $messageId,
         'smtp_code' => extractSmtpCode($dataResponse),
         'smtp_response' => trim($fullResponse),
+        'smtp_transcript' => implode("\n", $transcript),
+        'smtp_host' => $host . ':' . $port . ' (' . $mode . ')',
+        'message_headers' => implode("\r\n", $headers),
+        'message_body' => $body,
         'recipient_responses' => $recipientResponses,
     ];
+}
+
+/** Приводит DATA к RFC-строкам CRLF и экранирует строки, начинающиеся с точки. */
+function normalizeSmtpData(string $value): string
+{
+    $value = preg_replace('/\r\n|\r|\n/', "\r\n", $value) ?? $value;
+    return preg_replace('/^\./m', '..', $value) ?? $value;
 }
 
 function buildMultipartMessage(string $body, array $attachments, string $boundary): string
@@ -184,7 +211,7 @@ function buildMultipartMessage(string $body, array $attachments, string $boundar
         'Content-Type: text/plain; charset=UTF-8',
         'Content-Transfer-Encoding: 8bit',
         '',
-        str_replace("\n.", "\n..", $body),
+        normalizeSmtpData($body),
     ];
 
     foreach ($attachments as $attachment) {
@@ -210,6 +237,29 @@ function smtpCommand($socket, string $command, array $expectedCodes): string
 {
     fwrite($socket, $command . "\r\n");
     return smtpExpect($socket, $expectedCodes);
+}
+
+function smtpDiagnosticCommand($socket, string $command, array $expectedCodes, array &$transcript, ?string $displayCommand = null): string
+{
+    $transcript[] = 'C: ' . ($displayCommand ?? $command);
+    fwrite($socket, $command . "\r\n");
+    return smtpDiagnosticExpect($socket, $expectedCodes, $transcript);
+}
+
+function smtpDiagnosticExpect($socket, array $expectedCodes, array &$transcript): string
+{
+    try {
+        $response = smtpExpect($socket, $expectedCodes);
+    } catch (SmtpDeliveryException $error) {
+        foreach (preg_split('/\r\n|\r|\n/', trim($error->smtpResponse)) ?: [] as $line) {
+            if ($line !== '') $transcript[] = 'S: ' . $line;
+        }
+        throw new SmtpDeliveryException($error->smtpCode, $error->smtpResponse, implode("\n", $transcript));
+    }
+    foreach (preg_split('/\r\n|\r|\n/', trim($response)) ?: [] as $line) {
+        if ($line !== '') $transcript[] = 'S: ' . $line;
+    }
+    return $response;
 }
 
 function smtpExpect($socket, array $expectedCodes): string
@@ -247,15 +297,22 @@ function ensureEmailNotificationLogSchema(PDO $pdo): void
             duration_ms INT UNSIGNED NULL,
             retry_payload LONGTEXT NULL,
             distribution_details JSON NULL,
+            message_headers MEDIUMTEXT NULL,
+            message_body LONGTEXT NULL,
             PRIMARY KEY (id),
             INDEX idx_email_log_created_at (created_at),
             INDEX idx_email_log_status (status),
             INDEX idx_email_log_type (notification_type)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
-    $column = $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'email_notification_log' AND COLUMN_NAME = 'distribution_details'");
-    if ((int)$column->fetchColumn() === 0) {
-        $pdo->exec('ALTER TABLE email_notification_log ADD COLUMN distribution_details JSON NULL AFTER retry_payload');
+    foreach ([
+        'distribution_details' => 'ALTER TABLE email_notification_log ADD COLUMN distribution_details JSON NULL AFTER retry_payload',
+        'message_headers' => 'ALTER TABLE email_notification_log ADD COLUMN message_headers MEDIUMTEXT NULL AFTER distribution_details',
+        'message_body' => 'ALTER TABLE email_notification_log ADD COLUMN message_body LONGTEXT NULL AFTER message_headers',
+    ] as $columnName => $alterSql) {
+        $column = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'email_notification_log' AND COLUMN_NAME = :column");
+        $column->execute([':column' => $columnName]);
+        if ((int)$column->fetchColumn() === 0) $pdo->exec($alterSql);
     }
 }
 
@@ -287,12 +344,13 @@ function createEmailNotificationLog(PDO $pdo, string $type, array $emails, strin
     return (int)$pdo->lastInsertId();
 }
 
-function finishEmailNotificationLog(PDO $pdo, int $id, string $status, string $smtpCode, string $diagnosticCode, string $reason, string $response, int $durationMs): void
+function finishEmailNotificationLog(PDO $pdo, int $id, string $status, string $smtpCode, string $diagnosticCode, string $reason, string $response, int $durationMs, string $headers = '', string $body = ''): void
 {
     $statement = $pdo->prepare(
         'UPDATE email_notification_log
          SET status = :status, smtp_code = :smtp_code, diagnostic_code = :diagnostic_code,
-             error_reason = :error_reason, smtp_response = :smtp_response, duration_ms = :duration_ms
+             error_reason = :error_reason, smtp_response = :smtp_response, duration_ms = :duration_ms,
+             message_headers = :message_headers, message_body = :message_body
          WHERE id = :id'
     );
     $statement->execute([
@@ -302,6 +360,8 @@ function finishEmailNotificationLog(PDO $pdo, int $id, string $status, string $s
         ':error_reason' => $reason !== '' ? $reason : null,
         ':smtp_response' => $response !== '' ? $response : null,
         ':duration_ms' => $durationMs,
+        ':message_headers' => $headers !== '' ? $headers : null,
+        ':message_body' => $body !== '' ? $body : null,
         ':id' => $id,
     ]);
 }

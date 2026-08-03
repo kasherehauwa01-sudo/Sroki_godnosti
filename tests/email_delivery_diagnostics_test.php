@@ -35,4 +35,16 @@ try {
 }
 assertEmailDiagnosticsSame(true, $invalidRejected, 'Некорректный адрес должен приводить к явной ошибке');
 
+$messageId = createEmailMessageId(['smtp_from_email' => 'vr-vk@yandex.ru']);
+assertEmailDiagnosticsSame(
+    true,
+    preg_match('/^<[a-f0-9]{32}@yandex\.ru>$/', $messageId) === 1,
+    'Message-ID должен использовать домен реального отправителя'
+);
+assertEmailDiagnosticsSame(
+    "Первая строка\r\n..Строка с точкой\r\nПоследняя строка",
+    normalizeSmtpData("Первая строка\n.Строка с точкой\rПоследняя строка"),
+    'SMTP DATA должен использовать CRLF и dot-stuffing по RFC 5321'
+);
+
 echo "Проверки диагностики email пройдены.\n";
