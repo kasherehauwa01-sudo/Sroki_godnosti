@@ -96,6 +96,7 @@ function handleApiRequest(): void
                 'delete_by_articles' => deleteBatchesByArticles($pdo, $payload),
                 'settings' => saveProtectedSettings($pdo, $payload),
                 'test_notification' => sendTestNotification($pdo, $payload),
+                'test_email_delivery' => testEmailDelivery($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
                 'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
                 'test_purchase_notification' => sendTestPurchaseNotification($pdo, $payload),
@@ -191,6 +192,10 @@ function ensureSettingsSchema(PDO $pdo): void
             $pdo->exec($sql);
         }
     }
+    // Поле оставлено для совместимости со старыми установками, но все письма
+    // используют единое утверждённое имя отправителя.
+    $pdo->prepare("UPDATE settings SET smtp_from_name = :name WHERE id = 1 AND COALESCE(smtp_from_name, '') <> :name_check")
+        ->execute([':name' => notificationEmailFromName(), ':name_check' => notificationEmailFromName()]);
 }
 
 
@@ -409,7 +414,7 @@ function getProtectedEmailNotificationLogs(PDO $pdo, array $payload): array
     $direction = strtoupper((string)($payload['direction'] ?? 'DESC')) === 'ASC' ? 'ASC' : 'DESC';
     $statement = $pdo->prepare(
         'SELECT id, created_at, notification_type, subject, recipients, status, smtp_code, diagnostic_code,
-                error_reason, smtp_response, message_id, duration_ms, distribution_details
+                error_reason, smtp_response, message_id, duration_ms, distribution_details, message_headers, message_body
          FROM email_notification_log' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') .
         ' ORDER BY created_at ' . $direction . ', id ' . $direction . ' LIMIT 500'
     );
@@ -418,7 +423,7 @@ function getProtectedEmailNotificationLogs(PDO $pdo, array $payload): array
         $row['recipients'] = json_decode((string)$row['recipients'], true) ?: [];
         $row['distribution_details'] = json_decode((string)($row['distribution_details'] ?? ''), true) ?: [];
         $row['date'] = formatMoscowDateTime((string)$row['created_at']);
-        $row['status_text'] = (string)$row['status'] === 'SUCCESS' ? '✅ Отправлено' : '❌ Не отправлено';
+        $row['status_text'] = (string)$row['status'] === 'SUCCESS' ? '✅ Принято SMTP' : '❌ Не принято SMTP';
         return $row;
     }, $statement->fetchAll());
     return ['ok' => true, 'logs' => $logs];
@@ -1174,7 +1179,7 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
         foreach ($warehouses as $warehouse) {
             $form = createStockNotification($pdo, $warehouse, $eventBatches, 'expiry_' . (int)$daysLeft, $subject, publicBaseUrl());
             $body = expiryNotificationBody($eventBatches, (int)$daysLeft) . "\n\n" . stockFillInstructionText($form);
-            sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)]);
+            sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)], ['warehouse_name' => (string)$warehouse['name']]);
             $sentEvents[] = [
                 'days_left' => (int)$daysLeft,
                 'warehouse_id' => (int)$warehouse['id'],
@@ -1230,7 +1235,7 @@ function sendDueOverdueStockCheckNotifications(PDO $pdo): void
             $body = "Просьба заполнить остатки по данному товара.\n\n" . (string)$form['url'];
             $emailError = '';
             try {
-                sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings);
+                sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings, [], ['warehouse_name' => (string)$warehouse['name']]);
             } catch (Throwable $error) {
                 $emailError = $error->getMessage();
             }
@@ -1314,7 +1319,7 @@ function sendTestNotification(PDO $pdo, array $payload): array
     $form = createStockNotification($pdo, $warehouse, [$batch], 'test_expiry_' . $daysLeft, $subject, publicBaseUrl());
     $body .= "\n\n" . stockFillInstructionText($form);
     try {
-        sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings);
+        sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings, [], ['warehouse_name' => (string)$warehouse['name']]);
         writeLog($pdo, 'test_notification_sent', [
             'emails' => $emails,
             'article' => $batch['article'] ?? '',
@@ -1335,6 +1340,22 @@ function sendTestNotification(PDO $pdo, array $payload): array
     return ['ok' => true, 'message' => 'Тестовое уведомление отправлено.'];
 }
 
+/** Отправляет диагностическое письмо на один явно выбранный адрес. */
+function testEmailDelivery(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $email = trim((string)($payload['email'] ?? ''));
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Укажите корректный email для проверки доставки.');
+    }
+    $subject = 'Проверка доставки email — Сроки годности';
+    $body = "Это диагностическое письмо сервиса «Сроки годности».\n\nАдрес проверки: {$email}\nВремя UTC: " . gmdate('Y-m-d H:i:s');
+    $result = sendNotificationEmail($pdo, [$email], $subject, $body, getRawSettings($pdo), [], [
+        'notification_type' => 'Проверка доставки email', 'recipient_name' => $email,
+    ]);
+    return ['ok' => true, 'message' => 'SMTP-сервер принял письмо. Это ещё не подтверждает доставку в ящик.', 'delivery' => $result];
+}
+
 
 function sendTestStockFillNotification(PDO $pdo, array $payload): array
 {
@@ -1351,7 +1372,7 @@ function sendTestStockFillNotification(PDO $pdo, array $payload): array
     $subject = expiryNotificationSubject((int)$event['days_left']);
     $form = createStockNotification($pdo, $warehouse, $event['batches'], 'test_stock_fill_' . (int)$event['days_left'], $subject, publicBaseUrl());
     $body = expiryNotificationBody($event['batches'], (int)$event['days_left']) . "\n\n" . stockFillInstructionText($form);
-    sendNotificationEmail($pdo, [$email], $subject, $body, $settings);
+    sendNotificationEmail($pdo, [$email], $subject, $body, $settings, [], ['warehouse_name' => (string)$warehouse['name']]);
     writeLog($pdo, 'test_stock_fill_notification_sent', [
         'email' => $email,
         'warehouse_id' => (int)$warehouse['id'],
@@ -1626,6 +1647,8 @@ function sendStockReminderForWarehouse(PDO $pdo, array $event, array $warehouse)
     try {
         sendNotificationEmail($pdo, $form['emails'], $subject, $body, getRawSettings($pdo), [], [
             'notification_type' => 'Повторное уведомление ' . $reminderNumber,
+            'subject_base' => 'Повторное уведомление ' . $reminderNumber,
+            'warehouse_name' => (string)$warehouse['name'],
             'event_key' => $event['event_key'], 'event_date' => $event['event_date'],
             'warehouse_id' => $warehouseId, 'reminder_number' => $reminderNumber,
         ]);
@@ -2004,7 +2027,10 @@ function sendPurchaseNotificationForEvent(PDO $pdo, array $event, int $eventDays
                 'distribution_type' => !empty($item['matched_recipient']) ? 'персональное' : 'добавлено в раздел «Товары без определённого менеджера»',
                 'distribution_reason' => (string)$item['distribution_reason'],
             ], array_merge($assigned, $unassigned));
-            sendNotificationEmail($pdo, [(string)$recipient['email']], $subject, $body, getRawSettings($pdo), [], ['distribution' => $distributionDetails]);
+            sendNotificationEmail($pdo, [(string)$recipient['email']], $subject, $body, getRawSettings($pdo), [], [
+                'recipient_name' => trim((string)($recipient['full_name'] ?? '')) ?: (string)$recipient['email'],
+                'distribution' => $distributionDetails,
+            ]);
             updatePurchaseEventRecipientResult($pdo, $event, $recipientId, 'SUCCESS', '');
             updatePurchaseDistributionSendResult($pdo, $event, (string)$recipient['email'], 'SUCCESS', '');
         } catch (Throwable $error) {
@@ -2362,12 +2388,12 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
 function downloadPurchaseEventXls(PDO $pdo, string $token): array
 {
     $summary = getPurchaseEventSummary($pdo, $token);
-    $headers = ['Раздел', 'Код', 'Наименование', 'Менеджер', 'Общий остаток', 'Статус'];
+    $headers = ['Раздел', "Код\nМенеджер", 'Наименование', 'Общий остаток', 'Статус'];
     foreach ($summary['warehouses'] as $warehouse) $headers[] = (string)$warehouse['name'];
     $rows = [$headers];
     foreach ($summary['rows'] as $row) {
-        $managerText = trim((string)$row['manager_value'] . ((string)$row['manager_email'] !== '' ? "\n" . (string)$row['manager_email'] : ''));
-        $values = [$row['section'] === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары', $row['code'], $row['name'], $managerText, $row['total'], $row['status']];
+        $codeAndManager = (string)$row['code'] . "\n" . ((string)$row['manager_value'] !== '' ? (string)$row['manager_value'] : '—');
+        $values = [$row['section'] === 'unassigned' ? 'Товары без определённого менеджера' : 'Ваши товары', $codeAndManager, $row['name'], $row['total'], $row['status']];
         foreach ($summary['warehouses'] as $warehouse) $values[] = $row['quantities'][(string)$warehouse['id']] ?? '';
         $rows[] = $values;
     }
@@ -2647,7 +2673,7 @@ function normalizeSettings(array $settings): array
         'smtp_password' => '',
         'smtp_password_set' => $smtpPassword !== '',
         'smtp_from_email' => (string)($settings['smtp_from_email'] ?? SENDER_EMAIL),
-        'smtp_from_name' => (string)($settings['smtp_from_name'] ?? 'Сроки годности'),
+        'smtp_from_name' => notificationEmailFromName(),
         'notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
         'auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? '23:50'), '23:50'),
         'auto_import' => getAutoImportInfo($GLOBALS['pdo_for_settings_info'] ?? null),
@@ -2703,7 +2729,7 @@ function saveSettings(PDO $pdo, array $settings): array
         ':smtp_username' => trim((string)($settings['smtp_username'] ?? $current['smtp_username'] ?? SENDER_EMAIL)),
         ':smtp_password' => $smtpPassword,
         ':smtp_from_email' => trim((string)($settings['smtp_from_email'] ?? $current['smtp_from_email'] ?? SENDER_EMAIL)),
-        ':smtp_from_name' => trim((string)($settings['smtp_from_name'] ?? $current['smtp_from_name'] ?? 'Сроки годности')),
+        ':smtp_from_name' => notificationEmailFromName(),
         ':notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? $current['notification_time'] ?? '09:00')),
         ':auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? $current['auto_import_time'] ?? '23:50'), '23:50'),
         ':missing_filter_email' => implode(',', splitEmails((string)($settings['missing_filter_email'] ?? $current['missing_filter_email'] ?? ''))),
