@@ -391,6 +391,21 @@ function cleanupEmailNotificationLog(PDO $pdo): void
 function getProtectedEmailNotificationLogs(PDO $pdo, array $payload): array
 {
     assertSettingsPassword($payload);
+    [$sql, $params] = buildEmailNotificationLogQuery($payload);
+    $statement = $pdo->prepare($sql);
+    $statement->execute($params);
+    $logs = array_map(static function (array $row): array {
+        $row['recipients'] = json_decode((string)$row['recipients'], true) ?: [];
+        $row['distribution_details'] = json_decode((string)($row['distribution_details'] ?? ''), true) ?: [];
+        $row['date'] = formatMoscowDateTime((string)$row['created_at']);
+        $row['status_text'] = (string)$row['status'] === 'SUCCESS' ? '✅ Принято SMTP' : '❌ Не принято SMTP';
+        return $row;
+    }, $statement->fetchAll());
+    return ['ok' => true, 'logs' => $logs];
+}
+
+function buildEmailNotificationLogQuery(array $payload): array
+{
     $where = [];
     $params = [];
     $status = strtoupper(trim((string)($payload['status'] ?? '')));
@@ -410,25 +425,23 @@ function getProtectedEmailNotificationLogs(PDO $pdo, array $payload): array
     }
     $search = trim((string)($payload['search'] ?? ''));
     if ($search !== '') {
-        $where[] = '(subject LIKE :search OR notification_type LIKE :search OR CAST(recipients AS CHAR) LIKE :search OR error_reason LIKE :search)';
-        $params[':search'] = '%' . $search . '%';
+        $where[] = '(subject LIKE :search_subject
+            OR notification_type LIKE :search_type
+            OR CAST(recipients AS CHAR) LIKE :search_recipient
+            OR error_reason LIKE :search_error)';
+        $searchPattern = '%' . $search . '%';
+        $params[':search_subject'] = $searchPattern;
+        $params[':search_type'] = $searchPattern;
+        $params[':search_recipient'] = $searchPattern;
+        $params[':search_error'] = $searchPattern;
     }
     $direction = strtoupper((string)($payload['direction'] ?? 'DESC')) === 'ASC' ? 'ASC' : 'DESC';
-    $statement = $pdo->prepare(
-        'SELECT id, created_at, notification_type, subject, recipients, status, smtp_code, diagnostic_code,
-                error_reason, smtp_response, message_id, duration_ms, distribution_details, message_headers, message_body
-         FROM email_notification_log' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') .
-        ' ORDER BY created_at ' . $direction . ', id ' . $direction . ' LIMIT 500'
-    );
-    $statement->execute($params);
-    $logs = array_map(static function (array $row): array {
-        $row['recipients'] = json_decode((string)$row['recipients'], true) ?: [];
-        $row['distribution_details'] = json_decode((string)($row['distribution_details'] ?? ''), true) ?: [];
-        $row['date'] = formatMoscowDateTime((string)$row['created_at']);
-        $row['status_text'] = (string)$row['status'] === 'SUCCESS' ? '✅ Принято SMTP' : '❌ Не принято SMTP';
-        return $row;
-    }, $statement->fetchAll());
-    return ['ok' => true, 'logs' => $logs];
+    $sql = 'SELECT id, created_at, notification_type, subject, recipients, status, smtp_code, diagnostic_code,
+                   error_reason, smtp_response, message_id, duration_ms, distribution_details, message_headers, message_body
+            FROM email_notification_log' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') .
+        ' ORDER BY created_at ' . $direction . ', id ' . $direction . ' LIMIT 500';
+
+    return [$sql, $params];
 }
 
 function retryEmailNotification(PDO $pdo, array $payload): array
@@ -2215,16 +2228,23 @@ function savePurchaseEventDistributionAudit(PDO $pdo, array $event, array $distr
 
 function updatePurchaseDistributionSendResult(PDO $pdo, array $event, string $email, string $status, string $error): void
 {
-    $statement = $pdo->prepare(
-        'UPDATE purchase_event_distribution_log
-         SET send_status = CASE WHEN send_status = \'ERROR\' OR :status = \'ERROR\' THEN \'ERROR\' ELSE \'SUCCESS\' END,
-             smtp_error = CASE WHEN :status = \'ERROR\' THEN :error ELSE smtp_error END
-         WHERE event_key = :event_key AND event_date = :event_date AND CAST(actual_recipients AS CHAR) LIKE :email'
-    );
-    $statement->execute([
-        ':status' => $status, ':error' => $error !== '' ? $error : null,
+    [$sql, $params] = buildPurchaseDistributionSendResultQuery($event, $email, $status, $error);
+    $statement = $pdo->prepare($sql);
+    $statement->execute($params);
+}
+
+function buildPurchaseDistributionSendResultQuery(array $event, string $email, string $status, string $error): array
+{
+    $sql = 'UPDATE purchase_event_distribution_log
+         SET send_status = CASE WHEN send_status = \'ERROR\' OR :send_status = \'ERROR\' THEN \'ERROR\' ELSE \'SUCCESS\' END,
+             smtp_error = CASE WHEN :error_status = \'ERROR\' THEN :error ELSE smtp_error END
+         WHERE event_key = :event_key AND event_date = :event_date AND CAST(actual_recipients AS CHAR) LIKE :email';
+    $params = [
+        ':send_status' => $status, ':error_status' => $status, ':error' => $error !== '' ? $error : null,
         ':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':email' => '%' . $email . '%',
-    ]);
+    ];
+
+    return [$sql, $params];
 }
 
 function getPurchaseEventSummary(PDO $pdo, string $token): array
