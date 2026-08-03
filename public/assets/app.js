@@ -38,7 +38,7 @@ const state = {
     editingPurchaseRecipientId: null,
 };
 
-const statusOptions = ['В наличии', 'Реализована', 'Списана', 'Нет в наличии'];
+const statusOptions = ['В наличии', 'Перемещено на СБ', 'Нет в наличии'];
 
 const qs = (selector) => document.querySelector(selector);
 const qsa = (selector) => [...document.querySelectorAll(selector)];
@@ -648,13 +648,13 @@ function sortRegistryRows() {
     state.filteredBatches.sort((left, right) => {
         const terminalStatusRank = (status) => {
             if (status === 'Нет в наличии') return 2;
-            if (status === 'Списана') return 1;
+            if (status === 'Перемещено на СБ') return 1;
             return 0;
         };
         const leftStatusRank = terminalStatusRank(left.status);
         const rightStatusRank = terminalStatusRank(right.status);
         if (leftStatusRank !== rightStatusRank) {
-            // Партии без наличия и списанные партии всегда показываем в конце реестра независимо от выбранной сортировки.
+            // Партии без наличия и перемещённые на СБ всегда показываем в конце реестра независимо от выбранной сортировки.
             return leftStatusRank - rightStatusRank;
         }
 
@@ -756,7 +756,7 @@ function showBatchStockStatusControls() {
         return;
     }
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
         openWriteOffPasswordDialog();
         return;
     }
@@ -913,14 +913,14 @@ async function deleteBatch(id) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
         return;
     }
-    if (!confirm('Уверены, что хотите списать/удалить партию безвозвратно?')) return;
+    if (!confirm('Уверены, что хотите удалить партию безвозвратно?')) return;
 
     try {
         await api('delete', { id, write_off_password: state.writeOffPassword });
-        showToast('Партия списана/удалена.');
+        showToast('Партия удалена.');
         await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
     } catch (error) {
         showToast(error.message, true);
@@ -931,7 +931,7 @@ async function deleteSelectedBatches() {
     const ids = [...state.selectedBatchIds];
     if (!ids.length) return;
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
         return;
     }
     if (!confirm(`Удалить выбранные партии (${ids.length}) безвозвратно?`)) return;
@@ -1218,7 +1218,7 @@ async function saveSelectedStockBatchStatus() {
         return;
     }
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
         openWriteOffPasswordDialog();
         return;
     }
