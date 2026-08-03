@@ -87,11 +87,12 @@ function fetchVrCatalogProductsByArticles(array $articles, ?PDO $pdo = null): ar
 
 /**
  * Для специальных кодов каталог иногда хранит менеджера только у базового товара.
- * Оригинальные и базовые артикулы отправляются одним пакетным запросом, после чего
- * менеджер базового товара подставляется только при пустом менеджере варианта.
+ * Сначала каталог запрашивается по исходным артикулам. Базовые артикулы отправляются
+ * отдельным запросом только для специальных товаров, у которых менеджер не найден.
  */
-function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = null): array
+function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = null, ?callable $requestProducts = null): array
 {
+    $requestProducts ??= static fn (array $requestedArticles): array => fetchVrCatalogProductsByArticles($requestedArticles, $pdo);
     $articles = array_values(array_unique(array_filter(array_map(static fn ($value): string => trim((string)$value), $articles))));
     $fallbackByArticle = [];
     foreach ($articles as $article) {
@@ -99,50 +100,72 @@ function fetchVrCatalogProductsWithManagerFallback(array $articles, ?PDO $pdo = 
         if ($fallback !== '') $fallbackByArticle[$article] = $fallback;
     }
 
-    $requestedArticles = array_values(array_unique(array_merge($articles, array_values($fallbackByArticle))));
-    $products = fetchVrCatalogProductsByArticles($requestedArticles, $pdo);
+    $products = $requestProducts($articles);
     $byArticle = [];
     foreach ($products as $product) $byArticle[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
+
+    $unresolvedFallbackArticles = [];
+    foreach ($fallbackByArticle as $article => $fallbackArticle) {
+        $articleProducts = $byArticle[vrCatalogArticleLookupKey($article)] ?? [];
+        if (vrCatalogProductWithUnambiguousManager($articleProducts) === null) {
+            $unresolvedFallbackArticles[] = $fallbackArticle;
+        }
+    }
+
+    // Важно выполнять именно повторный поиск: endpoint каталога может вернуть
+    // только результаты для исходных кодов из первого пакетного запроса.
+    $fallbackByLookupKey = [];
+    if ($unresolvedFallbackArticles) {
+        $fallbackProducts = $requestProducts(array_values(array_unique($unresolvedFallbackArticles)));
+        foreach ($fallbackProducts as $product) {
+            $fallbackByLookupKey[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
+        }
+    }
 
     $result = [];
     foreach ($articles as $article) {
         $articleProducts = $byArticle[vrCatalogArticleLookupKey($article)] ?? [];
         $fallbackArticle = $fallbackByArticle[$article] ?? '';
-        $fallbackProducts = $fallbackArticle !== '' ? ($byArticle[vrCatalogArticleLookupKey($fallbackArticle)] ?? []) : [];
+        $fallbackProducts = $fallbackArticle !== '' ? ($fallbackByLookupKey[vrCatalogArticleLookupKey($fallbackArticle)] ?? []) : [];
         $fallbackProduct = vrCatalogProductWithUnambiguousManager($fallbackProducts);
-        // Некоторые версии каталога не возвращают запись варианта вообще. В этом
-        // случае создаём результат для исходного кода из однозначного базового товара.
-        if (!$articleProducts && $fallbackProduct !== null) {
-            $fallbackManager = vrCatalogManagerValue($fallbackProduct);
-            if ($fallbackManager['exists'] && $fallbackManager['value'] !== '') {
-                $product = $fallbackProduct;
-                $product['article'] = $article;
-                $product['found'] = true;
-                $product['manager_name'] = $fallbackManager['value'];
-                $product['manager_source_article'] = $fallbackArticle;
-                $articleProducts[] = $product;
-            }
-        }
-        foreach ($articleProducts as $product) {
-            $manager = vrCatalogManagerValue($product);
-            if ((!$manager['exists'] || $manager['value'] === '') && $fallbackArticle !== '') {
-                if ($fallbackProduct !== null) {
-                    $fallbackManager = vrCatalogManagerValue($fallbackProduct);
-                    if ($fallbackManager['exists'] && $fallbackManager['value'] !== '') {
-                        // Официальное поле имеет приоритет над legacy-структурами.
-                        // Базовый товар подтверждает существование варианта для целей
-                        // распределения и отображения менеджера в сводной таблице.
-                        $product['found'] = true;
-                        $product['manager_name'] = $fallbackManager['value'];
-                        $product['manager_source_article'] = $fallbackArticle;
-                    }
-                }
-            }
+        foreach (vrCatalogApplyManagerFallback($article, $articleProducts, $fallbackArticle, $fallbackProduct) as $product) {
             $result[] = $product;
         }
     }
 
     return $result;
+}
+
+/**
+ * Подставляет менеджера базового товара, не перезаписывая менеджера специального кода.
+ * Отдельная функция делает одинаковое правило проверяемым без обращения к каталогу.
+ */
+function vrCatalogApplyManagerFallback(string $article, array $products, string $fallbackArticle, ?array $fallbackProduct): array
+{
+    if ($fallbackArticle === '' || $fallbackProduct === null) return $products;
+
+    $fallbackManager = vrCatalogManagerValue($fallbackProduct);
+    if (!$fallbackManager['exists'] || $fallbackManager['value'] === '') return $products;
+
+    // Каталог может не вернуть строку специального кода. Для распределения партия
+    // всё равно существует, поэтому связываем найденный базовый товар с её кодом.
+    if (!$products) {
+        $product = $fallbackProduct;
+        $product['article'] = $article;
+        $products[] = $product;
+    }
+
+    return array_map(static function (array $product) use ($fallbackArticle, $fallbackManager): array {
+        $manager = vrCatalogManagerValue($product);
+        if ($manager['exists'] && $manager['value'] !== '') return $product;
+
+        // Официальное поле имеет приоритет над legacy-структурами и используется
+        // как при распределении, так и при построении сводной таблицы.
+        $product['found'] = true;
+        $product['manager_name'] = $fallbackManager['value'];
+        $product['manager_source_article'] = $fallbackArticle;
+        return $product;
+    }, $products);
 }
 
 function vrCatalogManagerFallbackArticle(string $article): string
