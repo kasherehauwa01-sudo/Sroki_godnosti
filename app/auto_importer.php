@@ -618,12 +618,11 @@ function notifyMissingExpiryFilterProducts(PDO $pdo, array $codes): array
         . implode("\n", $codes);
 
     try {
-        sendNotificationEmail(
+        enqueueNotificationEmails(
             $pdo,
             $recipients,
             'Товары без фильтра "Срок годности"',
             $body,
-            $settings,
             [missingExpiryFilterCodesXlsAttachment($codes)],
             ['recipient_name' => 'Все получатели']
         );

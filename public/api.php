@@ -467,16 +467,15 @@ function retryEmailNotification(PDO $pdo, array $payload): array
         'content_type' => (string)($attachment['content_type'] ?? 'application/octet-stream'),
         'content' => base64_decode((string)($attachment['content_base64'] ?? ''), true) ?: '',
     ], (array)($retry['attachments'] ?? []));
-    sendNotificationEmail(
+    enqueueNotificationEmails(
         $pdo,
         (array)($retry['emails'] ?? []),
         (string)($retry['subject'] ?? ''),
         (string)($retry['body'] ?? ''),
-        getRawSettings($pdo),
         $attachments,
         (array)($retry['context'] ?? [])
     );
-    return ['ok' => true, 'message' => 'Повторная отправка выполнена.'];
+    return ['ok' => true, 'message' => 'Повторная отправка поставлена в очередь.'];
 }
 
 function ensureBatchesSchema(PDO $pdo): void
@@ -1210,7 +1209,7 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
         foreach ($warehouses as $warehouse) {
             $form = createStockNotification($pdo, $warehouse, $eventBatches, 'expiry_' . (int)$daysLeft, $subject, publicBaseUrl());
             $body = expiryNotificationBody($eventBatches, (int)$daysLeft) . "\n\n" . stockFillInstructionText($form);
-            sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)], ['warehouse_name' => (string)$warehouse['name']]);
+            enqueueNotificationEmails($pdo, $form['emails'], $subject, $body, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)], ['warehouse_name' => (string)$warehouse['name']]);
             $sentEvents[] = [
                 'days_left' => (int)$daysLeft,
                 'warehouse_id' => (int)$warehouse['id'],
@@ -1266,7 +1265,7 @@ function sendDueOverdueStockCheckNotifications(PDO $pdo): void
             $body = "Просьба заполнить остатки по данному товара.\n\n" . (string)$form['url'];
             $emailError = '';
             try {
-                sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings, [], ['warehouse_name' => (string)$warehouse['name']]);
+                enqueueNotificationEmails($pdo, $form['emails'], $subject, $body, [], ['warehouse_name' => (string)$warehouse['name']]);
             } catch (Throwable $error) {
                 $emailError = $error->getMessage();
             }
@@ -1350,7 +1349,7 @@ function sendTestNotification(PDO $pdo, array $payload): array
     $form = createStockNotification($pdo, $warehouse, [$batch], 'test_expiry_' . $daysLeft, $subject, publicBaseUrl());
     $body .= "\n\n" . stockFillInstructionText($form);
     try {
-        sendNotificationEmail($pdo, $form['emails'], $subject, $body, $settings, [], ['warehouse_name' => (string)$warehouse['name']]);
+        enqueueNotificationEmails($pdo, $form['emails'], $subject, $body, [], ['warehouse_name' => (string)$warehouse['name']]);
         writeLog($pdo, 'test_notification_sent', [
             'emails' => $emails,
             'article' => $batch['article'] ?? '',
@@ -1368,7 +1367,23 @@ function sendTestNotification(PDO $pdo, array $payload): array
         throw $error;
     }
 
-    return ['ok' => true, 'message' => 'Тестовое уведомление отправлено.'];
+    return ['ok' => true, 'message' => 'Тестовое уведомление поставлено в очередь.'];
+}
+
+/** Отправляет диагностическое письмо на один явно выбранный адрес. */
+function testEmailDelivery(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $email = trim((string)($payload['email'] ?? ''));
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Укажите корректный email для проверки доставки.');
+    }
+    $subject = 'Проверка доставки email — Сроки годности';
+    $body = "Это диагностическое письмо сервиса «Сроки годности».\n\nАдрес проверки: {$email}\nВремя UTC: " . gmdate('Y-m-d H:i:s');
+    $result = sendNotificationEmail($pdo, [$email], $subject, $body, getRawSettings($pdo), [], [
+        'notification_type' => 'Проверка доставки email', 'recipient_name' => $email,
+    ]);
+    return ['ok' => true, 'message' => 'SMTP-сервер принял письмо. Это ещё не подтверждает доставку в ящик.', 'delivery' => $result];
 }
 
 /** Отправляет диагностическое письмо на один явно выбранный адрес. */
@@ -1676,7 +1691,7 @@ function sendStockReminderForWarehouse(PDO $pdo, array $event, array $warehouse)
     $subject = 'Не заполнены остатки.';
     $body = "Остатки не были заполнены в установленный срок. Просим в кратчайшие сроки внести актуальные данные и в дальнейшем соблюдать установленные сроки заполнения.\n\n" . $form['url'];
     try {
-        sendNotificationEmail($pdo, $form['emails'], $subject, $body, getRawSettings($pdo), [], [
+        enqueueNotificationEmails($pdo, $form['emails'], $subject, $body, [], [
             'notification_type' => 'Повторное уведомление ' . $reminderNumber,
             'subject_base' => 'Повторное уведомление ' . $reminderNumber,
             'warehouse_name' => (string)$warehouse['name'],
@@ -2058,7 +2073,7 @@ function sendPurchaseNotificationForEvent(PDO $pdo, array $event, int $eventDays
                 'distribution_type' => !empty($item['matched_recipient']) ? 'персональное' : 'добавлено в раздел «Товары без определённого менеджера»',
                 'distribution_reason' => (string)$item['distribution_reason'],
             ], array_merge($assigned, $unassigned));
-            sendNotificationEmail($pdo, [(string)$recipient['email']], $subject, $body, getRawSettings($pdo), [], [
+            enqueueNotificationEmails($pdo, [(string)$recipient['email']], $subject, $body, [], [
                 'recipient_name' => trim((string)($recipient['full_name'] ?? '')) ?: (string)$recipient['email'],
                 'distribution' => $distributionDetails,
             ]);
@@ -2244,6 +2259,15 @@ function updatePurchaseDistributionSendResult(PDO $pdo, array $event, string $em
     ];
 
     return [$sql, $params];
+}
+
+/** В native prepare каждое вхождение должно иметь собственный placeholder. */
+function purchaseDistributionSendResultSql(): string
+{
+    return 'UPDATE purchase_event_distribution_log
+            SET send_status = CASE WHEN send_status = \'ERROR\' OR :status_current = \'ERROR\' THEN \'ERROR\' ELSE \'SUCCESS\' END,
+                smtp_error = CASE WHEN :status_error = \'ERROR\' THEN :error ELSE smtp_error END
+            WHERE event_key = :event_key AND event_date = :event_date AND CAST(actual_recipients AS CHAR) LIKE :email';
 }
 
 /** В native prepare каждое вхождение должно иметь собственный placeholder. */

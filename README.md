@@ -370,3 +370,12 @@ VRCATALOG_REQUEST_TIMEOUT=10
 Оба запроса включают карточки с нулевым остатком в catalogvr.
 
 Диагностика соединения доступна через `GET api.php?action=catalog_health`.
+
+### Очередь email-уведомлений
+
+Событийные письма складам ставятся в очередь по одному получателю с интервалом
+3 минуты. Для обработки очереди добавьте ежеминутный cron:
+
+```cron
+* * * * * cd /var/www/html/vr/sroki_godnosti && php scripts/send_email_queue.php
+```

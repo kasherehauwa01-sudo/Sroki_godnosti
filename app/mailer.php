@@ -104,6 +104,118 @@ function normalizeSmtpRecipients(array $emails): array
     return array_values($result);
 }
 
+/** Возвращает расписание с фиксированным интервалом между отдельными письмами. */
+function notificationQueueScheduleTimes(int $count, DateTimeImmutable $first, int $intervalSeconds = 180): array
+{
+    $times = [];
+    for ($index = 0; $index < $count; $index++) {
+        $times[] = $first->modify('+' . ($index * $intervalSeconds) . ' seconds');
+    }
+    return $times;
+}
+
+function ensureEmailNotificationQueueSchema(PDO $pdo): void
+{
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS email_notification_queue (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            scheduled_at DATETIME NOT NULL,
+            started_at DATETIME NULL,
+            finished_at DATETIME NULL,
+            recipient VARCHAR(320) NOT NULL,
+            subject VARCHAR(998) NOT NULL,
+            body LONGTEXT NOT NULL,
+            attachments LONGTEXT NULL,
+            context JSON NULL,
+            status ENUM('PENDING', 'PROCESSING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
+            error_message TEXT NULL,
+            PRIMARY KEY (id),
+            INDEX idx_email_queue_due (status, scheduled_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+}
+
+/** Ставит отдельное письмо каждому адресату с интервалом не менее трёх минут. */
+function enqueueNotificationEmails(PDO $pdo, array $emails, string $subject, string $body, array $attachments = [], array $context = []): array
+{
+    ensureEmailNotificationQueueSchema($pdo);
+    $emails = normalizeSmtpRecipients($emails);
+    if ((int)$pdo->query("SELECT GET_LOCK('sroki_godnosti_email_queue', 10)")->fetchColumn() !== 1) {
+        throw new RuntimeException('Не удалось заблокировать очередь email для планирования.');
+    }
+    try {
+        $lastScheduled = (string)($pdo->query("SELECT MAX(scheduled_at) FROM email_notification_queue WHERE status IN ('PENDING', 'PROCESSING')")->fetchColumn() ?: '');
+        $databaseNow = (string)$pdo->query("SELECT DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s')")->fetchColumn();
+        $now = new DateTimeImmutable($databaseNow);
+        $first = $lastScheduled !== '' ? (new DateTimeImmutable($lastScheduled))->modify('+3 minutes') : $now;
+        if ($first < $now) $first = $now;
+        $schedule = notificationQueueScheduleTimes(count($emails), $first);
+        $statement = $pdo->prepare(
+            "INSERT INTO email_notification_queue (scheduled_at, recipient, subject, body, attachments, context)
+             VALUES (:scheduled_at, :recipient, :subject, :body, :attachments, :context)"
+        );
+        $ids = [];
+        foreach ($emails as $index => $email) {
+            $statement->execute([
+                ':scheduled_at' => $schedule[$index]->format('Y-m-d H:i:s'),
+                ':recipient' => $email,
+                ':subject' => $subject,
+                ':body' => $body,
+                ':attachments' => json_encode(array_map(static fn (array $attachment): array => [
+                    'filename' => (string)($attachment['filename'] ?? 'attachment'),
+                    'content_type' => (string)($attachment['content_type'] ?? 'application/octet-stream'),
+                    'content_base64' => base64_encode((string)($attachment['content'] ?? '')),
+                ], $attachments), JSON_UNESCAPED_UNICODE),
+                ':context' => json_encode($context, JSON_UNESCAPED_UNICODE),
+            ]);
+            $ids[] = (int)$pdo->lastInsertId();
+        }
+        return ['ids' => $ids, 'scheduled_at' => array_map(static fn (DateTimeImmutable $time): string => $time->format('Y-m-d H:i:s'), $schedule)];
+    } finally {
+        $pdo->query("SELECT RELEASE_LOCK('sroki_godnosti_email_queue')");
+    }
+}
+
+/** Отправляет одно наступившее письмо; вызывается cron каждую минуту. */
+function processDueNotificationEmailQueue(PDO $pdo, array $settings): bool
+{
+    ensureEmailNotificationQueueSchema($pdo);
+    $pdo->exec("UPDATE email_notification_queue SET status = 'PENDING', started_at = NULL WHERE status = 'PROCESSING' AND started_at < DATE_SUB(NOW(), INTERVAL 15 MINUTE)");
+    $pdo->beginTransaction();
+    try {
+        $row = $pdo->query("SELECT * FROM email_notification_queue WHERE status = 'PENDING' AND scheduled_at <= NOW() ORDER BY scheduled_at, id LIMIT 1 FOR UPDATE")->fetch();
+        if (!$row) {
+            $pdo->commit();
+            return false;
+        }
+        $pdo->prepare("UPDATE email_notification_queue SET status = 'PROCESSING', started_at = NOW() WHERE id = :id")
+            ->execute([':id' => (int)$row['id']]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
+
+    $storedAttachments = json_decode((string)($row['attachments'] ?? ''), true);
+    $attachments = array_map(static fn (array $attachment): array => [
+        'filename' => (string)($attachment['filename'] ?? 'attachment'),
+        'content_type' => (string)($attachment['content_type'] ?? 'application/octet-stream'),
+        'content' => base64_decode((string)($attachment['content_base64'] ?? ''), true) ?: '',
+    ], is_array($storedAttachments) ? $storedAttachments : []);
+    $context = json_decode((string)($row['context'] ?? ''), true);
+    try {
+        sendNotificationEmail($pdo, [(string)$row['recipient']], (string)$row['subject'], (string)$row['body'], $settings, $attachments, is_array($context) ? $context : []);
+        $pdo->prepare("UPDATE email_notification_queue SET status = 'SUCCESS', finished_at = NOW(), error_message = NULL WHERE id = :id")
+            ->execute([':id' => (int)$row['id']]);
+    } catch (Throwable $error) {
+        $pdo->prepare("UPDATE email_notification_queue SET status = 'ERROR', finished_at = NOW(), error_message = :error WHERE id = :id")
+            ->execute([':id' => (int)$row['id'], ':error' => $error->getMessage()]);
+        throw $error;
+    }
+    return true;
+}
+
 final class SmtpDeliveryException extends RuntimeException
 {
     public function __construct(public readonly int $smtpCode, public readonly string $smtpResponse, public readonly string $smtpTranscript = '')

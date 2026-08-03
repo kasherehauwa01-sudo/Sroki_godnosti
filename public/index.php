@@ -115,8 +115,11 @@ declare(strict_types=1);
 
         <section class="panel" id="tab-notifications">
             <div class="section-heading">
-                <h2>Уведомления</h2>
-                <p>События по срокам годности и прогресс заполнения остатков складами.</p>
+                <div>
+                    <h2>Уведомления</h2>
+                    <p>События по срокам годности и прогресс заполнения остатков складами.</p>
+                </div>
+                <button class="ghost-button" id="markAllStockEventsReadButton" type="button">Пометить все как прочитанное</button>
             </div>
             <div class="table-wrap card">
                 <table>

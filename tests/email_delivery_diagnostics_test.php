@@ -15,6 +15,13 @@ assertEmailDiagnosticsSame(
     'Для всех уведомлений должно использоваться утверждённое имя отправителя'
 );
 
+$queueTimes = notificationQueueScheduleTimes(3, new DateTimeImmutable('2026-08-03 12:00:00'));
+assertEmailDiagnosticsSame(
+    ['12:00', '12:03', '12:06'],
+    array_map(static fn (DateTimeImmutable $time): string => $time->format('H:i'), $queueTimes),
+    'Письма в очереди должны отправляться поочерёдно с интервалом три минуты'
+);
+
 $problemRecipients = [
     'az@volgorost.ru',
     'kvr@volgorost.ru',

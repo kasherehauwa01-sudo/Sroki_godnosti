@@ -1159,11 +1159,26 @@ function markStockEventViewed(notification, row) {
     row?.classList.remove('stock-event-unread');
 }
 
+function markAllStockEventsViewed() {
+    state.stockBatchNotifications.forEach((notification) => {
+        const changedAt = String(notification.last_stock_at || '');
+        if (changedAt !== '') state.stockEventViews[stockEventViewKey(notification)] = changedAt;
+    });
+    try {
+        window.localStorage.setItem(STOCK_EVENT_VIEWS_KEY, JSON.stringify(state.stockEventViews));
+    } catch {
+        // Состояние всё равно обновлено для текущей страницы.
+    }
+    renderStockBatchNotifications();
+}
+
 function renderStockBatchNotifications() {
     const body = qs('#stockBatchNotificationsBody');
     if (!body) return;
     const hasUnreadChanges = state.stockBatchNotifications.some(stockEventHasUnreadChanges);
     qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnreadChanges);
+    const markAllButton = qs('#markAllStockEventsReadButton');
+    if (markAllButton) markAllButton.disabled = !hasUnreadChanges;
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
         <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification ' : ''}${stockEventHasUnreadChanges(notification) ? 'stock-event-unread' : ''}" data-stock-event-key="${escapeHtml(stockEventViewKey(notification))}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
             <td>${notification.event_key === 'overdue_stock_check' ? 'Проверка наличия товара' : `${Number(notification.event_days || 0)} дней`}</td>
@@ -2101,7 +2116,7 @@ async function retryEmailNotification() {
         await api('email_notification_retry', { settings_password: state.settingsPassword, id: state.selectedEmailNotificationLogId });
         closeEmailNotificationLogDetails();
         await showNotificationLogs();
-        showToast('Письмо отправлено повторно. В журнал добавлена новая запись.');
+        showToast('Письмо поставлено в очередь повторной отправки.');
     } catch (error) {
         showToast(error.message, true);
         await showNotificationLogs();
@@ -2284,6 +2299,7 @@ async function importRowsInChunks(rows, chunkSize = 100) {
 }
 
 function bindEvents() {
+    qs('#markAllStockEventsReadButton')?.addEventListener('click', markAllStockEventsViewed);
     bindPurchaseRecipientEvents();
 
     qsa('.tab').forEach((button) => button.addEventListener('click', async () => {

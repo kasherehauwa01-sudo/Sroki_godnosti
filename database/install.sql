@@ -121,6 +121,23 @@ CREATE TABLE IF NOT EXISTS email_notification_log (
     INDEX idx_email_log_type (notification_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS email_notification_queue (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    scheduled_at DATETIME NOT NULL,
+    started_at DATETIME NULL,
+    finished_at DATETIME NULL,
+    recipient VARCHAR(320) NOT NULL,
+    subject VARCHAR(998) NOT NULL,
+    body LONGTEXT NOT NULL,
+    attachments LONGTEXT NULL,
+    context JSON NULL,
+    status ENUM('PENDING', 'PROCESSING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
+    error_message TEXT NULL,
+    PRIMARY KEY (id),
+    INDEX idx_email_queue_due (status, scheduled_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS warehouses (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     name VARCHAR(255) NOT NULL,
