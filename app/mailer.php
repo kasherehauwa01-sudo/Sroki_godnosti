@@ -6,20 +6,32 @@
  */
 declare(strict_types=1);
 
-function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings, array $attachments = [], array $context = []): bool
+function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings, array $attachments = [], array $context = []): array
 {
     ensureEmailNotificationLogSchema($pdo);
     $startedAt = microtime(true);
     $messageId = sprintf('<%s@sroki-godnosti.local>', bin2hex(random_bytes(16)));
+    $recipientsBeforeFilters = array_values(array_map(static fn ($email): string => (string)$email, $emails));
+    $emails = normalizeSmtpRecipients($emails);
+    $deliveryContext = [
+        'recipients_before_filters' => $recipientsBeforeFilters,
+        'recipients_after_filters' => $emails,
+        'smtp_to' => $emails,
+        'smtp_cc' => [],
+        'smtp_bcc' => [],
+        'recipient_count' => count($emails),
+    ];
+    $context['email_delivery'] = $deliveryContext;
     // Служебные отправители могут передать более точное пользовательское название
     // события. Оно попадёт в единый журнал и сохранится при повторной отправке.
     $notificationType = trim((string)($context['notification_type'] ?? '')) ?: emailNotificationType($subject);
     $logId = createEmailNotificationLog($pdo, $notificationType, $emails, $subject, $body, $attachments, $messageId, $context);
 
     try {
-        sendSmtpEmail($pdo, $emails, $subject, $body, $settings, $attachments, $messageId);
-        finishEmailNotificationLog($pdo, $logId, 'SUCCESS', '', '', '', '', (int)round((microtime(true) - $startedAt) * 1000));
-        return true;
+        $smtpResult = sendSmtpEmail($pdo, $emails, $subject, $body, $settings, $attachments, $messageId);
+        finishEmailNotificationLog($pdo, $logId, 'SUCCESS', (string)$smtpResult['smtp_code'], '', '', (string)$smtpResult['smtp_response'], (int)round((microtime(true) - $startedAt) * 1000));
+        writeLog($pdo, 'smtp_message_accepted', $deliveryContext + $smtpResult);
+        return ['log_id' => $logId] + $deliveryContext + $smtpResult;
     } catch (Throwable $error) {
         $smtpResponse = $error instanceof SmtpDeliveryException ? $error->smtpResponse : $error->getMessage();
         $smtpCode = $error instanceof SmtpDeliveryException ? (string)$error->smtpCode : extractSmtpCode($smtpResponse);
@@ -38,6 +50,23 @@ function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string 
     }
 }
 
+/** Нормализует адресатов перед SMTP и удаляет только точные дубликаты email. */
+function normalizeSmtpRecipients(array $emails): array
+{
+    $result = [];
+    foreach ($emails as $email) {
+        $email = trim((string)$email);
+        if ($email === '') continue;
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new InvalidArgumentException('Некорректный email получателя: ' . $email);
+        }
+        $key = mb_strtolower($email, 'UTF-8');
+        $result[$key] ??= $email;
+    }
+    if (!$result) throw new InvalidArgumentException('Список получателей email пуст.');
+    return array_values($result);
+}
+
 final class SmtpDeliveryException extends RuntimeException
 {
     public function __construct(public readonly int $smtpCode, public readonly string $smtpResponse)
@@ -46,7 +75,7 @@ final class SmtpDeliveryException extends RuntimeException
     }
 }
 
-function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings, array $attachments = [], string $messageId = ''): void
+function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, array $settings, array $attachments = [], string $messageId = ''): array
 {
     $defaultSender = defined('SENDER_EMAIL') ? (string)constant('SENDER_EMAIL') : 'vr-vk@yandex.ru';
     $host = trim((string)($settings['smtp_host'] ?? ''));
@@ -106,8 +135,9 @@ function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, a
     }
 
     smtpCommand($socket, 'MAIL FROM:<' . $fromEmail . '>', [250]);
+    $recipientResponses = [];
     foreach ($emails as $email) {
-        smtpCommand($socket, 'RCPT TO:<' . $email . '>', [250, 251]);
+        $recipientResponses[$email] = trim(smtpCommand($socket, 'RCPT TO:<' . $email . '>', [250, 251]));
     }
     smtpCommand($socket, 'DATA', [354]);
 
@@ -131,9 +161,20 @@ function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, a
     }
 
     fwrite($socket, implode("\r\n", $headers) . "\r\n\r\n" . $message . "\r\n.\r\n");
-    smtpExpect($socket, [250]);
+    $dataResponse = trim(smtpExpect($socket, [250]));
     smtpCommand($socket, 'QUIT', [221]);
     fclose($socket);
+    $fullResponse = implode("\n", array_map(
+        static fn (string $email, string $response): string => 'RCPT TO <' . $email . '>: ' . $response,
+        array_keys($recipientResponses),
+        array_values($recipientResponses)
+    )) . "\nDATA: " . $dataResponse;
+    return [
+        'message_id' => $messageId,
+        'smtp_code' => extractSmtpCode($dataResponse),
+        'smtp_response' => trim($fullResponse),
+        'recipient_responses' => $recipientResponses,
+    ];
 }
 
 function buildMultipartMessage(string $body, array $attachments, string $boundary): string
