@@ -54,7 +54,7 @@ try {
         $body = expiryNotificationBody($eventBatches, $daysLeft);
 
         try {
-            sendNotificationEmail($pdo, $emails, $subject, $body, $settings, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)]);
+            sendNotificationEmail($pdo, $emails, $subject, $body, $settings, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)], ['warehouse_name' => 'Все склады']);
             writeLog($pdo, 'expiry_notifications_sent', [
                 'emails' => $emails,
                 'criteria' => [$daysLeft],

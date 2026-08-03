@@ -573,9 +573,6 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
             }
         }
         updateStockNotificationProgress($pdo, (int)$notification['id']);
-        if (function_exists('maybeSendPurchaseNotifications')) {
-            maybeSendPurchaseNotifications($pdo, $notification, $submittedBatchIds);
-        }
         $pdo->commit();
     } catch (Throwable $error) {
         if ($pdo->inTransaction()) {
@@ -592,6 +589,8 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
         }
     }
 
+    // Отправка закупкам является побочным действием и выполняется только после
+    // фиксации остатков: ошибка SMTP или журнала не должна откатывать ввод склада.
     if (function_exists('maybeSendPurchaseNotifications')) {
         try {
             maybeSendPurchaseNotifications($pdo, $notification, $submittedBatchIds);

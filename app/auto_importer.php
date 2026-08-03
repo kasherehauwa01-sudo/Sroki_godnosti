@@ -624,7 +624,8 @@ function notifyMissingExpiryFilterProducts(PDO $pdo, array $codes): array
             'Товары без фильтра "Срок годности"',
             $body,
             $settings,
-            [missingExpiryFilterCodesXlsAttachment($codes)]
+            [missingExpiryFilterCodesXlsAttachment($codes)],
+            ['recipient_name' => 'Все получатели']
         );
         writeMissingFilterLog($pdo, $codes, $recipients, 'SUCCESS', '');
 
