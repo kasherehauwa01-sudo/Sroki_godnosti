@@ -2264,45 +2264,7 @@ function updatePurchaseDistributionSendResult(PDO $pdo, array $event, string $em
     $statement->execute([
         ':status_current' => $status, ':status_error' => $status, ':error' => $error !== '' ? $error : null,
         ':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':email' => '%' . $email . '%',
-    ];
-
-    return [$sql, $params];
-}
-
-/** В native prepare каждое вхождение должно иметь собственный placeholder. */
-function purchaseDistributionSendResultSql(): string
-{
-    return 'UPDATE purchase_event_distribution_log
-            SET send_status = CASE WHEN send_status = \'ERROR\' OR :status_current = \'ERROR\' THEN \'ERROR\' ELSE \'SUCCESS\' END,
-                smtp_error = CASE WHEN :status_error = \'ERROR\' THEN :error ELSE smtp_error END
-            WHERE event_key = :event_key AND event_date = :event_date AND CAST(actual_recipients AS CHAR) LIKE :email';
-}
-
-/** В native prepare каждое вхождение должно иметь собственный placeholder. */
-function purchaseDistributionSendResultSql(): string
-{
-    return 'UPDATE purchase_event_distribution_log
-            SET send_status = CASE WHEN send_status = \'ERROR\' OR :status_current = \'ERROR\' THEN \'ERROR\' ELSE \'SUCCESS\' END,
-                smtp_error = CASE WHEN :status_error = \'ERROR\' THEN :error ELSE smtp_error END
-            WHERE event_key = :event_key AND event_date = :event_date AND CAST(actual_recipients AS CHAR) LIKE :email';
-}
-
-/** В native prepare каждое вхождение должно иметь собственный placeholder. */
-function purchaseDistributionSendResultSql(): string
-{
-    return 'UPDATE purchase_event_distribution_log
-            SET send_status = CASE WHEN send_status = \'ERROR\' OR :status_current = \'ERROR\' THEN \'ERROR\' ELSE \'SUCCESS\' END,
-                smtp_error = CASE WHEN :status_error = \'ERROR\' THEN :error ELSE smtp_error END
-            WHERE event_key = :event_key AND event_date = :event_date AND CAST(actual_recipients AS CHAR) LIKE :email';
-}
-
-/** В native prepare каждое вхождение должно иметь собственный placeholder. */
-function purchaseDistributionSendResultSql(): string
-{
-    return 'UPDATE purchase_event_distribution_log
-            SET send_status = CASE WHEN send_status = \'ERROR\' OR :status_current = \'ERROR\' THEN \'ERROR\' ELSE \'SUCCESS\' END,
-                smtp_error = CASE WHEN :status_error = \'ERROR\' THEN :error ELSE smtp_error END
-            WHERE event_key = :event_key AND event_date = :event_date AND CAST(actual_recipients AS CHAR) LIKE :email';
+    ]);
 }
 
 /** В native prepare каждое вхождение должно иметь собственный placeholder. */
