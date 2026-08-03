@@ -115,7 +115,7 @@ function readBatchSheet(sheet) {
 }
 
 function updateStatus(id, status) {
-  if (['В наличии', 'Реализована', 'Списана'].indexOf(status) === -1) throw new Error('Недопустимый статус партии.');
+  if (['В наличии', 'Перемещено на СБ'].indexOf(status) === -1) throw new Error('Недопустимый статус партии.');
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const activeSheet = spreadsheet.getSheetByName(SHEETS.batches);
   const archiveSheet = spreadsheet.getSheetByName(SHEETS.archive);
@@ -125,7 +125,7 @@ function updateStatus(id, status) {
 
   if (activeRow) {
     activeSheet.getRange(activeRow, 7).setValue(status);
-    if (status === 'Реализована' || status === 'Списана') {
+    if (status === 'Перемещено на СБ') {
       const rowValues = activeSheet.getRange(activeRow, 1, 1, BATCH_HEADERS.length).getValues()[0];
       rowValues[6] = status;
       rowValues[7] = toIsoDate(new Date());

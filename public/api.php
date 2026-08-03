@@ -22,7 +22,9 @@ require_once __DIR__ . '/../app/vrcatalog_client.php';
 
 const ACTIVE_STATUS = 'В наличии';
 const UNAVAILABLE_STATUS = 'Нет в наличии';
-const ARCHIVED_STATUSES = ['Реализована', 'Списана', UNAVAILABLE_STATUS];
+const TRANSFERRED_TO_SECURITY_STATUS = 'Перемещено на СБ';
+const BATCH_STATUSES = [ACTIVE_STATUS, TRANSFERRED_TO_SECURITY_STATUS, UNAVAILABLE_STATUS];
+const ARCHIVED_STATUSES = [TRANSFERRED_TO_SECURITY_STATUS, UNAVAILABLE_STATUS];
 const DUPLICATE_BATCH_MESSAGE = 'В реестре уже есть эта партия товара';
 const SENDER_EMAIL = 'vr-vk@yandex.ru';
 const SETTINGS_PASSWORD_HASH = 'ff10705eafbaa3ff925fb0429d4b3f10379a4dd9dc1725654bbe0a5c9ce1a10f';
@@ -389,6 +391,21 @@ function cleanupEmailNotificationLog(PDO $pdo): void
 function getProtectedEmailNotificationLogs(PDO $pdo, array $payload): array
 {
     assertSettingsPassword($payload);
+    [$sql, $params] = buildEmailNotificationLogQuery($payload);
+    $statement = $pdo->prepare($sql);
+    $statement->execute($params);
+    $logs = array_map(static function (array $row): array {
+        $row['recipients'] = json_decode((string)$row['recipients'], true) ?: [];
+        $row['distribution_details'] = json_decode((string)($row['distribution_details'] ?? ''), true) ?: [];
+        $row['date'] = formatMoscowDateTime((string)$row['created_at']);
+        $row['status_text'] = (string)$row['status'] === 'SUCCESS' ? '✅ Принято SMTP' : '❌ Не принято SMTP';
+        return $row;
+    }, $statement->fetchAll());
+    return ['ok' => true, 'logs' => $logs];
+}
+
+function buildEmailNotificationLogQuery(array $payload): array
+{
     $where = [];
     $params = [];
     $status = strtoupper(trim((string)($payload['status'] ?? '')));
@@ -408,8 +425,15 @@ function getProtectedEmailNotificationLogs(PDO $pdo, array $payload): array
     }
     $search = trim((string)($payload['search'] ?? ''));
     if ($search !== '') {
-        $where[] = '(subject LIKE :search OR notification_type LIKE :search OR CAST(recipients AS CHAR) LIKE :search OR error_reason LIKE :search)';
-        $params[':search'] = '%' . $search . '%';
+        $where[] = '(subject LIKE :search_subject
+            OR notification_type LIKE :search_type
+            OR CAST(recipients AS CHAR) LIKE :search_recipient
+            OR error_reason LIKE :search_error)';
+        $searchPattern = '%' . $search . '%';
+        $params[':search_subject'] = $searchPattern;
+        $params[':search_type'] = $searchPattern;
+        $params[':search_recipient'] = $searchPattern;
+        $params[':search_error'] = $searchPattern;
     }
     $direction = strtoupper((string)($payload['direction'] ?? 'DESC')) === 'ASC' ? 'ASC' : 'DESC';
     $statement = $pdo->prepare(
@@ -478,8 +502,15 @@ function ensureBatchesSchema(PDO $pdo): void
         'SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
     );
     $statusColumn->execute([':table' => 'batches', ':column' => 'status']);
-    if (!str_contains((string)$statusColumn->fetchColumn(), UNAVAILABLE_STATUS)) {
-        $pdo->exec("ALTER TABLE batches MODIFY COLUMN status ENUM('В наличии', 'Реализована', 'Списана', 'Нет в наличии') NOT NULL DEFAULT 'В наличии'");
+    $statusColumnType = (string)$statusColumn->fetchColumn();
+    if (!str_contains($statusColumnType, TRANSFERRED_TO_SECURITY_STATUS)
+        || str_contains($statusColumnType, 'Реализована')
+        || str_contains($statusColumnType, 'Списана')) {
+        // Сначала расширяем ENUM, чтобы существующие значения можно было перенести без потери данных.
+        $pdo->exec("ALTER TABLE batches MODIFY COLUMN status ENUM('В наличии', 'Реализована', 'Списана', 'Перемещено на СБ', 'Нет в наличии') NOT NULL DEFAULT 'В наличии'");
+        $pdo->exec("UPDATE batches SET status = 'Перемещено на СБ' WHERE status = 'Списана'");
+        $pdo->exec("UPDATE batches SET status = 'Нет в наличии' WHERE status = 'Реализована'");
+        $pdo->exec("ALTER TABLE batches MODIFY COLUMN status ENUM('В наличии', 'Перемещено на СБ', 'Нет в наличии') NOT NULL DEFAULT 'В наличии'");
     }
 }
 
@@ -690,7 +721,7 @@ function writeOffBaseCodeBatchesForReplacement(PDO $pdo, array $batch): array
          FROM batches
          WHERE code = :code
            AND expiry_date = :expiry_date
-           AND status <> 'Списана'
+           AND status <> 'Перемещено на СБ'
          ORDER BY id ASC"
     );
     $statement->execute([
@@ -703,12 +734,12 @@ function writeOffBaseCodeBatchesForReplacement(PDO $pdo, array $batch): array
     }
 
     $writtenOff = [];
-    $update = $pdo->prepare("UPDATE batches SET status = 'Списана' WHERE id = :id");
+    $update = $pdo->prepare("UPDATE batches SET status = 'Перемещено на СБ' WHERE id = :id");
     foreach ($ids as $id) {
         $before = findBatchForHistory($pdo, $id);
         $update->execute([':id' => $id]);
         $after = $before;
-        $after['status'] = 'Списана';
+        $after['status'] = 'Перемещено на СБ';
         $writtenOff[] = ['before' => $before, 'after' => $after, 'replacement_code' => $code];
     }
 
@@ -932,7 +963,7 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
     if ($article === '' || $expiryDate === '') {
         throw new InvalidArgumentException('Заполните артикул и срок годности.');
     }
-    if (!in_array($status, array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES), true)) {
+    if (!in_array($status, BATCH_STATUSES, true)) {
         throw new InvalidArgumentException('Недопустимый статус партии.');
     }
 
@@ -1355,6 +1386,22 @@ function testEmailDelivery(PDO $pdo, array $payload): array
     return ['ok' => true, 'message' => 'SMTP-сервер принял письмо. Это ещё не подтверждает доставку в ящик.', 'delivery' => $result];
 }
 
+/** Отправляет диагностическое письмо на один явно выбранный адрес. */
+function testEmailDelivery(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $email = trim((string)($payload['email'] ?? ''));
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Укажите корректный email для проверки доставки.');
+    }
+    $subject = 'Проверка доставки email — Сроки годности';
+    $body = "Это диагностическое письмо сервиса «Сроки годности».\n\nАдрес проверки: {$email}\nВремя UTC: " . gmdate('Y-m-d H:i:s');
+    $result = sendNotificationEmail($pdo, [$email], $subject, $body, getRawSettings($pdo), [], [
+        'notification_type' => 'Проверка доставки email', 'recipient_name' => $email,
+    ]);
+    return ['ok' => true, 'message' => 'SMTP-сервер принял письмо. Это ещё не подтверждает доставку в ящик.', 'delivery' => $result];
+}
+
 
 function sendTestStockFillNotification(PDO $pdo, array $payload): array
 {
@@ -1471,7 +1518,7 @@ function assertWriteOffPassword(array $payload): void
 {
     $password = (string)($payload['write_off_password'] ?? '');
     if (!hash_equals(WRITE_OFF_PASSWORD_HASH, hash('sha256', $password))) {
-        throw new InvalidArgumentException('Неверный пароль для списания партии.');
+        throw new InvalidArgumentException('Неверный пароль для изменения статуса партии.');
     }
 }
 
@@ -1803,7 +1850,7 @@ function updateUnavailableStatusForZeroStockBatches(PDO $pdo, array $batchIds): 
             || (int)$batch['filled_warehouse_count'] !== $activeWarehouseCount
             || (float)$batch['total_stock'] !== 0.0
             || (string)$batch['status'] === UNAVAILABLE_STATUS
-            || in_array((string)$batch['status'], ['Списана', 'Реализована'], true)) {
+            || (string)$batch['status'] === TRANSFERRED_TO_SECURITY_STATUS) {
             continue;
         }
 
@@ -2209,7 +2256,18 @@ function updatePurchaseDistributionSendResult(PDO $pdo, array $event, string $em
     $statement->execute([
         ':status_current' => $status, ':status_error' => $status, ':error' => $error !== '' ? $error : null,
         ':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':email' => '%' . $email . '%',
-    ]);
+    ];
+
+    return [$sql, $params];
+}
+
+/** В native prepare каждое вхождение должно иметь собственный placeholder. */
+function purchaseDistributionSendResultSql(): string
+{
+    return 'UPDATE purchase_event_distribution_log
+            SET send_status = CASE WHEN send_status = \'ERROR\' OR :status_current = \'ERROR\' THEN \'ERROR\' ELSE \'SUCCESS\' END,
+                smtp_error = CASE WHEN :status_error = \'ERROR\' THEN :error ELSE smtp_error END
+            WHERE event_key = :event_key AND event_date = :event_date AND CAST(actual_recipients AS CHAR) LIKE :email';
 }
 
 /** В native prepare каждое вхождение должно иметь собственный placeholder. */
@@ -2293,7 +2351,7 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
         $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'total' => $total, 'status' => $batch['status'], 'quantities' => $quantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'manager_email' => $managerEmails[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
     }
     usort($rows, static fn (array $left, array $right): int => ($left['section'] <=> $right['section']) ?: ($left['id'] <=> $right['id']));
-    return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES), 'can_remind' => purchaseEventMissingWarehouses($event) !== []];
+    return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => BATCH_STATUSES, 'can_remind' => purchaseEventMissingWarehouses($event) !== []];
 }
 
 function findPurchaseEventByToken(PDO $pdo, string $token): array
@@ -2318,7 +2376,7 @@ function updatePurchaseEventBatchStatus(PDO $pdo, array $payload): array
     $eventInfo = findPurchaseEventByToken($pdo, trim((string)($payload['token'] ?? '')));
     $batchId = (int)($payload['batch_id'] ?? 0);
     $status = trim((string)($payload['status'] ?? ''));
-    if (!in_array($status, array_merge([ACTIVE_STATUS], ARCHIVED_STATUSES), true)) {
+    if (!in_array($status, BATCH_STATUSES, true)) {
         throw new InvalidArgumentException('Недопустимый статус партии.');
     }
     $event = getPurchaseEventData($pdo, (string)$eventInfo['event_key'], (string)$eventInfo['event_date'], false);
