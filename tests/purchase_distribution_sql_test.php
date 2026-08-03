@@ -23,4 +23,17 @@ runApiBackgroundTask(new class extends PDO {
     throw new RuntimeException('Тестовая ошибка фоновой задачи');
 });
 
+$summaryUrl = 'https://example.test/purchase-event.php?token=test-token';
+$managerBody = purchaseManagerEmailBody(
+    [['id' => 11257, 'code' => 'Н-С00089-1', 'name' => 'Средство для чистки', 'manager_value' => 'Иванов']],
+    [],
+    180,
+    '26.01.2027',
+    $summaryUrl,
+    ''
+);
+if (substr_count($managerBody, $summaryUrl) !== 1 || str_contains($managerBody, '#batch-')) {
+    throw new RuntimeException('В письме менеджеру должна оставаться только итоговая ссылка на сводную таблицу.');
+}
+
 echo "Проверка SQL журнала рассылки пройдена.\n";

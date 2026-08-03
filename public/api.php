@@ -2221,13 +2221,13 @@ function distributePurchaseEventBatches(array $event, array $recipients, ?PDO $p
 function purchaseManagerEmailBody(array $assigned, array $unassigned, int $eventDays, string $expiryText, string $url, string $warning): string
 {
     $lines = ["Остатки по товарам со сроком годности до {$expiryText}. При необходимости ознакомьтесь с данными и, на основании указанных остатков, выполните списание товара.{$warning}", '', 'Ваши товары', str_repeat('-', 50)];
-    foreach ($assigned as $batch) $lines[] = implode(' | ', [(string)$batch['code'], (string)$batch['name'], $eventDays . ' дней', $url . '#batch-' . (int)$batch['id']]);
+    foreach ($assigned as $batch) $lines[] = implode(' | ', [(string)$batch['code'], (string)$batch['name'], $eventDays . ' дней']);
     if (!$assigned) $lines[] = 'Нет товаров.';
     if ($unassigned) {
         $lines[] = '';
         $lines[] = 'Товары без определённого менеджера';
         $lines[] = str_repeat('-', 50);
-        foreach ($unassigned as $batch) $lines[] = implode(' | ', [(string)$batch['code'], (string)$batch['name'], $eventDays . ' дней', (string)$batch['manager_value'], $url . '#batch-' . (int)$batch['id']]);
+        foreach ($unassigned as $batch) $lines[] = implode(' | ', [(string)$batch['code'], (string)$batch['name'], $eventDays . ' дней', (string)$batch['manager_value']]);
     }
     $lines[] = '';
     $lines[] = 'Открыть сводную таблицу: ' . $url;
@@ -2267,6 +2267,15 @@ function updatePurchaseDistributionSendResult(PDO $pdo, array $event, string $em
     ];
 
     return [$sql, $params];
+}
+
+/** В native prepare каждое вхождение должно иметь собственный placeholder. */
+function purchaseDistributionSendResultSql(): string
+{
+    return 'UPDATE purchase_event_distribution_log
+            SET send_status = CASE WHEN send_status = \'ERROR\' OR :status_current = \'ERROR\' THEN \'ERROR\' ELSE \'SUCCESS\' END,
+                smtp_error = CASE WHEN :status_error = \'ERROR\' THEN :error ELSE smtp_error END
+            WHERE event_key = :event_key AND event_date = :event_date AND CAST(actual_recipients AS CHAR) LIKE :email';
 }
 
 /** В native prepare каждое вхождение должно иметь собственный placeholder. */
