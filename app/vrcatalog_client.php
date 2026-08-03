@@ -31,7 +31,9 @@ function requestVrCatalogProducts(array $articles, ?PDO $pdo = null): array
         CURLOPT_POST => true,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json', 'X-Internal-Token: ' . $token],
-        CURLOPT_POSTFIELDS => json_encode(['articles' => $articles], JSON_UNESCAPED_UNICODE),
+        // Базовый товар может иметь нулевой остаток в catalogvr, но его карточка
+        // всё равно нужна для чтения менеджера специального кода.
+        CURLOPT_POSTFIELDS => json_encode(vrCatalogProductsRequestPayload($articles), JSON_UNESCAPED_UNICODE),
         CURLOPT_CONNECTTIMEOUT => $connectTimeout,
         CURLOPT_TIMEOUT => $requestTimeout,
     ]);
@@ -78,6 +80,15 @@ function requestVrCatalogProducts(array $articles, ?PDO $pdo = null): array
     $diagnostics = $baseDiagnostics + ['found_count' => $foundCount, 'missing_count' => max(0, count($articles) - $foundCount)];
     logVrCatalogRequest($pdo, $diagnostics);
     return ['items' => $items, 'diagnostics' => $diagnostics];
+}
+
+/** Формирует запрос без фильтрации карточек по остатку в catalogvr. */
+function vrCatalogProductsRequestPayload(array $articles): array
+{
+    return [
+        'articles' => $articles,
+        'include_zero_stock' => true,
+    ];
 }
 
 function fetchVrCatalogProductsByArticles(array $articles, ?PDO $pdo = null): array
