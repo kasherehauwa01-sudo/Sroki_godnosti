@@ -1652,9 +1652,10 @@ function purchaseEventMissingWarehouses(array $event): array
 function refreshStockReminderForm(PDO $pdo, array $event, int $warehouseId): array
 {
     $statement = $pdo->prepare(
-        "SELECT n.id, n.email, t.id AS token_id
+        "SELECT n.id, w.email, t.id AS token_id
          FROM stock_notifications n
          INNER JOIN stock_notification_tokens t ON t.notification_id = n.id
+         INNER JOIN warehouses w ON w.id = n.warehouse_id
          WHERE n.event_key = :event_key AND DATE(n.sent_at) = :event_date AND n.warehouse_id = :warehouse_id
          ORDER BY n.id DESC LIMIT 1"
     );
@@ -1671,7 +1672,8 @@ function refreshStockReminderForm(PDO $pdo, array $event, int $warehouseId): arr
 
     return [
         'notification_id' => (int)$row['id'],
-        'emails' => preg_split('/[\r\n,;]+/', (string)$row['email'], -1, PREG_SPLIT_NO_EMPTY) ?: [],
+        // Повторное уведомление отправляется на все актуальные адреса из настроек склада.
+        'emails' => warehouseNotificationEmailList((string)$row['email']),
         'url' => publicBaseUrl() . '/fill-stock.php?token=' . rawurlencode($token),
     ];
 }

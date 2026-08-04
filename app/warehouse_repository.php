@@ -177,18 +177,30 @@ function normalizeWarehousePayload(array $payload): array
 
 function normalizeWarehouseEmails(string $emails): ?string
 {
+    $items = warehouseNotificationEmailList($emails);
+
+    return $items ? implode("\n", $items) : null;
+}
+
+/** Разбирает все адреса склада и сохраняет порядок, заданный в настройках. */
+function warehouseNotificationEmailList(string $emails): array
+{
     $items = array_values(array_filter(array_map(
         static fn (string $email): string => trim($email),
-        preg_split('/\R+/', $emails) ?: []
+        preg_split('/[\r\n,;]+/', $emails) ?: []
     ), static fn (string $email): bool => $email !== ''));
+
+    $uniqueItems = [];
 
     foreach ($items as $email) {
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            throw new InvalidArgumentException('Введите корректные email склада, каждый адрес с новой строки.');
+            throw new InvalidArgumentException('Введите корректные email склада, разделяя адреса новой строкой, запятой или точкой с запятой.');
         }
+        $key = mb_strtolower($email, 'UTF-8');
+        $uniqueItems[$key] ??= $email;
     }
 
-    return $items ? implode("\n", $items) : null;
+    return array_values($uniqueItems);
 }
 
 
@@ -201,7 +213,7 @@ function getWarehouseNotificationEmails(PDO $pdo): array
         if ($items === null) {
             continue;
         }
-        $emails = array_merge($emails, explode("\n", $items));
+        $emails = array_merge($emails, warehouseNotificationEmailList($items));
     }
 
     return array_values(array_unique($emails));
@@ -419,7 +431,7 @@ function createStockNotification(PDO $pdo, array $warehouse, array $batches, str
         'token' => $token,
         'url' => rtrim($baseUrl, '/') . '/fill-stock.php?token=' . rawurlencode($token),
         'expires_at' => $expiresAt,
-        'emails' => explode("\n", $emails),
+        'emails' => warehouseNotificationEmailList($emails),
     ];
 }
 
