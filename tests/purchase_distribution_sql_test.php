@@ -36,4 +36,26 @@ if (substr_count($managerBody, $summaryUrl) !== 1 || str_contains($managerBody, 
     throw new RuntimeException('В письме менеджеру должна оставаться только итоговая ссылка на сводную таблицу.');
 }
 
+$missingWarehouses = purchaseEventMissingWarehouseNames([
+    'warehouses' => [
+        ['id' => 1, 'name' => 'Склад 1'],
+        ['id' => 2, 'name' => 'Склад 2'],
+    ],
+    'batches' => [
+        ['id' => 111],
+        ['id' => 222],
+    ],
+    'stock' => [
+        111 => [2 => 5],
+        222 => [1 => 7, 2 => 8],
+    ],
+    'expected_stock' => [
+        111 => [2 => true],
+        222 => [1 => true, 2 => true],
+    ],
+]);
+if ($missingWarehouses !== []) {
+    throw new RuntimeException('Предупреждение для закупок не должно учитывать товары, исключённые из формы склада по остаткам catalogvr.');
+}
+
 echo "Проверка SQL журнала рассылки пройдена.\n";
