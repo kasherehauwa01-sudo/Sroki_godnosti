@@ -1640,6 +1640,7 @@ function maybeSendPurchaseNotifications(PDO $pdo, array $notification, array $su
 
     $expected = countPurchaseEventExpectedStocks($event);
     if ((int)$event['filled_count'] < $expected) return;
+    if (purchaseEventNotificationAlreadySent($pdo, (string)$event['event_key'], (string)$event['event_date'])) return;
     sendPurchaseNotificationForEvent($pdo, $event, $eventDays);
 }
 
@@ -1825,6 +1826,12 @@ function sendExpiredPurchaseEventNotifications(PDO $pdo): void
 
 function purchaseEventNotificationAlreadyLogged(PDO $pdo, string $eventKey, string $eventDate): bool
 {
+    return purchaseEventNotificationAlreadySent($pdo, $eventKey, $eventDate);
+}
+
+/** Проверяет, что итоговое уведомление закупкам по событию уже было успешно поставлено в очередь. */
+function purchaseEventNotificationAlreadySent(PDO $pdo, string $eventKey, string $eventDate): bool
+{
     $statement = $pdo->prepare("SELECT COUNT(*) FROM purchase_event_notification_log WHERE event_key = :event_key AND event_date = :event_date AND status = 'SUCCESS'");
     $statement->execute([':event_key' => $eventKey, ':event_date' => $eventDate]);
     return (int)$statement->fetchColumn() > 0;
@@ -1836,7 +1843,9 @@ function purchaseEventMissingWarehouseNames(array $event): array
     foreach ($event['warehouses'] as $warehouse) {
         $warehouseId = (int)$warehouse['id'];
         foreach ($event['batches'] as $batch) {
-            if (!array_key_exists($warehouseId, $event['stock'][(int)$batch['id']] ?? [])) {
+            $batchId = (int)$batch['id'];
+            if (empty($event['expected_stock'][$batchId][$warehouseId])) continue;
+            if (!array_key_exists($warehouseId, $event['stock'][$batchId] ?? [])) {
                 $missing[] = (string)$warehouse['name'];
                 break;
             }
@@ -2055,6 +2064,10 @@ function getOrCreatePurchaseEventSummaryToken(PDO $pdo, array $event, ?int $reci
 
 function sendPurchaseNotificationForEvent(PDO $pdo, array $event, int $eventDays): void
 {
+    // Успешная запись в журнале означает, что письмо закупкам уже поставлено в очередь.
+    // Повторное сохранение остатков складом не должно создавать новую рассылку по тому же событию.
+    if (purchaseEventNotificationAlreadySent($pdo, (string)$event['event_key'], (string)$event['event_date'])) return;
+
     $recipients = listPurchaseRecipients($pdo);
     if (!$recipients) return;
     $token = bin2hex(random_bytes(24));
