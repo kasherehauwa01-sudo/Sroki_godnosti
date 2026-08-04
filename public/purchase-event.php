@@ -67,7 +67,8 @@ function renderPurchaseEventTable(result) {
         <td class="purchase-event-main-column"><select class="purchase-event-status" data-batch-id="${row.id}" data-current-status="${escapeHtml(row.status)}">${result.statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === row.status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}</select></td>
         ${result.warehouses.map((warehouse) => {
             const value = row.quantities[warehouse.id];
-            return `<td class="numeric-cell">${purchaseEventEditing
+            const isAutoZero = Boolean(row.auto_zero_quantities?.[warehouse.id]);
+            return `<td class="numeric-cell ${isAutoZero ? 'auto-zero-stock' : ''}">${purchaseEventEditing
                 ? `<input class="purchase-event-quantity" type="number" min="0" step="1" inputmode="numeric" data-batch-id="${row.id}" data-warehouse-id="${warehouse.id}" value="${escapeHtml(inputQuantityValue(value))}">`
                 : formatQuantity(value)}</td>`;
         }).join('')}
