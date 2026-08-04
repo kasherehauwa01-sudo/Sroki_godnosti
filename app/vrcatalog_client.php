@@ -88,7 +88,74 @@ function vrCatalogProductsRequestPayload(array $articles): array
     return [
         'articles' => $articles,
         'include_zero_stock' => true,
+        // Остатки нужны до создания индивидуальных складских форм.
+        'include_warehouse_stocks' => true,
     ];
+}
+
+/**
+ * Оставляет для склада только партии, которые фактически есть на его остатках.
+ * Отсутствующий товар, склад или количество считаются нулевым остатком: так при
+ * неполном ответе catalogvr склад не получит форму с лишней позицией.
+ */
+function filterBatchesByVrCatalogWarehouseStock(array $batches, array $products, array $warehouse): array
+{
+    $productsByArticle = [];
+    foreach ($products as $product) {
+        if (!is_array($product) || !vrCatalogProductFound($product)) continue;
+        $key = vrCatalogArticleLookupKey(vrCatalogProductArticle($product));
+        if ($key !== '') $productsByArticle[$key][] = $product;
+    }
+
+    return array_values(array_filter($batches, static function (array $batch) use ($productsByArticle, $warehouse): bool {
+        $key = vrCatalogArticleLookupKey((string)($batch['article'] ?? ''));
+        foreach ($productsByArticle[$key] ?? [] as $product) {
+            if (vrCatalogWarehouseStockQuantity($product, $warehouse) > 0) return true;
+        }
+        return false;
+    }));
+}
+
+/** Читает остаток склада из официального массива stocks и legacy-вариантов ответа. */
+function vrCatalogWarehouseStockQuantity(array $product, array $warehouse): float
+{
+    $warehouseName = vrCatalogWarehouseLookupKey((string)($warehouse['name'] ?? ''));
+    if ($warehouseName === '') return 0.0;
+
+    foreach (['stocks', 'warehouse_stocks', 'warehouses'] as $field) {
+        $stocks = $product[$field] ?? null;
+        if (!is_array($stocks)) continue;
+
+        foreach ($stocks as $key => $stock) {
+            if (is_array($stock)) {
+                $name = (string)($stock['warehouse_name'] ?? $stock['warehouse'] ?? $stock['name'] ?? $key);
+                $quantity = $stock['quantity'] ?? $stock['stock'] ?? $stock['balance'] ?? $stock['available'] ?? 0;
+            } else {
+                $name = (string)$key;
+                $quantity = $stock;
+            }
+            if (vrCatalogWarehouseLookupKey($name) === $warehouseName && is_numeric($quantity)) {
+                return (float)$quantity;
+            }
+        }
+    }
+
+    $stockByWarehouse = $product['stock_by_warehouse'] ?? null;
+    if (is_array($stockByWarehouse)) {
+        foreach ($stockByWarehouse as $name => $quantity) {
+            if (vrCatalogWarehouseLookupKey((string)$name) === $warehouseName && is_numeric($quantity)) {
+                return (float)$quantity;
+            }
+        }
+    }
+
+    return 0.0;
+}
+
+function vrCatalogWarehouseLookupKey(string $name): string
+{
+    $name = preg_replace('/\s+/u', ' ', trim($name)) ?? trim($name);
+    return mb_strtolower($name, 'UTF-8');
 }
 
 function fetchVrCatalogProductsByArticles(array $articles, ?PDO $pdo = null): array
