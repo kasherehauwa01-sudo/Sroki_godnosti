@@ -10,9 +10,34 @@ function assertSameValue(mixed $expected, mixed $actual, string $message): void
 }
 
 assertSameValue(
-    ['articles' => ['ОКА-27134'], 'include_zero_stock' => true],
+    ['articles' => ['ОКА-27134'], 'include_zero_stock' => true, 'include_warehouse_stocks' => true],
     vrCatalogProductsRequestPayload(['ОКА-27134']),
     'Поиск в catalogvr должен включать товары с нулевым остатком'
+);
+
+$stockProducts = [
+    ['article' => '111111', 'found' => true, 'stocks' => [
+        ['warehouse_name' => 'Склад 1', 'quantity' => 0],
+        ['warehouse_name' => '  СКЛАД   2 ', 'quantity' => 1],
+    ]],
+    ['article' => '222222', 'found' => true, 'stock_by_warehouse' => ['Склад 1' => 12, 'Склад 2' => 24]],
+    ['article' => '333333', 'found' => false, 'stocks' => [['warehouse_name' => 'Склад 2', 'quantity' => 33]]],
+];
+$eventBatches = [
+    ['id' => 1, 'article' => '111111'],
+    ['id' => 2, 'article' => '222222'],
+    ['id' => 3, 'article' => '333333'],
+    ['id' => 4, 'article' => 'нет-в-ответе'],
+];
+assertSameValue(
+    [2],
+    array_column(filterBatchesByVrCatalogWarehouseStock($eventBatches, $stockProducts, ['name' => 'Склад 1']), 'id'),
+    'Форма склада 1 должна исключать нулевые и неизвестные остатки'
+);
+assertSameValue(
+    [1, 2],
+    array_column(filterBatchesByVrCatalogWarehouseStock($eventBatches, $stockProducts, ['name' => 'склад 2']), 'id'),
+    'Форма склада 2 должна содержать только товары с положительным остатком'
 );
 
 foreach ([

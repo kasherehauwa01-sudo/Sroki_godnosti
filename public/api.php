@@ -1230,16 +1230,30 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
     $warehouses = getActiveWarehousesWithEmails($pdo);
     foreach (groupBatchesByDaysLeft($batches) as $daysLeft => $eventBatches) {
         $subject = expiryNotificationSubject((int)$daysLeft);
+        // Один запрос на всё событие: далее его результат используется для
+        // формирования отдельного набора позиций каждого склада.
+        $catalogProducts = fetchVrCatalogProductsByArticles(array_column($eventBatches, 'article'), $pdo);
         foreach ($warehouses as $warehouse) {
-            $form = createStockNotification($pdo, $warehouse, $eventBatches, 'expiry_' . (int)$daysLeft, $subject, publicBaseUrl());
-            $body = expiryNotificationBody($eventBatches, (int)$daysLeft) . "\n\n" . stockFillInstructionText($form);
-            enqueueNotificationEmails($pdo, $form['emails'], $subject, $body, [expiryCodesXlsAttachment($eventBatches, (int)$daysLeft)], ['warehouse_name' => (string)$warehouse['name']]);
+            $warehouseBatches = filterBatchesByVrCatalogWarehouseStock($eventBatches, $catalogProducts, $warehouse);
+            if (!$warehouseBatches) {
+                $sentEvents[] = [
+                    'days_left' => (int)$daysLeft,
+                    'warehouse_id' => (int)$warehouse['id'],
+                    'warehouse' => (string)$warehouse['name'],
+                    'count' => 0,
+                    'skipped' => 'В catalogvr нет положительных остатков для склада',
+                ];
+                continue;
+            }
+            $form = createStockNotification($pdo, $warehouse, $warehouseBatches, 'expiry_' . (int)$daysLeft, $subject, publicBaseUrl());
+            $body = expiryNotificationBody($warehouseBatches, (int)$daysLeft) . "\n\n" . stockFillInstructionText($form);
+            enqueueNotificationEmails($pdo, $form['emails'], $subject, $body, [expiryCodesXlsAttachment($warehouseBatches, (int)$daysLeft)], ['warehouse_name' => (string)$warehouse['name']]);
             $sentEvents[] = [
                 'days_left' => (int)$daysLeft,
                 'warehouse_id' => (int)$warehouse['id'],
                 'warehouse' => (string)$warehouse['name'],
                 'notification_id' => (int)$form['id'],
-                'count' => count($eventBatches),
+                'count' => count($warehouseBatches),
                 'subject' => $subject,
                 'text' => $body,
             ];
@@ -1631,7 +1645,7 @@ function maybeSendPurchaseNotifications(PDO $pdo, array $notification, array $su
     $event = getPurchaseEventData($pdo, (string)$notification['event_key'], $eventDate, false);
     if (!$event['batches'] || !$event['warehouses']) return;
 
-    $expected = count($event['batches']) * count($event['warehouses']);
+    $expected = countPurchaseEventExpectedStocks($event);
     if ((int)$event['filled_count'] < $expected) return;
     sendPurchaseNotificationForEvent($pdo, $event, $eventDays);
 }
@@ -1642,10 +1656,18 @@ function purchaseEventMissingWarehouses(array $event): array
     return array_values(array_filter($event['warehouses'], static function (array $warehouse) use ($event): bool {
         $warehouseId = (int)$warehouse['id'];
         foreach ($event['batches'] as $batch) {
-            if (!array_key_exists($warehouseId, $event['stock'][(int)$batch['id']] ?? [])) return true;
+            $batchId = (int)$batch['id'];
+            if (empty($event['expected_stock'][$batchId][$warehouseId])) continue;
+            if (!array_key_exists($warehouseId, $event['stock'][$batchId] ?? [])) return true;
         }
         return false;
     }));
+}
+
+/** Количество полей во всех индивидуальных формах события. */
+function countPurchaseEventExpectedStocks(array $event): int
+{
+    return array_sum(array_map('count', (array)($event['expected_stock'] ?? [])));
 }
 
 /** Обновляет персональную ссылку склада, чтобы просроченную форму снова можно было заполнить. */
@@ -1908,6 +1930,7 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
     $batchIds = array_map(static fn (array $row): int => (int)$row['id'], $batches);
     $warehouseIds = array_map(static fn (array $row): int => (int)$row['id'], $warehouses);
     $stock = [];
+    $expectedStock = [];
     $lastStockAt = '';
     if ($batchIds && $warehouseIds) {
         $batchMarks = implode(',', array_fill(0, count($batchIds), '?'));
@@ -1918,6 +1941,27 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
             $stock[(int)$row['batch_id']][(int)$row['warehouse_id']] = (float)$row['quantity'];
             if ((string)$row['updated_at'] > $lastStockAt) $lastStockAt = (string)$row['updated_at'];
         }
+
+        // Матрица содержит только позиции, которые catalogvr разрешил показать
+        // конкретному складу. Для старых уведомлений она естественно остаётся полной.
+        $expectedStatement = $pdo->prepare(
+            "SELECT DISTINCT i.batch_id, n.warehouse_id
+             FROM stock_notifications n
+             INNER JOIN stock_notification_items i ON i.notification_id = n.id
+             WHERE n.event_key = ? AND DATE(n.sent_at) = ?
+               AND i.batch_id IN ($batchMarks) AND n.warehouse_id IN ($warehouseMarks)"
+        );
+        $expectedStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+        foreach ($expectedStatement->fetchAll() as $row) {
+            $expectedStock[(int)$row['batch_id']][(int)$row['warehouse_id']] = true;
+        }
+    }
+
+    $filledCount = 0;
+    foreach ($expectedStock as $batchId => $expectedWarehouses) {
+        foreach ($expectedWarehouses as $warehouseId => $_) {
+            if (array_key_exists($warehouseId, $stock[$batchId] ?? [])) $filledCount++;
+        }
     }
 
     return [
@@ -1927,7 +1971,8 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
         'batches' => $batches,
         'warehouses' => $warehouses,
         'stock' => $stock,
-        'filled_count' => array_sum(array_map('count', $stock)),
+        'expected_stock' => $expectedStock,
+        'filled_count' => $filledCount,
         'last_stock_at' => $lastStockAt,
     ];
 }
@@ -1948,11 +1993,13 @@ function listPurchaseEventNotifications(PDO $pdo): array
         $eventDate = (string)$row['event_date'];
         $event = getPurchaseEventData($pdo, $eventKey, $eventDate, false);
         if (!$event['batches'] || !$event['warehouses']) continue;
-        $expected = count($event['batches']) * count($event['warehouses']);
-        $warehouseIds = array_map(static fn (array $warehouse): int => (int)$warehouse['id'], $event['warehouses']);
-        $filledBatchCount = count(array_filter($event['batches'], static function (array $batch) use ($event, $warehouseIds): bool {
-            $filledWarehouseIds = array_keys($event['stock'][(int)$batch['id']] ?? []);
-            return count(array_intersect($warehouseIds, array_map('intval', $filledWarehouseIds))) === count($warehouseIds);
+        $expected = countPurchaseEventExpectedStocks($event);
+        $filledBatchCount = count(array_filter($event['batches'], static function (array $batch) use ($event): bool {
+            $batchId = (int)$batch['id'];
+            $expectedWarehouseIds = array_map('intval', array_keys($event['expected_stock'][$batchId] ?? []));
+            if (!$expectedWarehouseIds) return false;
+            $filledWarehouseIds = array_map('intval', array_keys($event['stock'][$batchId] ?? []));
+            return count(array_intersect($expectedWarehouseIds, $filledWarehouseIds)) === count($expectedWarehouseIds);
         }));
         $token = getOrCreatePurchaseEventSummaryToken($pdo, $event);
         $events[] = [
