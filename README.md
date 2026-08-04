@@ -297,8 +297,14 @@ mysql -u sroki -p sroki_godnosti < database/install.sql
 
 ### Проверка сроков годности
 
+Скрипт запускается каждые 5 минут, но создаёт уведомления только после времени,
+заданного в настройке `notification_time` (по умолчанию — 09:00 МСК). Повторной
+рассылки одного события за день не будет. Если проверка завершилась ошибкой или
+на момент запуска не было подходящих партий, следующая попытка выполняется не
+ранее чем через час.
+
 ```cron
-0 9 * * * /usr/bin/php /var/www/kvasmix.ru/vr/sroki_godnosti/scripts/check_expiry.php >> /var/log/sroki_godnosti_expiry.log 2>&1
+*/5 * * * * /usr/bin/php /var/www/kvasmix.ru/vr/sroki_godnosti/scripts/check_expiry.php >> /var/log/sroki_godnosti_expiry.log 2>&1
 ```
 
 ### Автозагрузка из почты
