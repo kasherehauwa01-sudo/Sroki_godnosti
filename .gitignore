@@ -8,3 +8,5 @@ app/config.php
 .env.cron
 
 !.env.example
+
+vendor/
