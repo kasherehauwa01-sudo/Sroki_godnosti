@@ -1984,12 +1984,17 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
             'SELECT DISTINCT w.id, w.name, w.sort_order
              FROM warehouses w
              WHERE w.is_active = 1 AND (
-                 EXISTS (SELECT 1 FROM stock_notifications n WHERE n.warehouse_id = w.id AND n.event_key = :event_key AND DATE(n.sent_at) = :event_date)
-                 OR EXISTS (SELECT 1 FROM stock_auto_zero_entries z WHERE z.warehouse_id = w.id AND z.event_key = :event_key AND z.event_date = :event_date)
+                 EXISTS (SELECT 1 FROM stock_notifications n WHERE n.warehouse_id = w.id AND n.event_key = :notification_event_key AND DATE(n.sent_at) = :notification_event_date)
+                 OR EXISTS (SELECT 1 FROM stock_auto_zero_entries z WHERE z.warehouse_id = w.id AND z.event_key = :auto_zero_event_key AND z.event_date = :auto_zero_event_date)
              )
              ORDER BY w.sort_order, w.name, w.id'
         );
-        $warehouseStatement->execute([':event_key' => $eventKey, ':event_date' => $eventDate]);
+        $warehouseStatement->execute([
+            ':notification_event_key' => $eventKey,
+            ':notification_event_date' => $eventDate,
+            ':auto_zero_event_key' => $eventKey,
+            ':auto_zero_event_date' => $eventDate,
+        ]);
     }
     $warehouses = $warehouseStatement->fetchAll();
     $batchIds = array_map(static fn (array $row): int => (int)$row['id'], $batches);
