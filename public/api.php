@@ -243,6 +243,29 @@ function ensureLogsSchema(PDO $pdo): void
 }
 
 
+function ensurePurchaseRecipientEmailIndexAllowsDuplicates(PDO $pdo): void
+{
+    $index = $pdo->prepare(
+        "SELECT NON_UNIQUE FROM INFORMATION_SCHEMA.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchase_notification_recipients' AND INDEX_NAME = 'uniq_purchase_recipient_email'
+         LIMIT 1"
+    );
+    $index->execute();
+    $nonUnique = $index->fetchColumn();
+    if ($nonUnique !== false) {
+        $pdo->exec('ALTER TABLE purchase_notification_recipients DROP INDEX uniq_purchase_recipient_email');
+    }
+
+    $plainIndex = $pdo->prepare(
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchase_notification_recipients' AND INDEX_NAME = 'idx_purchase_recipient_email'"
+    );
+    $plainIndex->execute();
+    if ((int)$plainIndex->fetchColumn() === 0) {
+        $pdo->exec('ALTER TABLE purchase_notification_recipients ADD INDEX idx_purchase_recipient_email (email)');
+    }
+}
+
 function ensurePurchaseNotificationSchema(PDO $pdo): void
 {
     $pdo->exec(
@@ -254,10 +277,12 @@ function ensurePurchaseNotificationSchema(PDO $pdo): void
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
-            UNIQUE KEY uniq_purchase_recipient_email (email),
+            INDEX idx_purchase_recipient_email (email),
             INDEX idx_purchase_recipient_active (is_active)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+    ensurePurchaseRecipientEmailIndexAllowsDuplicates($pdo);
+
     $supervisorColumn = $pdo->prepare(
         'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
     );
@@ -1622,8 +1647,7 @@ function createPurchaseRecipient(PDO $pdo, array $payload): array
 
     $statement = $pdo->prepare(
         'INSERT INTO purchase_notification_recipients (full_name, email, is_active, is_supervisor)
-         VALUES (:full_name, :email, 1, :is_supervisor)
-         ON DUPLICATE KEY UPDATE full_name = VALUES(full_name), is_active = 1, is_supervisor = VALUES(is_supervisor), updated_at = CURRENT_TIMESTAMP'
+         VALUES (:full_name, :email, 1, :is_supervisor)'
     );
     $statement->execute([':full_name' => $fullName, ':email' => $email, ':is_supervisor' => $isSupervisor]);
 
@@ -1644,9 +1668,6 @@ function updatePurchaseRecipient(PDO $pdo, array $payload): array
     $exists = $pdo->prepare('SELECT COUNT(*) FROM purchase_notification_recipients WHERE id = :id AND is_active = 1');
     $exists->execute([':id' => $id]);
     if ((int)$exists->fetchColumn() === 0) throw new InvalidArgumentException('Получатель не найден.');
-    $duplicate = $pdo->prepare('SELECT COUNT(*) FROM purchase_notification_recipients WHERE email = :email AND id <> :id');
-    $duplicate->execute([':email' => $email, ':id' => $id]);
-    if ((int)$duplicate->fetchColumn() > 0) throw new InvalidArgumentException('Получатель с таким email уже существует.');
     $statement = $pdo->prepare(
         'UPDATE purchase_notification_recipients SET full_name = :full_name, email = :email, is_supervisor = :is_supervisor, updated_at = CURRENT_TIMESTAMP
          WHERE id = :id AND is_active = 1'
