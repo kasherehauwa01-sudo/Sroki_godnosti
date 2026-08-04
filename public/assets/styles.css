@@ -165,6 +165,10 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 #registryBody tr[data-batch-id] { cursor: pointer; }
 #registryBody tr[data-batch-id]:hover td { filter: brightness(.98); }
 .numeric-cell { text-align: right; font-variant-numeric: tabular-nums; }
+.clickable-row { cursor: pointer; }
+.clickable-row:hover td { filter: brightness(.98); }
+.clickable-row:focus { outline: 3px solid #93c5fd; outline-offset: -3px; }
+.auto-zero-stock { color: #2563eb; font-weight: 700; }
 .stock-table { min-width: 100%; }
 .stock-table tfoot th { background: #f1f5f9; font-weight: 800; }
 .stock-table-wrap { border: 1px solid var(--border); border-radius: 16px; }

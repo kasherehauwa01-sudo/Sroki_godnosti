@@ -1824,14 +1824,26 @@ function showPurchaseNotificationLogs() {
     if (!logs.length) {
         body.innerHTML = '<tr><td colspan="4">Логи уведомлений отдела закупок пока отсутствуют.</td></tr>';
     } else {
-        body.innerHTML = logs.map((log) => `
-            <tr>
+        body.innerHTML = logs.map((log, index) => `
+            <tr class="${log.url ? 'clickable-row' : ''}" data-purchase-log-index="${index}" tabindex="${log.url ? '0' : '-1'}">
                 <td>${escapeHtml(log.date || 'Дата не указана')}</td>
                 <td>${escapeHtml(log.event || log.text || 'Описание отсутствует')}</td>
                 <td>${escapeHtml((log.recipients || []).join(', ') || '—')}</td>
                 <td>${escapeHtml(log.status || 'Статус не указан')}</td>
             </tr>
         `).join('');
+        body.querySelectorAll('[data-purchase-log-index]').forEach((row) => {
+            const log = logs[Number(row.dataset.purchaseLogIndex)];
+            if (!log?.url) return;
+            const open = () => { window.location.href = log.url; };
+            row.addEventListener('click', open);
+            row.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    open();
+                }
+            });
+        });
     }
     qs('#purchaseNotificationLogsDialog').showModal();
 }
