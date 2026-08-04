@@ -460,21 +460,14 @@ function buildEmailNotificationLogQuery(array $payload): array
         $params[':search_error'] = $searchPattern;
     }
     $direction = strtoupper((string)($payload['direction'] ?? 'DESC')) === 'ASC' ? 'ASC' : 'DESC';
-    $statement = $pdo->prepare(
-        'SELECT id, created_at, notification_type, subject, recipients, status, smtp_code, diagnostic_code,
-                error_reason, smtp_response, message_id, duration_ms, distribution_details, message_headers, message_body
-         FROM email_notification_log' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') .
-        ' ORDER BY created_at ' . $direction . ', id ' . $direction . ' LIMIT 500'
-    );
-    $statement->execute($params);
-    $logs = array_map(static function (array $row): array {
-        $row['recipients'] = json_decode((string)$row['recipients'], true) ?: [];
-        $row['distribution_details'] = json_decode((string)($row['distribution_details'] ?? ''), true) ?: [];
-        $row['date'] = formatMoscowDateTime((string)$row['created_at']);
-        $row['status_text'] = (string)$row['status'] === 'SUCCESS' ? '✅ Принято SMTP' : '❌ Не принято SMTP';
-        return $row;
-    }, $statement->fetchAll());
-    return ['ok' => true, 'logs' => $logs];
+    $sql = 'SELECT id, created_at, notification_type, subject, recipients, status, smtp_code, diagnostic_code,
+                   error_reason, smtp_response, message_id, duration_ms, distribution_details, message_headers, message_body
+            FROM email_notification_log' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') .
+        ' ORDER BY created_at ' . $direction . ', id ' . $direction . ' LIMIT 500';
+
+    // Выполнение остаётся в getProtectedEmailNotificationLogs(): построитель
+    // запроса не зависит от PDO и может отдельно проверяться тестами.
+    return [$sql, $params];
 }
 
 function retryEmailNotification(PDO $pdo, array $payload): array
@@ -2309,11 +2302,21 @@ function savePurchaseEventDistributionAudit(PDO $pdo, array $event, array $distr
 
 function updatePurchaseDistributionSendResult(PDO $pdo, array $event, string $email, string $status, string $error): void
 {
-    $statement = $pdo->prepare(purchaseDistributionSendResultSql());
-    $statement->execute([
-        ':status_current' => $status, ':status_error' => $status, ':error' => $error !== '' ? $error : null,
-        ':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':email' => '%' . $email . '%',
-    ]);
+    [$sql, $params] = buildPurchaseDistributionSendResultQuery($event, $email, $status, $error);
+    $statement = $pdo->prepare($sql);
+    $statement->execute($params);
+}
+
+function buildPurchaseDistributionSendResultQuery(array $event, string $email, string $status, string $error): array
+{
+    return [purchaseDistributionSendResultSql(), [
+        ':status_current' => $status,
+        ':status_error' => $status,
+        ':error' => $error !== '' ? $error : null,
+        ':event_key' => $event['event_key'],
+        ':event_date' => $event['event_date'],
+        ':email' => '%' . $email . '%',
+    ]];
 }
 
 /** В native prepare каждое вхождение должно иметь собственный placeholder. */
