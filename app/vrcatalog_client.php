@@ -212,6 +212,25 @@ function vrCatalogWarehouseMatches(string $catalogName, string $warehouseLookupK
     return str_contains($catalogKey, $warehouseLookupKey) || str_contains($warehouseLookupKey, $catalogKey);
 }
 
+
+function vrCatalogWarehouseMatches(string $catalogName, string $warehouseLookupKey): bool
+{
+    $catalogKey = vrCatalogWarehouseLookupKey($catalogName);
+    if ($catalogKey === '' || $warehouseLookupKey === '') return false;
+    if ($catalogKey === $warehouseLookupKey) return true;
+
+    // В catalogvr встречаются объединённые склады вида «Авиаторов Зал+Склад».
+    // Для настроек сервиса «Авиаторов Зал» и «Авиаторов Склад» считаем такой
+    // остаток подходящим, иначе складские формы ошибочно получают нули.
+    $parts = preg_split('/\s*\+\s*/u', $catalogName) ?: [];
+    foreach ($parts as $part) {
+        $partKey = vrCatalogWarehouseLookupKey($part);
+        if ($partKey === $warehouseLookupKey || ($partKey !== '' && str_contains($warehouseLookupKey, $partKey))) return true;
+    }
+
+    return str_contains($catalogKey, $warehouseLookupKey) || str_contains($warehouseLookupKey, $catalogKey);
+}
+
 function vrCatalogWarehouseLookupKey(string $name): string
 {
     $name = preg_replace('/\s+/u', ' ', trim($name)) ?? trim($name);
