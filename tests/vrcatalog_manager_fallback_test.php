@@ -40,6 +40,14 @@ assertSameValue(
     'Форма склада 2 должна содержать только товары с положительным остатком'
 );
 
+$russianStockProduct = ['article' => '346051', 'found' => true, 'stocks' => [
+    ['Склад' => 'Бахтурова', 'Остаток' => 2],
+    ['Склад' => 'Авиаторов Зал+Склад', 'Остаток' => 13],
+]];
+assertSameValue(2.0, vrCatalogWarehouseStockQuantity($russianStockProduct, ['name' => 'Бахтурова']), 'Остаток должен читаться из русских ключей catalogvr');
+assertSameValue(13.0, vrCatalogWarehouseStockQuantity($russianStockProduct, ['name' => 'Авиаторов Зал']), 'Объединённый склад catalogvr должен сопоставляться с залом');
+assertSameValue(13.0, vrCatalogWarehouseStockQuantity($russianStockProduct, ['name' => 'Авиаторов Склад']), 'Объединённый склад catalogvr должен сопоставляться со складом');
+
 foreach ([
     'ЖС2344-1' => 'ЖС2344',
     'ЖС2344-1-25' => 'ЖС2344',

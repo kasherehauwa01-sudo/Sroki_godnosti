@@ -128,13 +128,13 @@ function vrCatalogWarehouseStockQuantity(array $product, array $warehouse): floa
 
         foreach ($stocks as $key => $stock) {
             if (is_array($stock)) {
-                $name = (string)($stock['warehouse_name'] ?? $stock['warehouse'] ?? $stock['name'] ?? $key);
-                $quantity = $stock['quantity'] ?? $stock['stock'] ?? $stock['balance'] ?? $stock['available'] ?? 0;
+                $name = (string)($stock['warehouse_name'] ?? $stock['warehouse'] ?? $stock['name'] ?? $stock['Склад'] ?? $stock['склад'] ?? $key);
+                $quantity = $stock['quantity'] ?? $stock['stock'] ?? $stock['balance'] ?? $stock['available'] ?? $stock['Остаток'] ?? $stock['остаток'] ?? $stock['Количество'] ?? $stock['количество'] ?? 0;
             } else {
                 $name = (string)$key;
                 $quantity = $stock;
             }
-            if (vrCatalogWarehouseLookupKey($name) === $warehouseName && is_numeric($quantity)) {
+            if (vrCatalogWarehouseMatches($name, $warehouseName) && is_numeric($quantity)) {
                 return (float)$quantity;
             }
         }
@@ -143,13 +143,32 @@ function vrCatalogWarehouseStockQuantity(array $product, array $warehouse): floa
     $stockByWarehouse = $product['stock_by_warehouse'] ?? null;
     if (is_array($stockByWarehouse)) {
         foreach ($stockByWarehouse as $name => $quantity) {
-            if (vrCatalogWarehouseLookupKey((string)$name) === $warehouseName && is_numeric($quantity)) {
+            if (vrCatalogWarehouseMatches((string)$name, $warehouseName) && is_numeric($quantity)) {
                 return (float)$quantity;
             }
         }
     }
 
     return 0.0;
+}
+
+
+function vrCatalogWarehouseMatches(string $catalogName, string $warehouseLookupKey): bool
+{
+    $catalogKey = vrCatalogWarehouseLookupKey($catalogName);
+    if ($catalogKey === '' || $warehouseLookupKey === '') return false;
+    if ($catalogKey === $warehouseLookupKey) return true;
+
+    // В catalogvr встречаются объединённые склады вида «Авиаторов Зал+Склад».
+    // Для настроек сервиса «Авиаторов Зал» и «Авиаторов Склад» считаем такой
+    // остаток подходящим, иначе складские формы ошибочно получают нули.
+    $parts = preg_split('/\s*\+\s*/u', $catalogName) ?: [];
+    foreach ($parts as $part) {
+        $partKey = vrCatalogWarehouseLookupKey($part);
+        if ($partKey === $warehouseLookupKey || ($partKey !== '' && str_contains($warehouseLookupKey, $partKey))) return true;
+    }
+
+    return str_contains($catalogKey, $warehouseLookupKey) || str_contains($warehouseLookupKey, $catalogKey);
 }
 
 function vrCatalogWarehouseLookupKey(string $name): string
