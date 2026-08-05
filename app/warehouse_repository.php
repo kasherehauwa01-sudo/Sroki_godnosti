@@ -571,6 +571,7 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
                 ':warehouse_id' => (int)$notification['warehouse_id'],
                 ':quantity' => $newQuantity,
             ]);
+            clearStockAutoZeroEntryForManualStock($pdo, $notification, $batchId);
             $submittedBatchIds[] = $batchId;
             if ($oldQuantity !== $newQuantity) {
                 $log->execute([
@@ -612,6 +613,30 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
     }
 
     return ['ok' => true] + loadStockFormByToken($pdo, $token, false);
+}
+
+function clearStockAutoZeroEntryForManualStock(PDO $pdo, array $notification, int $batchId): void
+{
+    $eventKey = (string)($notification['event_key'] ?? '');
+    $eventDate = substr((string)($notification['sent_at'] ?? $notification['created_at'] ?? ''), 0, 10);
+    $warehouseId = (int)($notification['warehouse_id'] ?? 0);
+    if ($eventKey === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $eventDate) || $batchId <= 0 || $warehouseId <= 0) return;
+
+    try {
+        // Ручной ввод склада важнее технического автонуля: если склад сохранил
+        // значение в форме, сводная должна показывать именно это значение.
+        $pdo->prepare(
+            'DELETE FROM stock_auto_zero_entries
+             WHERE event_key = :event_key AND event_date = :event_date AND batch_id = :batch_id AND warehouse_id = :warehouse_id'
+        )->execute([
+            ':event_key' => $eventKey,
+            ':event_date' => $eventDate,
+            ':batch_id' => $batchId,
+            ':warehouse_id' => $warehouseId,
+        ]);
+    } catch (Throwable $error) {
+        error_log('Не удалось удалить технический автоноль после ввода склада: ' . $error->getMessage());
+    }
 }
 
 function updateStockNotificationProgress(PDO $pdo, int $notificationId): void

@@ -13,6 +13,29 @@ date_default_timezone_set(APP_TIMEZONE);
 
 header('Content-Type: application/json; charset=utf-8');
 
+register_shutdown_function(static function (): void {
+    $error = error_get_last();
+    if (!$error || !in_array((int)$error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        return;
+    }
+
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    echo json_encode([
+        'ok' => false,
+        'error' => 'Фатальная ошибка API: ' . (string)$error['message'],
+        'file' => basename((string)$error['file']),
+        'line' => (int)$error['line'],
+    ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+});
+
 require_once __DIR__ . '/../app/database.php';
 require_once __DIR__ . '/../app/mailer.php';
 require_once __DIR__ . '/../app/notification_templates.php';
@@ -61,9 +84,11 @@ function handleApiRequest(): void
         refreshDaysLeft($pdo);
         runApiBackgroundTask($pdo, 'overdue_stock_check', static fn () => sendDueOverdueStockCheckNotifications($pdo));
         runApiBackgroundTask($pdo, 'stock_reminders', static fn () => sendDueStockReminderNotifications($pdo));
+        runApiBackgroundTask($pdo, 'email_queue', static fn () => processDueNotificationEmailQueueSafely($pdo));
         if (!in_array($action, ['test_notification', 'test_purchase_notification'], true)) {
             runApiBackgroundTask($pdo, 'expiry_notifications', static fn () => runDueExpiryNotifications($pdo));
             runApiBackgroundTask($pdo, 'expired_purchase_events', static fn () => sendExpiredPurchaseEventNotifications($pdo));
+            runApiBackgroundTask($pdo, 'email_queue_after_notifications', static fn () => processDueNotificationEmailQueueSafely($pdo));
         }
 
         if ($method === 'GET') {
@@ -79,7 +104,7 @@ function handleApiRequest(): void
                 'stock_notification' => ['ok' => true] + getStockNotificationDetails($pdo, (int)($_GET['id'] ?? 0)),
                 'purchase_recipients' => getProtectedPurchaseRecipients($pdo, $_GET),
                 'email_notification_logs' => getProtectedEmailNotificationLogs($pdo, $_GET),
-                'catalog_health' => checkVrCatalogHealth($pdo),
+                'catalog_health' => getCatalogSyncStatus($pdo),
                 'purchase_event_summary' => ['ok' => true] + getPurchaseEventSummary($pdo, (string)($_GET['token'] ?? '')),
                 'purchase_event_xls' => downloadPurchaseEventXls($pdo, (string)($_GET['token'] ?? '')),
                 'stock_batch_notifications' => ['ok' => true, 'notifications' => listPurchaseEventNotifications($pdo)],
@@ -98,6 +123,8 @@ function handleApiRequest(): void
                 'delete_by_articles' => deleteBatchesByArticles($pdo, $payload),
                 'settings' => saveProtectedSettings($pdo, $payload),
                 'test_notification' => sendTestNotification($pdo, $payload),
+                'run_notifications_now' => sendManualExpiryNotifications($pdo, $payload),
+                'catalog_sync_test' => runCatalogSyncTest($pdo, $payload),
                 'test_email_delivery' => testEmailDelivery($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
                 'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
@@ -115,6 +142,7 @@ function handleApiRequest(): void
                 'purchase_event_batch_status' => updatePurchaseEventBatchStatus($pdo, $payload),
                 'purchase_event_stocks' => updatePurchaseEventStocks($pdo, $payload),
                 'purchase_event_remind' => remindPurchaseEventWarehouses($pdo, $payload),
+                'registry_recount' => sendRegistryRecountNotifications($pdo, $payload),
                 'email_notification_retry' => retryEmailNotification($pdo, $payload),
                 default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
             };
@@ -145,6 +173,22 @@ function runApiBackgroundTask(PDO $pdo, string $task, callable $callback): void
             writeLog($pdo, 'background_task_failed', ['task' => $task, 'error' => $error->getMessage()]);
         } catch (Throwable) {
             // Даже сбой таблицы logs не должен заменить ответ запрошенного API.
+        }
+    }
+}
+
+
+/** Обрабатывает одно наступившее письмо из очереди без риска сломать основной ответ API. */
+function processDueNotificationEmailQueueSafely(PDO $pdo): void
+{
+    try {
+        processDueNotificationEmailQueue($pdo, getRawSettings($pdo));
+    } catch (Throwable $error) {
+        error_log('Ошибка обработки очереди email: ' . $error->getMessage());
+        try {
+            writeLog($pdo, 'email_queue_processing_failed', ['error' => $error->getMessage()]);
+        } catch (Throwable) {
+            // Ошибка журналирования не должна мешать основной операции пользователя.
         }
     }
 }
@@ -406,6 +450,11 @@ function ensurePurchaseNotificationSchema(PDO $pdo): void
             CONSTRAINT fk_stock_auto_zero_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+    $columnCheck->execute([':table' => 'stock_auto_zero_entries', ':column' => 'source']);
+    if ((int)$columnCheck->fetchColumn() === 0) {
+        $pdo->exec("ALTER TABLE stock_auto_zero_entries ADD COLUMN source VARCHAR(64) NOT NULL DEFAULT 'catalog_missing_legacy' AFTER warehouse_id");
+    }
+
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS stock_notification_reminder_log (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -1239,9 +1288,9 @@ function recordCatalogAutoZeroStocks(PDO $pdo, string $eventKey, string $eventDa
          ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)'
     );
     $marker = $pdo->prepare(
-        'INSERT INTO stock_auto_zero_entries (event_key, event_date, batch_id, warehouse_id)
-         VALUES (:event_key, :event_date, :batch_id, :warehouse_id)
-         ON DUPLICATE KEY UPDATE created_at = created_at'
+        'INSERT INTO stock_auto_zero_entries (event_key, event_date, batch_id, warehouse_id, source)
+         VALUES (:event_key, :event_date, :batch_id, :warehouse_id, :source)
+         ON DUPLICATE KEY UPDATE source = VALUES(source), created_at = created_at'
     );
     foreach ($batches as $batch) {
         $batchId = (int)($batch['id'] ?? 0);
@@ -1252,22 +1301,165 @@ function recordCatalogAutoZeroStocks(PDO $pdo, string $eventKey, string $eventDa
             ':event_date' => $eventDate,
             ':batch_id' => $batchId,
             ':warehouse_id' => (int)$warehouse['id'],
+            ':source' => 'catalog_explicit_zero',
         ]);
     }
 }
 
-function sendDueExpiryNotifications(PDO $pdo, array $settings): void
+function refreshPurchaseEventCatalogAutoZeros(PDO $pdo, string $eventKey, string $eventDate, array $batches, array $warehouses): void
+{
+    if (!$batches || !$warehouses || !preg_match('/^expiry_\d+$/', $eventKey)) return;
+    $today = (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->format('Y-m-d');
+    if ($eventDate !== $today) return;
+
+    try {
+        $batchIds = array_values(array_unique(array_map(static fn (array $batch): int => (int)$batch['id'], $batches)));
+        $warehouseIds = array_values(array_unique(array_map(static fn (array $warehouse): int => (int)$warehouse['id'], $warehouses)));
+        if (!$batchIds || !$warehouseIds) return;
+
+        $batchMarks = implode(',', array_fill(0, count($batchIds), '?'));
+        $warehouseMarks = implode(',', array_fill(0, count($warehouseIds), '?'));
+        $explicitAutoZeroStatement = $pdo->prepare(
+            "SELECT batch_id, warehouse_id
+             FROM stock_auto_zero_entries
+             WHERE event_key = ? AND event_date = ? AND source = 'catalog_explicit_zero'
+               AND batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)"
+        );
+        $explicitAutoZeroStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+        $previousAutoZeros = $explicitAutoZeroStatement->fetchAll();
+
+        // Перед показом сегодняшней сводной заново сверяем явные нули catalogvr:
+        // положительный остаток остаётся прочерком до заполнения склада, а
+        // подтверждённый ноль автоматически отображается синим 0.
+        $catalogProducts = fetchVrCatalogProductsByArticles(array_column($batches, 'article'), $pdo);
+
+        $deleteStock = $pdo->prepare('DELETE FROM batch_stock WHERE batch_id = :batch_id AND warehouse_id = :warehouse_id AND quantity = 0');
+        $deleteMarker = $pdo->prepare(
+            "DELETE FROM stock_auto_zero_entries
+             WHERE event_key = :event_key AND event_date = :event_date AND batch_id = :batch_id AND warehouse_id = :warehouse_id AND source = 'catalog_explicit_zero'"
+        );
+        foreach ($previousAutoZeros as $row) {
+            $params = [':batch_id' => (int)$row['batch_id'], ':warehouse_id' => (int)$row['warehouse_id']];
+            $deleteStock->execute($params);
+            $deleteMarker->execute($params + [':event_key' => $eventKey, ':event_date' => $eventDate]);
+        }
+
+        foreach ($warehouses as $warehouse) {
+            $autoZeroBatches = filterBatchesByVrCatalogWarehouseZeroStock($batches, $catalogProducts, $warehouse);
+            recordCatalogAutoZeroStocks($pdo, $eventKey, $eventDate, $warehouse, $autoZeroBatches);
+        }
+    } catch (Throwable $error) {
+        writeLog($pdo, 'catalog_auto_zero_refresh_failed', [
+            'event_key' => $eventKey,
+            'event_date' => $eventDate,
+            'error' => $error->getMessage(),
+        ]);
+    }
+}
+
+
+function explainCatalogDiagnostics(array $diagnostics): string
+{
+    // Расшифровка нужна в настройках, чтобы видеть не только «ошибка», но и
+    // конкретную причину: отключена интеграция, нет авторизации, HTTP-сбой и т.д.
+    if (empty($diagnostics['enabled'])) return 'Интеграция отключена: проверьте VRCATALOG_INTERNAL_API_URL и VRCATALOG_INTERNAL_API_TOKEN.';
+    if (($diagnostics['authentication_ok'] ?? null) === false) return 'Ошибка авторизации: catalogvr отклонил внутренний токен.';
+    if (!empty($diagnostics['error'])) return (string)$diagnostics['error'];
+    if (isset($diagnostics['http_code']) && (int)$diagnostics['http_code'] >= 400) return 'catalogvr вернул HTTP ' . (int)$diagnostics['http_code'] . '.';
+    if (!empty($diagnostics['available'])) return 'Синхронизация доступна.';
+    return 'Статус catalogvr не определён. Запустите тест синхронизации по артикулу.';
+}
+
+function getCatalogSyncStatus(PDO $pdo): array
+{
+    $status = checkVrCatalogHealth($pdo);
+    $status['message'] = explainCatalogDiagnostics($status);
+    return $status;
+}
+
+function runCatalogSyncTest(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $article = trim((string)($payload['article'] ?? ''));
+    if ($article === '') throw new InvalidArgumentException('Укажите артикул для теста синхронизации.');
+    $response = requestVrCatalogProducts([$article], $pdo);
+    $warehouses = listWarehouses($pdo, true);
+    $rows = [];
+    foreach ($response['items'] as $product) {
+        if (!is_array($product)) continue;
+        $manager = vrCatalogManagerValue($product);
+        $detectedStocks = function_exists('vrCatalogExtractWarehouseStockRows') ? vrCatalogExtractWarehouseStockRows($product) : [];
+        $stocks = [];
+        foreach ($warehouses as $warehouse) {
+            $stocks[(string)$warehouse['id']] = vrCatalogWarehouseStockQuantity($product, $warehouse);
+        }
+        $rows[] = [
+            'article' => vrCatalogProductArticle($product) ?: $article,
+            'manager' => $manager['exists'] ? (string)$manager['value'] : '',
+            'found' => vrCatalogProductFound($product),
+            'stocks' => $stocks,
+            'detected_stock_rows' => count($detectedStocks),
+            'detected_stock_names' => array_values(array_unique(array_map(static fn (array $row): string => (string)$row['name'], $detectedStocks))),
+        ];
+    }
+    if (!$rows) {
+        $rows[] = ['article' => $article, 'manager' => '', 'found' => false, 'stocks' => array_fill_keys(array_map(static fn (array $warehouse): string => (string)$warehouse['id'], $warehouses), 0)];
+    }
+    return ['ok' => true, 'warehouses' => array_map(static fn (array $warehouse): array => ['id' => (int)$warehouse['id'], 'name' => (string)$warehouse['name']], $warehouses), 'rows' => $rows, 'diagnostics' => $response['diagnostics'], 'message' => explainCatalogDiagnostics($response['diagnostics'])];
+}
+
+function enabledNotificationDaysFromSettings(array $settings): array
+{
+    // Автоматическая и ручная отправка должны брать дни только из настроек,
+    // а не из фиксированной константы, иначе выбранные правила игнорируются.
+    $map = [
+        0 => 'notify_0_days',
+        180 => 'notify_180_days',
+        90 => 'notify_90_days',
+        60 => 'notify_60_days',
+        30 => 'notify_30_days',
+        15 => 'notify_15_days',
+        7 => 'notify_7_days',
+        1 => 'notify_1_day',
+    ];
+    $days = [];
+    foreach ($map as $day => $key) {
+        if (!empty($settings[$key])) $days[] = $day;
+    }
+    return $days;
+}
+
+
+function expiryNotificationBatchSummary(array $batches): array
+{
+    // В журнале показываем конкретные партии, чтобы было понятно, по каким товарам
+    // catalogvr повлиял на отправку или пропуск складской формы.
+    return array_map(static function (array $batch): string {
+        $code = trim((string)($batch['code'] ?? '')) ?: trim((string)($batch['article'] ?? ''));
+        $name = trim((string)($batch['name'] ?? ''));
+        return trim($code . ($name !== '' ? ' — ' . $name : ''));
+    }, $batches);
+}
+
+function sendDueExpiryNotifications(PDO $pdo, array $settings, string $mode = 'daily_auto'): array
 {
     $emails = getWarehouseNotificationEmails($pdo);
     if (!$emails) {
         writeLog($pdo, 'expiry_check_skipped', [
-            'mode' => 'daily_auto',
+            'mode' => $mode,
             'reason' => 'Не указаны email складов для уведомлений',
         ]);
-        return;
+        return ['sent' => 0, 'events' => [], 'message' => 'Не указаны email складов для уведомлений.'];
     }
 
-    $notificationDays = NOTIFICATION_EVENT_DAYS;
+    $notificationDays = enabledNotificationDaysFromSettings($settings);
+    if (!$notificationDays) {
+        writeLog($pdo, 'expiry_check_skipped', [
+            'mode' => $mode,
+            'reason' => 'Не выбраны правила уведомлений',
+        ]);
+        return ['sent' => 0, 'events' => [], 'message' => 'Не выбраны правила уведомлений.'];
+    }
     $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
     $statement = $pdo->prepare(
         "SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
@@ -1280,10 +1472,10 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
 
     if (!$batches) {
         writeLog($pdo, 'expiry_check_no_matches', [
-            'mode' => 'daily_auto',
+            'mode' => $mode,
             'criteria' => $notificationDays,
         ]);
-        return;
+        return ['sent' => 0, 'events' => [], 'message' => 'Сегодня нет партий под выбранные правила уведомлений.'];
     }
 
     $sentEvents = [];
@@ -1297,8 +1489,10 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
         $catalogProducts = fetchVrCatalogProductsByArticles(array_column($eventBatches, 'article'), $pdo);
         foreach ($warehouses as $warehouse) {
             $warehouseBatches = filterBatchesByVrCatalogWarehouseStock($eventBatches, $catalogProducts, $warehouse);
-            $warehouseBatchIds = array_flip(array_map(static fn (array $batch): int => (int)$batch['id'], $warehouseBatches));
-            $autoZeroBatches = array_values(array_filter($eventBatches, static fn (array $batch): bool => !isset($warehouseBatchIds[(int)$batch['id']])));
+            $autoZeroBatches = filterBatchesByVrCatalogWarehouseZeroStock($eventBatches, $catalogProducts, $warehouse);
+            // Автоноль ставим только при явном нуле из catalogvr. Если остаток не
+            // сопоставился или catalogvr прислал положительное значение, склад
+            // должен заполнить форму сам, а в сводной до этого будет прочерк.
             recordCatalogAutoZeroStocks($pdo, $eventKey, $eventDate, $warehouse, $autoZeroBatches);
             if (!$warehouseBatches) {
                 $sentEvents[] = [
@@ -1306,6 +1500,7 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
                     'warehouse_id' => (int)$warehouse['id'],
                     'warehouse' => (string)$warehouse['name'],
                     'count' => 0,
+                    'batches' => expiryNotificationBatchSummary($eventBatches),
                     'skipped' => 'В catalogvr нет положительных остатков для склада',
                 ];
                 continue;
@@ -1319,17 +1514,41 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
                 'warehouse' => (string)$warehouse['name'],
                 'notification_id' => (int)$form['id'],
                 'count' => count($warehouseBatches),
+                'batches' => expiryNotificationBatchSummary($warehouseBatches),
+                'source' => 'catalogvr',
                 'subject' => $subject,
                 'text' => $body,
             ];
         }
     }
 
+    $sentCount = count(array_filter($sentEvents, static fn (array $event): bool => !empty($event['notification_id'])));
+    if ($sentCount === 0) {
+        writeLog($pdo, 'expiry_check_no_matches', [
+            'mode' => $mode,
+            'criteria' => $notificationDays,
+            'events' => $sentEvents,
+            'reason' => 'После фильтрации по складам нет партий для отправки',
+        ]);
+        return ['sent' => 0, 'events' => $sentEvents, 'message' => 'Сегодняшние события найдены, но после фильтрации по складам отправлять нечего.'];
+    }
+
     writeLog($pdo, 'expiry_notifications_sent', [
-        'mode' => 'daily_auto',
+        'mode' => $mode,
         'emails' => $emails,
         'events' => $sentEvents,
+        'sent' => $sentCount,
     ]);
+
+    return ['sent' => $sentCount, 'events' => $sentEvents, 'message' => 'Уведомления складам поставлены в очередь.'];
+}
+
+function sendManualExpiryNotifications(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $result = sendDueExpiryNotifications($pdo, getRawSettings($pdo), 'manual_settings');
+    processDueNotificationEmailQueueSafely($pdo);
+    return ['ok' => true] + $result;
 }
 
 function sendDueOverdueStockCheckNotifications(PDO $pdo): void
@@ -1699,8 +1918,10 @@ function maybeSendPurchaseNotifications(PDO $pdo, array $notification, array $su
 {
     if (!$submittedBatchIds) return;
     $eventDays = parsePurchaseEventDays((string)($notification['event_key'] ?? ''));
-    $isOverdueStockCheck = (string)($notification['event_key'] ?? '') === 'overdue_stock_check';
-    if ($eventDays <= 0 && !$isOverdueStockCheck) return;
+    $eventKey = (string)($notification['event_key'] ?? '');
+    $isOverdueStockCheck = $eventKey === 'overdue_stock_check';
+    $isRecountEvent = str_starts_with($eventKey, 'recount_');
+    if ($eventDays <= 0 && !$isOverdueStockCheck && !$isRecountEvent) return;
     $eventDate = substr((string)($notification['sent_at'] ?? $notification['created_at'] ?? ''), 0, 10);
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $eventDate)) return;
     $event = getPurchaseEventData($pdo, (string)$notification['event_key'], $eventDate, false);
@@ -1799,6 +2020,76 @@ function sendStockReminderForWarehouse(PDO $pdo, array $event, array $warehouse)
         throw $error;
     }
     return $reminderNumber;
+}
+
+
+function registryRecountEmailSubject(array $warehouse): string
+{
+    // Тема должна совпадать с форматом из задачи и не получать служебный суффикс.
+    $today = (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->format('d.m.Y');
+    return 'Пересчет остатков | ' . (string)$warehouse['name'] . ' | ' . $today;
+}
+
+function registryRecountEmailBody(array $warehouse, string $expiryDate, array $form): string
+{
+    // Склад вносит только остатки выбранных партий с указанным сроком годности.
+    $expiryText = date('d.m.Y', strtotime($expiryDate));
+    return 'Остатки по событию заполнены некорректно. Прошу пересчитать. Склад ' . (string)$warehouse['name'] . ".\n"
+        . 'Внимание! Не нужно указывать общее количество товара на складе. Внесите только количество единиц, на упаковке которых указан срок годности до ' . $expiryText . ' включительно и нажмите «Сохранить».'
+        . "\n\n" . $form['url'];
+}
+
+function loadRegistryRecountBatches(PDO $pdo, array $batchIds): array
+{
+    $batchIds = array_values(array_unique(array_filter(array_map('intval', $batchIds), static fn (int $id): bool => $id > 0)));
+    if (!$batchIds) throw new InvalidArgumentException('Отметьте хотя бы один товар для пересчета.');
+    $marks = implode(',', array_fill(0, count($batchIds), '?'));
+    $statement = $pdo->prepare("SELECT id, article, code, name, expiry_date, expiry_full_date FROM batches WHERE id IN ($marks) AND status = ? AND expiry_invalid = 0 ORDER BY expiry_date ASC, article ASC, id ASC");
+    $statement->execute(array_merge($batchIds, [ACTIVE_STATUS]));
+    $batches = $statement->fetchAll();
+    if (count($batches) !== count($batchIds)) throw new InvalidArgumentException('Часть выбранных товаров не найдена, имеет некорректный срок годности или не находится в статусе «В наличии».');
+    return $batches;
+}
+
+function sendRegistryRecountNotifications(PDO $pdo, array $payload): array
+{
+    $batches = loadRegistryRecountBatches($pdo, (array)($payload['batch_ids'] ?? []));
+    $warehouses = getActiveWarehousesWithEmails($pdo);
+    if (!$warehouses) throw new InvalidArgumentException('Нет активных складов с email для отправки пересчета.');
+    $eventKey = 'recount_' . (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->format('Ymd_His') . '_' . bin2hex(random_bytes(3));
+    $expiryDate = max(array_map(static fn (array $batch): string => (string)$batch['expiry_date'], $batches));
+    $batchIds = array_map(static fn (array $batch): int => (int)$batch['id'], $batches);
+    $warehouseIds = array_map(static fn (array $warehouse): int => (int)$warehouse['id'], $warehouses);
+    $batchMarks = implode(',', array_fill(0, count($batchIds), '?'));
+    $warehouseMarks = implode(',', array_fill(0, count($warehouseIds), '?'));
+    // Старые остатки выбранных товаров очищаются, чтобы новое событие «Пересчет»
+    // считалось заполненным только после отправки новых форм всеми складами.
+    $clearStocks = $pdo->prepare("DELETE FROM batch_stock WHERE batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)");
+    $clearStocks->execute(array_merge($batchIds, $warehouseIds));
+    $sent = 0;
+    $errors = [];
+    foreach ($warehouses as $warehouse) {
+        try {
+            $subject = registryRecountEmailSubject($warehouse);
+            $form = createStockNotification($pdo, $warehouse, $batches, $eventKey, $subject, publicBaseUrl());
+            enqueueNotificationEmails($pdo, $form['emails'], $subject, registryRecountEmailBody($warehouse, $expiryDate, $form), [], [
+                'warehouse_name' => (string)$warehouse['name'],
+                'exact_subject' => true,
+                'notification_type' => 'Пересчет',
+                'event_key' => $eventKey,
+                'warehouse_id' => (int)$warehouse['id'],
+            ]);
+            $sent++;
+        } catch (Throwable $error) {
+            $errors[] = (string)$warehouse['name'] . ': ' . $error->getMessage();
+        }
+    }
+    // После ручного запуска пересчета сразу пытаемся отправить первое письмо,
+    // даже если отдельный cron очереди email еще не настроен или временно не сработал.
+    processDueNotificationEmailQueueSafely($pdo);
+    writeLog($pdo, 'registry_recount_sent', ['event_key' => $eventKey, 'batch_ids' => array_map('intval', array_column($batches, 'id')), 'warehouse_count' => count($warehouses), 'sent' => $sent, 'errors' => $errors]);
+    if ($errors) throw new RuntimeException('Часть уведомлений не поставлена в очередь: ' . implode('; ', $errors));
+    return ['ok' => true, 'message' => 'Пересчет отправлен складам: ' . $sent . '.', 'event_key' => $eventKey, 'sent' => $sent];
 }
 
 function remindPurchaseEventWarehouses(PDO $pdo, array $payload): array
@@ -2018,6 +2309,8 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
         ]);
     }
     $warehouses = $warehouseStatement->fetchAll();
+    refreshPurchaseEventCatalogAutoZeros($pdo, $eventKey, $eventDate, $batches, $warehouses);
+
     $batchIds = array_map(static fn (array $row): int => (int)$row['id'], $batches);
     $warehouseIds = array_map(static fn (array $row): int => (int)$row['id'], $warehouses);
     $stock = [];
@@ -2030,11 +2323,29 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
         $stockStatement->execute(array_merge($batchIds, $warehouseIds));
         foreach ($stockStatement->fetchAll() as $row) {
             $stock[(int)$row['batch_id']][(int)$row['warehouse_id']] = (float)$row['quantity'];
-            if ((string)$row['updated_at'] > $lastStockAt) $lastStockAt = (string)$row['updated_at'];
         }
 
-        // Матрица содержит только позиции, которые catalogvr разрешил показать
-        // конкретному складу. Для старых уведомлений она естественно остаётся полной.
+        // Старые технические автонули скрываем из сводной, но ручной ввод склада
+        // важнее: если по этой форме есть запись в журнале изменений, показываем
+        // сохранённый складом остаток вместо прочерка.
+        $legacyAutoZeroStatement = $pdo->prepare(
+            "SELECT z.batch_id, z.warehouse_id
+             FROM stock_auto_zero_entries z
+             WHERE z.event_key = ? AND z.event_date = ? AND z.source <> 'catalog_explicit_zero'
+               AND z.batch_id IN ($batchMarks) AND z.warehouse_id IN ($warehouseMarks)
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM stock_change_logs l
+                   INNER JOIN stock_notifications n ON n.id = l.notification_id
+                   WHERE n.event_key = ? AND DATE(n.sent_at) = ?
+                     AND l.batch_id = z.batch_id AND l.warehouse_id = z.warehouse_id
+               )"
+        );
+        $legacyAutoZeroStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds, [$eventKey, $eventDate]));
+        foreach ($legacyAutoZeroStatement->fetchAll() as $row) {
+            unset($stock[(int)$row['batch_id']][(int)$row['warehouse_id']]);
+        }
+
         $expectedStatement = $pdo->prepare(
             "SELECT DISTINCT i.batch_id, n.warehouse_id
              FROM stock_notifications n
@@ -2050,13 +2361,26 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
         $autoExpectedStatement = $pdo->prepare(
             "SELECT batch_id, warehouse_id
              FROM stock_auto_zero_entries
-             WHERE event_key = ? AND event_date = ?
+             WHERE event_key = ? AND event_date = ? AND source = 'catalog_explicit_zero'
                AND batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)"
         );
         $autoExpectedStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
         foreach ($autoExpectedStatement->fetchAll() as $row) {
             $expectedStock[(int)$row['batch_id']][(int)$row['warehouse_id']] = true;
         }
+
+        // Для признака «непрочитано» учитываем только фактические сохранения
+        // складских форм. Техническое обновление автонулей catalogvr не должно
+        // снова делать событие непрочитанным после обновления страницы.
+        $lastManualStockStatement = $pdo->prepare(
+            "SELECT MAX(l.created_at)
+             FROM stock_change_logs l
+             INNER JOIN stock_notifications n ON n.id = l.notification_id
+             WHERE n.event_key = ? AND DATE(n.sent_at) = ?
+               AND l.batch_id IN ($batchMarks) AND l.warehouse_id IN ($warehouseMarks)"
+        );
+        $lastManualStockStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+        $lastStockAt = (string)($lastManualStockStatement->fetchColumn() ?: '');
     }
 
     $filledCount = 0;
@@ -2085,7 +2409,7 @@ function listPurchaseEventNotifications(PDO $pdo): array
     $statement = $pdo->query(
         "SELECT event_key, DATE(sent_at) AS event_date, MAX(sent_at) AS sent_at
          FROM stock_notifications
-         WHERE event_key REGEXP '^expiry_[0-9]+$' OR event_key = 'overdue_stock_check'
+         WHERE event_key REGEXP '^expiry_[0-9]+$' OR event_key = 'overdue_stock_check' OR event_key LIKE 'recount_%'
          GROUP BY event_key, DATE(sent_at)
          ORDER BY sent_at DESC"
     );
@@ -2518,7 +2842,7 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
         $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'total' => $total, 'status' => $batch['status'], 'quantities' => $quantities, 'auto_zero_quantities' => $autoZeroQuantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'manager_email' => $managerEmails[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
     }
     usort($rows, static fn (array $left, array $right): int => ($left['section'] <=> $right['section']) ?: ($left['id'] <=> $right['id']));
-    return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => BATCH_STATUSES, 'can_remind' => purchaseEventMissingWarehouses($event) !== []];
+    return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'event_label' => str_starts_with((string)$log['event_key'], 'recount_') ? 'Пересчет' : ((int)$log['event_days'] . ' дней'), 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => BATCH_STATUSES, 'can_remind' => purchaseEventMissingWarehouses($event) !== []];
 }
 
 function purchaseEventAutoZeroMatrix(PDO $pdo, array $event): array
@@ -2531,7 +2855,7 @@ function purchaseEventAutoZeroMatrix(PDO $pdo, array $event): array
     $statement = $pdo->prepare(
         "SELECT batch_id, warehouse_id
          FROM stock_auto_zero_entries
-         WHERE event_key = ? AND event_date = ?
+         WHERE event_key = ? AND event_date = ? AND source = 'catalog_explicit_zero'
            AND batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)"
     );
     $statement->execute(array_merge([(string)$event['event_key'], (string)$event['event_date']], $batchIds, $warehouseIds));
