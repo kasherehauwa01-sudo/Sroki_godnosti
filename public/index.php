@@ -33,8 +33,9 @@ declare(strict_types=1);
         <section class="panel active" id="tab-registry">
             <div class="registry-actions registry-top-actions">
                 <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
-                <button class="ghost-button" id="openWriteOffButton" type="button">Изменить статус / Удалить</button>
+                <button class="ghost-button" id="openWriteOffButton" type="button">Режим супервайзера</button>
                 <button class="small-button danger hidden" id="bulkDeleteButton" type="button">Удалить</button>
+                <button class="small-button hidden" id="sendRecountButton" type="button">Отправить на пересчет</button>
             </div>
             <div class="card registry-filter-card">
                 <div class="registry-search-row">
@@ -417,7 +418,7 @@ declare(strict_types=1);
 
                 <h3>4. Смена статуса и перемещение на СБ</h3>
                 <ol>
-                    <li>Нажмите <code>Изменить статус / Удалить</code>.</li>
+                    <li>Нажмите <code>Режим супервайзера</code>.</li>
                     <li>Введите пароль ответственного пользователя.</li>
                     <li>После успешного ввода пароля можно менять статусы в реестре.</li>
                     <li>Выберите новый статус: <code>В наличии</code>, <code>Перемещено на СБ</code> или <code>Нет в наличии</code>.</li>
@@ -576,15 +577,15 @@ declare(strict_types=1);
     <dialog class="modal" id="writeOffPasswordDialog">
         <form class="card form modal-card" id="writeOffPasswordForm" method="dialog">
             <div class="modal-heading">
-                <h2>Изменить статус / Удалить</h2>
+                <h2>Режим супервайзера</h2>
                 <button class="icon-button" id="closeWriteOffPasswordDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
-            <p class="subtitle">Введите пароль, чтобы разрешить изменение статусов в колонке «Статус».</p>
+            <p class="subtitle">Введите пароль, чтобы разрешить изменение статусов, удаление партий и отправку товаров на пересчет.</p>
             <label>Пароль<input id="writeOffPasswordInput" required autocomplete="current-password" type="password"></label>
             <p class="field-error" id="writeOffPasswordError" role="alert"></p>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelWriteOffPasswordButton" type="button">Отмена</button>
-                <button class="primary" type="submit">Разрешить изменение статусов</button>
+                <button class="primary" type="submit">Войти в режим супервайзера</button>
             </div>
         </form>
     </dialog>
