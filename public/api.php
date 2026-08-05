@@ -115,6 +115,7 @@ function handleApiRequest(): void
                 'purchase_event_batch_status' => updatePurchaseEventBatchStatus($pdo, $payload),
                 'purchase_event_stocks' => updatePurchaseEventStocks($pdo, $payload),
                 'purchase_event_remind' => remindPurchaseEventWarehouses($pdo, $payload),
+                'purchase_event_recount' => recountPurchaseEventWarehouseStocks($pdo, $payload),
                 'email_notification_retry' => retryEmailNotification($pdo, $payload),
                 default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
             };
@@ -1799,6 +1800,74 @@ function sendStockReminderForWarehouse(PDO $pdo, array $event, array $warehouse)
         throw $error;
     }
     return $reminderNumber;
+}
+
+
+function recountPurchaseEventEmailSubject(array $event, array $warehouse): string
+{
+    // Тема фиксируется без времени, чтобы склад сразу видел дату запуска пересчета.
+    $today = (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->format('d.m.Y');
+    return 'Пересчет остатков | ' . (string)$warehouse['name'] . ' | ' . $today;
+}
+
+function recountPurchaseEventEmailBody(array $event, array $warehouse, array $form): string
+{
+    // В тексте повторяем склад и срок годности, для которого нужно внести только проблемные остатки.
+    $expiryText = date('d.m.Y', strtotime((string)$event['expiry_date']));
+    return 'Остатки по событию заполнены некорректно. Прошу пересчитать. Склад ' . (string)$warehouse['name'] . ".\n"
+        . 'Внимание! Не нужно указывать общее количество товара на складе. Внесите только количество единиц, на упаковке которых указан срок годности до ' . $expiryText . ' включительно и нажмите «Сохранить».'
+        . "\n\n" . $form['url'];
+}
+
+function recountPurchaseEventWarehouseStocks(PDO $pdo, array $payload): array
+{
+    assertWriteOffPassword($payload);
+    $eventInfo = findPurchaseEventByToken($pdo, trim((string)($payload['token'] ?? '')));
+    $event = getPurchaseEventData($pdo, (string)$eventInfo['event_key'], (string)$eventInfo['event_date'], false);
+    $warehouseId = (int)($payload['warehouse_id'] ?? 0);
+    $allWarehouses = filter_var($payload['all_warehouses'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    $warehouses = array_values(array_filter($event['warehouses'], static fn (array $warehouse): bool => $allWarehouses || (int)$warehouse['id'] === $warehouseId));
+    if (!$warehouses) throw new InvalidArgumentException('Склад не входит в сводную таблицу.');
+    if (!$event['batches']) throw new InvalidArgumentException('В событии нет партий для пересчета.');
+
+    $batchIds = array_map(static fn (array $batch): int => (int)$batch['id'], $event['batches']);
+    $batchMarks = implode(',', array_fill(0, count($batchIds), '?'));
+    $upsert = $pdo->prepare(
+        'INSERT INTO batch_stock (batch_id, warehouse_id, quantity)
+         VALUES (:batch_id, :warehouse_id, 0)
+         ON DUPLICATE KEY UPDATE quantity = 0, updated_at = CURRENT_TIMESTAMP'
+    );
+    $deleteAutoZero = $pdo->prepare("DELETE FROM stock_auto_zero_entries WHERE event_key = ? AND event_date = ? AND batch_id IN ($batchMarks) AND warehouse_id = ?");
+    $sent = 0;
+    $errors = [];
+    foreach ($warehouses as $warehouse) {
+        $pdo->beginTransaction();
+        try {
+            foreach ($batchIds as $batchId) $upsert->execute([':batch_id' => $batchId, ':warehouse_id' => (int)$warehouse['id']]);
+            $deleteAutoZero->execute(array_merge([(string)$eventInfo['event_key'], (string)$eventInfo['event_date']], $batchIds, [(int)$warehouse['id']]));
+            $pdo->commit();
+        } catch (Throwable $error) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $error;
+        }
+        try {
+            $form = createStockNotification($pdo, $warehouse, $event['batches'], (string)$eventInfo['event_key'], recountPurchaseEventEmailSubject($event, $warehouse), publicBaseUrl());
+            enqueueNotificationEmails($pdo, $form['emails'], recountPurchaseEventEmailSubject($event, $warehouse), recountPurchaseEventEmailBody($event, $warehouse, $form), [], [
+                'warehouse_name' => (string)$warehouse['name'],
+                'exact_subject' => true,
+                'notification_type' => 'Пересчет остатков',
+                'event_key' => (string)$eventInfo['event_key'],
+                'event_date' => (string)$eventInfo['event_date'],
+                'warehouse_id' => (int)$warehouse['id'],
+            ]);
+            $sent++;
+        } catch (Throwable $error) {
+            $errors[] = (string)$warehouse['name'] . ': ' . $error->getMessage();
+        }
+    }
+    writeLog($pdo, 'purchase_event_recount_requested', ['event_key' => (string)$eventInfo['event_key'], 'event_date' => (string)$eventInfo['event_date'], 'warehouse_ids' => array_map(static fn (array $warehouse): int => (int)$warehouse['id'], $warehouses), 'sent' => $sent, 'errors' => $errors]);
+    if ($errors) throw new RuntimeException('Часть уведомлений не поставлена в очередь: ' . implode('; ', $errors));
+    return ['ok' => true, 'message' => 'Запрос на пересчет отправлен складам: ' . $sent . '.', 'sent' => $sent] + getPurchaseEventSummary($pdo, trim((string)($payload['token'] ?? '')));
 }
 
 function remindPurchaseEventWarehouses(PDO $pdo, array $payload): array
