@@ -121,7 +121,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients', 'email_notification_logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'run_notifications_now']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -536,14 +536,17 @@ function updateSelectionControls() {
     const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
     const selectAll = qs('#selectAllBatches');
 
-    qs('#selectionHeader').classList.toggle('hidden', !state.writeOffAccessGranted);
+    const selectionVisible = state.writeOffAccessGranted;
+    qs('#selectionHeader').classList.toggle('hidden', !selectionVisible);
     qs('#bulkDeleteButton').classList.toggle('hidden', !state.writeOffAccessGranted || state.selectedBatchIds.size === 0);
     qs('#bulkDeleteButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
+    qs('#sendRecountButton')?.classList.toggle('hidden', !state.writeOffAccessGranted);
+    qs('#sendRecountButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
 
     if (selectAll) {
         selectAll.checked = allVisibleSelected;
         selectAll.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
-        selectAll.disabled = !state.writeOffAccessGranted || visibleIds.length === 0;
+        selectAll.disabled = !selectionVisible || visibleIds.length === 0;
     }
 }
 
@@ -581,7 +584,8 @@ function renderRegistry() {
     qs('#registryBody').innerHTML = state.filteredBatches.map((batch) => {
         const days = batch.expiryInvalid ? null : (batch.daysLeft ?? daysLeft(batch.expiryDate));
         const options = statusOptions.map((option) => `<option ${option === batch.status ? 'selected' : ''}>${option}</option>`).join('');
-        const selectionCell = state.writeOffAccessGranted
+        const selectionVisible = state.writeOffAccessGranted;
+        const selectionCell = selectionVisible
             ? `<td class="selection-column"><input class="batch-select-checkbox" data-id="${escapeHtml(batch.id)}" type="checkbox" ${state.selectedBatchIds.has(String(batch.id)) ? 'checked' : ''}></td>`
             : '';
         const invalidDateActions = batch.expiryInvalid
@@ -687,6 +691,26 @@ function toggleRegistrySort(field) {
     renderRegistry();
 }
 
+async function sendSelectedBatchesToRecount() {
+    if (state.selectedBatchIds.size === 0) {
+        showToast('Отметьте хотя бы один товар для пересчета.', true);
+        return;
+    }
+    const button = qs('#sendRecountButton');
+    button.disabled = true;
+    try {
+        const result = await api('registry_recount', { batch_ids: [...state.selectedBatchIds].map(Number) });
+        showToast(result.message || 'Товары отправлены на пересчет.');
+        state.selectedBatchIds.clear();
+        renderRegistry();
+        await loadStockBatchNotifications();
+    } catch (error) {
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
 async function onStatusChange(event) {
     const id = event.target.dataset.id;
     const status = event.target.value;
@@ -756,7 +780,7 @@ function showBatchStockStatusControls() {
         return;
     }
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         openWriteOffPasswordDialog();
         return;
     }
@@ -913,7 +937,7 @@ async function deleteBatch(id) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         return;
     }
     if (!confirm('Уверены, что хотите удалить партию безвозвратно?')) return;
@@ -931,7 +955,7 @@ async function deleteSelectedBatches() {
     const ids = [...state.selectedBatchIds];
     if (!ids.length) return;
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         return;
     }
     if (!confirm(`Удалить выбранные партии (${ids.length}) безвозвратно?`)) return;
@@ -1184,7 +1208,7 @@ function renderStockBatchNotifications() {
     if (markAllButton) markAllButton.disabled = !hasUnreadChanges;
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
         <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification ' : ''}${stockEventHasUnreadChanges(notification) ? 'stock-event-unread' : ''}" data-stock-event-key="${escapeHtml(stockEventViewKey(notification))}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
-            <td>${notification.event_key === 'overdue_stock_check' ? 'Проверка наличия товара' : `${Number(notification.event_days || 0)} дней`}</td>
+            <td>${notification.event_key === 'overdue_stock_check' ? 'Проверка наличия товара' : (String(notification.event_key || '').startsWith('recount_') ? 'Пересчет' : `${Number(notification.event_days || 0)} дней`)}</td>
             <td>${escapeHtml(formatDateRu(notification.event_date))}</td>
             <td>${escapeHtml(formatDateRu(notification.expiry_date))}</td>
             <td>${Number(notification.batch_count || 0)}</td>
@@ -1218,7 +1242,7 @@ async function saveSelectedStockBatchStatus() {
         return;
     }
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         openWriteOffPasswordDialog();
         return;
     }
@@ -1414,7 +1438,7 @@ async function leaveSettingsWithoutSaving() {
 
 function openWriteOffPasswordDialog() {
     if (state.writeOffAccessGranted) {
-        showToast('Изменение статусов уже разрешено.');
+        showToast('Режим супервайзера уже включен.');
         return;
     }
 
@@ -1439,7 +1463,7 @@ async function submitWriteOffPassword(event) {
         state.writeOffAccessGranted = true;
         closeWriteOffPasswordDialog();
         renderRegistry();
-        showToast('Теперь можно выделять, изменять статусы и удалять партии в реестре.');
+        showToast('Режим супервайзера включен: можно выделять, менять статусы, удалять партии и отправлять товары на пересчет.');
     } catch (verifyError) {
         state.writeOffPassword = '';
         error.textContent = verifyError.message;
@@ -1582,11 +1606,29 @@ function formatHistoryDetails(action, payload) {
     }
 
     if (action === 'expiry_notifications_sent') {
-        return `Уведомления отправлены. Получатели: ${(parsed.recipients || []).join(', ') || 'не указаны'}. Партий: ${Number(parsed.count || parsed.batches?.length || 0)}.`;
+        const events = Array.isArray(parsed.events) ? parsed.events : [];
+        if (events.length > 0) {
+            const sentEvents = events.filter((event) => event.notification_id);
+            const recipients = [...new Set(sentEvents.map((event) => event.warehouse).filter(Boolean))];
+            const batchCount = sentEvents.reduce((sum, event) => sum + Number(event.count || 0), 0);
+            const skipped = events.filter((event) => event.skipped).map((event) => `${event.warehouse}: ${event.skipped}`);
+            return `Уведомления поставлены в очередь. Склады: ${recipients.join(', ') || 'не указаны'}. Партий в формах: ${batchCount}.${skipped.length ? ` Не отправлено: ${skipped.join('; ')}.` : ''}`;
+        }
+        return `Уведомления отправлены. Получатели: ${(parsed.recipients || parsed.emails || []).join(', ') || 'не указаны'}. Партий: ${Number(parsed.count || parsed.batches?.length || 0)}.`;
     }
 
     if (action === 'expiry_notifications_failed') {
         return `Ошибка отправки уведомлений. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
+
+    if (action === 'expiry_check_no_matches') {
+        const events = Array.isArray(parsed.events) ? parsed.events : [];
+        const skipped = events.filter((event) => event.skipped).map((event) => `${event.warehouse}: ${event.skipped}`);
+        return `${parsed.reason || 'Сегодня нет партий под выбранные правила уведомлений.'}${skipped.length ? ` ${skipped.join('; ')}.` : ''}`;
+    }
+
+    if (action === 'expiry_check_skipped') {
+        return parsed.reason || 'Проверка сроков пропущена.';
     }
 
     if (parsed.text) return parsed.text;
@@ -1891,6 +1933,28 @@ function toggleSmtpPasswordVisibility() {
     const button = qs('#toggleSmtpPasswordButton');
     input.type = input.type === 'password' ? 'text' : 'password';
     button.textContent = input.type === 'password' ? 'Показать' : 'Скрыть';
+}
+
+
+async function runNotificationsNow() {
+    const button = qs('#runNotificationsNowButton');
+    const status = qs('#testNotificationStatus');
+    button.disabled = true;
+    status.textContent = 'Сохраняю настройки и ищу сегодняшние события...';
+    showToast('Запускаю отправку уведомлений складам...');
+
+    try {
+        await persistSettings();
+        const result = await api('run_notifications_now', { settings_password: state.settingsPassword });
+        await loadSettings();
+        status.textContent = result.message || `Уведомления поставлены в очередь: ${Number(result.sent || 0)}.`;
+        showToast(status.textContent);
+    } catch (error) {
+        status.textContent = error.message;
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
 }
 
 async function sendTestNotification() {
@@ -2371,6 +2435,7 @@ function bindEvents() {
     qs('#leaveSettingsButton').addEventListener('click', leaveSettingsWithoutSaving);
     qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
     qs('#bulkDeleteButton').addEventListener('click', deleteSelectedBatches);
+    qs('#sendRecountButton').addEventListener('click', sendSelectedBatchesToRecount);
     qs('#selectAllBatches').addEventListener('change', toggleSelectAllBatches);
     qs('#writeOffPasswordForm').addEventListener('submit', submitWriteOffPassword);
     qs('#cancelWriteOffPasswordButton').addEventListener('click', closeWriteOffPasswordDialog);
@@ -2453,6 +2518,7 @@ function bindEvents() {
     qs('#confirmMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
+    qs('#runNotificationsNowButton').addEventListener('click', runNotificationsNow);
     qs('#testEmailDeliveryButton').addEventListener('click', testEmailDelivery);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
     qs('#openEmailNotificationLogButton')?.addEventListener('click', showNotificationLogs);
