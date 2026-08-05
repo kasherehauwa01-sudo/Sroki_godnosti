@@ -224,6 +224,7 @@ function vrCatalogWarehouseMatches(string $catalogName, string $warehouseLookupK
     $catalogKey = vrCatalogWarehouseLookupKey($catalogName);
     if ($catalogKey === '' || $warehouseLookupKey === '') return false;
     if ($catalogKey === $warehouseLookupKey) return true;
+    if (vrCatalogCombinedWarehouseMatches($catalogName, $warehouseLookupKey)) return true;
 
     // В catalogvr встречаются объединённые склады вида «Авиаторов Зал+Склад».
     // Для настроек сервиса «Авиаторов Зал» и «Авиаторов Склад» считаем такой
@@ -231,10 +232,34 @@ function vrCatalogWarehouseMatches(string $catalogName, string $warehouseLookupK
     $parts = preg_split('/\s*\+\s*/u', $catalogName) ?: [];
     foreach ($parts as $part) {
         $partKey = vrCatalogWarehouseLookupKey($part);
-        if ($partKey === $warehouseLookupKey || ($partKey !== '' && str_contains($warehouseLookupKey, $partKey))) return true;
+        if ($partKey === $warehouseLookupKey) return true;
     }
 
     return str_contains($catalogKey, $warehouseLookupKey) || str_contains($warehouseLookupKey, $catalogKey);
+}
+
+function vrCatalogCombinedWarehouseMatches(string $catalogName, string $warehouseLookupKey): bool
+{
+    $parts = preg_split('/\s*\+\s*/u', trim($catalogName)) ?: [];
+    if (count($parts) < 2) return false;
+
+    $firstWords = preg_split('/\s+/u', trim((string)$parts[0])) ?: [];
+    $prefix = trim((string)($firstWords[0] ?? ''));
+    foreach ($parts as $index => $part) {
+        $part = trim((string)$part);
+        if ($part === '') continue;
+        $variants = [$part];
+        // Для catalogvr «Авиаторов Зал+Склад» второй сегмент приходит без
+        // общего префикса. В сервисе сроков ему соответствует «Авиаторов Склад».
+        if ($index > 0 && $prefix !== '' && !str_contains(vrCatalogWarehouseLookupKey($part), vrCatalogWarehouseLookupKey($prefix))) {
+            $variants[] = $prefix . ' ' . $part;
+        }
+        foreach ($variants as $variant) {
+            if (vrCatalogWarehouseLookupKey($variant) === $warehouseLookupKey) return true;
+        }
+    }
+
+    return false;
 }
 
 function vrCatalogWarehouseLookupKey(string $name): string
