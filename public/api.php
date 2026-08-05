@@ -1432,8 +1432,10 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings, string $mode = 'd
         $catalogProducts = fetchVrCatalogProductsByArticles(array_column($eventBatches, 'article'), $pdo);
         foreach ($warehouses as $warehouse) {
             $warehouseBatches = filterBatchesByVrCatalogWarehouseStock($eventBatches, $catalogProducts, $warehouse);
-            $warehouseBatchIds = array_flip(array_map(static fn (array $batch): int => (int)$batch['id'], $warehouseBatches));
-            $autoZeroBatches = array_values(array_filter($eventBatches, static fn (array $batch): bool => !isset($warehouseBatchIds[(int)$batch['id']])));
+            $autoZeroBatches = filterBatchesByVrCatalogWarehouseZeroStock($eventBatches, $catalogProducts, $warehouse);
+            // Автоноль ставим только при явном нуле из catalogvr. Если остаток не
+            // сопоставился или catalogvr прислал положительное значение, склад
+            // должен заполнить форму сам, а в сводной до этого будет прочерк.
             recordCatalogAutoZeroStocks($pdo, $eventKey, $eventDate, $warehouse, $autoZeroBatches);
             if (!$warehouseBatches) {
                 $sentEvents[] = [

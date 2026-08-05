@@ -55,6 +55,19 @@ $nestedStockProduct = ['article' => '346051', 'found' => true, 'data' => ['remai
 assertSameValue(3.0, vrCatalogWarehouseStockQuantity($nestedStockProduct, ['name' => 'Козловская']), 'Остаток должен находиться рекурсивно и читаться из строки');
 assertSameValue(7.5, vrCatalogWarehouseStockQuantity($nestedStockProduct, ['name' => 'Стройград']), 'Дробный остаток с запятой должен читаться как число');
 
+$zeroProducts = [
+    ['article' => 'zero', 'found' => true, 'stocks' => [['Склад' => 'Бахтурова', 'Остаток' => 0]]],
+    ['article' => 'positive', 'found' => true, 'stocks' => [['Склад' => 'Бахтурова', 'Остаток' => 2]]],
+    ['article' => 'missing-stock-row', 'found' => true, 'stocks' => [['Склад' => 'Диамант', 'Остаток' => 0]]],
+];
+$zeroBatches = [
+    ['id' => 10, 'article' => 'zero'],
+    ['id' => 11, 'article' => 'positive'],
+    ['id' => 12, 'article' => 'missing-stock-row'],
+];
+assertSameValue([10], array_column(filterBatchesByVrCatalogWarehouseZeroStock($zeroBatches, $zeroProducts, ['name' => 'Бахтурова']), 'id'), 'Автоноль должен ставиться только при явном нуле catalogvr');
+assertSameValue(null, vrCatalogWarehouseStockQuantityOrNull($zeroProducts[2], ['name' => 'Бахтурова']), 'Отсутствующая строка склада не должна считаться нулём');
+
 foreach ([
     'ЖС2344-1' => 'ЖС2344',
     'ЖС2344-1-25' => 'ЖС2344',

@@ -116,11 +116,36 @@ function filterBatchesByVrCatalogWarehouseStock(array $batches, array $products,
     }));
 }
 
+
+function filterBatchesByVrCatalogWarehouseZeroStock(array $batches, array $products, array $warehouse): array
+{
+    $productsByArticle = [];
+    foreach ($products as $product) {
+        if (!is_array($product) || !vrCatalogProductFound($product)) continue;
+        $key = vrCatalogArticleLookupKey(vrCatalogProductArticle($product));
+        if ($key !== '') $productsByArticle[$key][] = $product;
+    }
+
+    return array_values(array_filter($batches, static function (array $batch) use ($productsByArticle, $warehouse): bool {
+        $key = vrCatalogArticleLookupKey((string)($batch['article'] ?? ''));
+        foreach ($productsByArticle[$key] ?? [] as $product) {
+            $quantity = vrCatalogWarehouseStockQuantityOrNull($product, $warehouse);
+            if ($quantity !== null && $quantity <= 0) return true;
+        }
+        return false;
+    }));
+}
+
 /** Читает остаток склада из официального массива stocks и legacy-вариантов ответа. */
 function vrCatalogWarehouseStockQuantity(array $product, array $warehouse): float
 {
+    return vrCatalogWarehouseStockQuantityOrNull($product, $warehouse) ?? 0.0;
+}
+
+function vrCatalogWarehouseStockQuantityOrNull(array $product, array $warehouse): ?float
+{
     $warehouseName = vrCatalogWarehouseLookupKey((string)($warehouse['name'] ?? ''));
-    if ($warehouseName === '') return 0.0;
+    if ($warehouseName === '') return null;
 
     foreach (vrCatalogExtractWarehouseStockRows($product) as $row) {
         if (vrCatalogWarehouseMatches((string)$row['name'], $warehouseName)) {
@@ -128,7 +153,7 @@ function vrCatalogWarehouseStockQuantity(array $product, array $warehouse): floa
         }
     }
 
-    return 0.0;
+    return null;
 }
 
 function vrCatalogExtractWarehouseStockRows(array $product): array
