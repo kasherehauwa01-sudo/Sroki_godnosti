@@ -33,8 +33,9 @@ declare(strict_types=1);
         <section class="panel active" id="tab-registry">
             <div class="registry-actions registry-top-actions">
                 <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
-                <button class="ghost-button" id="openWriteOffButton" type="button">Изменить статус / Удалить</button>
+                <button class="ghost-button" id="openWriteOffButton" type="button">Режим супервайзера</button>
                 <button class="small-button danger hidden" id="bulkDeleteButton" type="button">Удалить</button>
+                <button class="small-button hidden" id="sendRecountButton" type="button">Отправить на пересчет</button>
             </div>
             <div class="card registry-filter-card">
                 <div class="registry-search-row">
@@ -181,6 +182,18 @@ declare(strict_types=1);
                     </dl>
                 </div>
 
+
+                <div class="card form settings-catalog-sync-card">
+                    <h3>Синхронизация с catalogvr</h3>
+                    <dl class="system-info">
+                        <dt>Статус:</dt><dd id="catalogSyncStatus">Не проверялось</dd>
+                        <dt>HTTP:</dt><dd id="catalogSyncHttp">—</dd>
+                        <dt>Авторизация:</dt><dd id="catalogSyncAuth">—</dd>
+                        <dt>Последняя проверка:</dt><dd id="catalogSyncCheckedAt">—</dd>
+                        <dt>Ошибка:</dt><dd id="catalogSyncError">—</dd>
+                    </dl>
+                    <button class="ghost-button" id="openCatalogSyncTestButton" formnovalidate type="button">Тест синхронизации</button>
+                </div>
                 <div class="card form settings-delete-articles-card">
                     <h3>Удаление артикулов</h3>
                     <p class="subtitle">Удаляет из реестра все партии с точным совпадением в колонке «Артикул».</p>
@@ -219,6 +232,7 @@ declare(strict_types=1);
                     </label>
                     <div class="settings-actions">
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                        <button class="ghost-button" id="runNotificationsNowButton" formnovalidate type="button">Запустить отправку</button>
                         <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">История уведомлений</button>
                     </div>
                     <label>Email для проверки доставки
@@ -417,7 +431,7 @@ declare(strict_types=1);
 
                 <h3>4. Смена статуса и перемещение на СБ</h3>
                 <ol>
-                    <li>Нажмите <code>Изменить статус / Удалить</code>.</li>
+                    <li>Нажмите <code>Режим супервайзера</code>.</li>
                     <li>Введите пароль ответственного пользователя.</li>
                     <li>После успешного ввода пароля можно менять статусы в реестре.</li>
                     <li>Выберите новый статус: <code>В наличии</code>, <code>Перемещено на СБ</code> или <code>Нет в наличии</code>.</li>
@@ -576,15 +590,15 @@ declare(strict_types=1);
     <dialog class="modal" id="writeOffPasswordDialog">
         <form class="card form modal-card" id="writeOffPasswordForm" method="dialog">
             <div class="modal-heading">
-                <h2>Изменить статус / Удалить</h2>
+                <h2>Режим супервайзера</h2>
                 <button class="icon-button" id="closeWriteOffPasswordDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
-            <p class="subtitle">Введите пароль, чтобы разрешить изменение статусов в колонке «Статус».</p>
+            <p class="subtitle">Введите пароль, чтобы разрешить изменение статусов, удаление партий и отправку товаров на пересчет.</p>
             <label>Пароль<input id="writeOffPasswordInput" required autocomplete="current-password" type="password"></label>
             <p class="field-error" id="writeOffPasswordError" role="alert"></p>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelWriteOffPasswordButton" type="button">Отмена</button>
-                <button class="primary" type="submit">Разрешить изменение статусов</button>
+                <button class="primary" type="submit">Войти в режим супервайзера</button>
             </div>
         </form>
     </dialog>
@@ -716,6 +730,38 @@ declare(strict_types=1);
         </form>
     </dialog>
 
+
+    <dialog class="modal" id="catalogSyncTestDialog">
+        <form class="card form modal-card" id="catalogSyncTestForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Тест синхронизации с catalogvr</h2>
+                <button class="icon-button" id="closeCatalogSyncTestDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <label>Артикул<input id="catalogSyncArticle" required autocomplete="off" placeholder="Введите артикул"></label>
+            <p class="field-error" id="catalogSyncTestError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelCatalogSyncTestButton" type="button">Отмена</button>
+                <button class="primary" id="runCatalogSyncTestButton" type="submit">Запустить тест</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal notification-history-dialog" id="catalogSyncResultDialog">
+        <div class="card form modal-card wide-modal-card">
+            <div class="modal-heading">
+                <h2>Результат синхронизации с catalogvr</h2>
+                <button class="icon-button" id="closeCatalogSyncResultDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle" id="catalogSyncResultInfo"></p>
+            <div class="table-wrap notification-dialog-body">
+                <table>
+                    <thead><tr id="catalogSyncResultHead"></tr></thead>
+                    <tbody id="catalogSyncResultBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-actions"><button class="primary" id="confirmCatalogSyncResultDialogButton" type="button">Закрыть</button></div>
+        </div>
+    </dialog>
     <dialog class="modal" id="testPurchaseNotificationDialog">
         <form class="card form modal-card" id="testPurchaseNotificationForm" method="dialog">
             <div class="modal-heading">
