@@ -2326,15 +2326,23 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
             if ((string)$row['updated_at'] > $lastStockAt) $lastStockAt = (string)$row['updated_at'];
         }
 
-        // Матрица содержит только позиции, которые catalogvr разрешил показать
-        // конкретному складу. Для старых уведомлений она естественно остаётся полной.
+        // Старые технические автонули скрываем из сводной, но ручной ввод склада
+        // важнее: если по этой форме есть запись в журнале изменений, показываем
+        // сохранённый складом остаток вместо прочерка.
         $legacyAutoZeroStatement = $pdo->prepare(
-            "SELECT batch_id, warehouse_id
-             FROM stock_auto_zero_entries
-             WHERE event_key = ? AND event_date = ? AND source <> 'catalog_explicit_zero'
-               AND batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)"
+            "SELECT z.batch_id, z.warehouse_id
+             FROM stock_auto_zero_entries z
+             WHERE z.event_key = ? AND z.event_date = ? AND z.source <> 'catalog_explicit_zero'
+               AND z.batch_id IN ($batchMarks) AND z.warehouse_id IN ($warehouseMarks)
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM stock_change_logs l
+                   INNER JOIN stock_notifications n ON n.id = l.notification_id
+                   WHERE n.event_key = ? AND DATE(n.sent_at) = ?
+                     AND l.batch_id = z.batch_id AND l.warehouse_id = z.warehouse_id
+               )"
         );
-        $legacyAutoZeroStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+        $legacyAutoZeroStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds, [$eventKey, $eventDate]));
         foreach ($legacyAutoZeroStatement->fetchAll() as $row) {
             unset($stock[(int)$row['batch_id']][(int)$row['warehouse_id']]);
         }
