@@ -21,7 +21,6 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
             <h1>Остатки по товарам со сроком годности</h1>
             <div class="purchase-event-actions">
                 <button class="ghost-button" id="editPurchaseEventButton" type="button">Редактировать</button>
-                <button class="ghost-button" id="recountAllPurchaseEventButton" type="button">Пересчитать всем</button>
                 <button class="primary hidden" id="savePurchaseEventStocksButton" type="button">Сохранить</button>
                 <button class="primary" id="downloadPurchaseEventXlsButton" type="button">Скачать XLS</button>
                 <button class="ghost-button hidden" id="remindPurchaseEventButton" type="button">Напомнить</button>
@@ -53,7 +52,7 @@ const formatDate = (value) => {
 function renderPurchaseEventTable(result) {
     document.querySelector('#purchaseEventHead').innerHTML = ['Код<br>Менеджер', 'Наименование', 'Общий остаток', 'Статус']
         .map((title) => `<th class="purchase-event-main-column">${title}</th>`).join('')
-        + result.warehouses.map((warehouse) => `<th><button class="small-button recount-warehouse-button" data-warehouse-id="${warehouse.id}" type="button">Пересчитать</button><br>${escapeHtml(warehouse.name)}</th>`).join('');
+        + result.warehouses.map((warehouse) => `<th>${escapeHtml(warehouse.name)}</th>`).join('');
     let lastSection = '';
     document.querySelector('#purchaseEventBody').innerHTML = result.rows.map((row) => {
         const section = row.section || 'assigned';
@@ -76,35 +75,7 @@ function renderPurchaseEventTable(result) {
     </tr>`;
     }).join('');
     document.querySelectorAll('.purchase-event-status').forEach((select) => select.addEventListener('change', savePurchaseEventStatus));
-    document.querySelectorAll('.recount-warehouse-button').forEach((button) => button.addEventListener('click', () => recountPurchaseEventStocks({ warehouseId: Number(button.dataset.warehouseId), button })));
     document.querySelector('#savePurchaseEventStocksButton').classList.toggle('hidden', !purchaseEventEditing);
-}
-
-
-async function recountPurchaseEventStocks({ warehouseId = null, allWarehouses = false, button = null } = {}) {
-    const password = prompt(allWarehouses ? 'Введите пароль для пересчета всех складов:' : 'Введите пароль для пересчета склада:');
-    if (password === null) return;
-    const targetButton = button || document.querySelector('#recountAllPurchaseEventButton');
-    targetButton.disabled = true;
-    document.querySelector('#purchaseEventError').textContent = '';
-    try {
-        const response = await fetch(`${purchaseEventApiUrl}?action=purchase_event_recount`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: purchaseEventToken, write_off_password: password, warehouse_id: warehouseId, all_warehouses: allWarehouses }),
-        });
-        const result = await response.json();
-        if (!response.ok || !result.ok) throw new Error(result.error || 'Не удалось запустить пересчет остатков.');
-        purchaseEventData = result;
-        purchaseEventEditing = false;
-        purchaseEventEditPassword = '';
-        renderPurchaseEventTable(result);
-        alert(result.message || 'Запрос на пересчет отправлен.');
-    } catch (error) {
-        document.querySelector('#purchaseEventError').textContent = error.message;
-    } finally {
-        targetButton.disabled = false;
-    }
 }
 
 async function loadPurchaseEvent() {
@@ -205,7 +176,6 @@ async function savePurchaseEventStocks() {
 }
 
 document.querySelector('#editPurchaseEventButton').addEventListener('click', enablePurchaseEventEditing);
-document.querySelector('#recountAllPurchaseEventButton').addEventListener('click', (event) => recountPurchaseEventStocks({ allWarehouses: true, button: event.currentTarget }));
 document.querySelector('#savePurchaseEventStocksButton').addEventListener('click', savePurchaseEventStocks);
 document.querySelector('#downloadPurchaseEventXlsButton').addEventListener('click', () => {
     const url = new URL(purchaseEventApiUrl, window.location.origin);

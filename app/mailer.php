@@ -14,7 +14,7 @@ function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string 
     $startedAt = microtime(true);
     $baseSubject = trim((string)($context['subject_base'] ?? $subject));
     $context['subject_base'] = $baseSubject;
-    $subject = !empty($context['exact_subject']) ? $baseSubject : formatNotificationEmailSubject($baseSubject, $emails, $context);
+    $subject = formatNotificationEmailSubject($baseSubject, $emails, $context);
     $messageId = createEmailMessageId($settings);
     $recipientsBeforeFilters = array_values(array_map(static fn ($email): string => (string)$email, $emails));
     $emails = normalizeSmtpRecipients($emails);
