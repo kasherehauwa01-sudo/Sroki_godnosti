@@ -1306,6 +1306,57 @@ function recordCatalogAutoZeroStocks(PDO $pdo, string $eventKey, string $eventDa
     }
 }
 
+function refreshPurchaseEventCatalogAutoZeros(PDO $pdo, string $eventKey, string $eventDate, array $batches, array $warehouses): void
+{
+    if (!$batches || !$warehouses || !preg_match('/^expiry_\d+$/', $eventKey)) return;
+    $today = (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->format('Y-m-d');
+    if ($eventDate !== $today) return;
+
+    try {
+        $batchIds = array_values(array_unique(array_map(static fn (array $batch): int => (int)$batch['id'], $batches)));
+        $warehouseIds = array_values(array_unique(array_map(static fn (array $warehouse): int => (int)$warehouse['id'], $warehouses)));
+        if (!$batchIds || !$warehouseIds) return;
+
+        $batchMarks = implode(',', array_fill(0, count($batchIds), '?'));
+        $warehouseMarks = implode(',', array_fill(0, count($warehouseIds), '?'));
+        $explicitAutoZeroStatement = $pdo->prepare(
+            "SELECT batch_id, warehouse_id
+             FROM stock_auto_zero_entries
+             WHERE event_key = ? AND event_date = ? AND source = 'catalog_explicit_zero'
+               AND batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)"
+        );
+        $explicitAutoZeroStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+        $previousAutoZeros = $explicitAutoZeroStatement->fetchAll();
+
+        // Перед показом сегодняшней сводной заново сверяем явные нули catalogvr:
+        // положительный остаток остаётся прочерком до заполнения склада, а
+        // подтверждённый ноль автоматически отображается синим 0.
+        $catalogProducts = fetchVrCatalogProductsByArticles(array_column($batches, 'article'), $pdo);
+
+        $deleteStock = $pdo->prepare('DELETE FROM batch_stock WHERE batch_id = :batch_id AND warehouse_id = :warehouse_id AND quantity = 0');
+        $deleteMarker = $pdo->prepare(
+            "DELETE FROM stock_auto_zero_entries
+             WHERE event_key = :event_key AND event_date = :event_date AND batch_id = :batch_id AND warehouse_id = :warehouse_id AND source = 'catalog_explicit_zero'"
+        );
+        foreach ($previousAutoZeros as $row) {
+            $params = [':batch_id' => (int)$row['batch_id'], ':warehouse_id' => (int)$row['warehouse_id']];
+            $deleteStock->execute($params);
+            $deleteMarker->execute($params + [':event_key' => $eventKey, ':event_date' => $eventDate]);
+        }
+
+        foreach ($warehouses as $warehouse) {
+            $autoZeroBatches = filterBatchesByVrCatalogWarehouseZeroStock($batches, $catalogProducts, $warehouse);
+            recordCatalogAutoZeroStocks($pdo, $eventKey, $eventDate, $warehouse, $autoZeroBatches);
+        }
+    } catch (Throwable $error) {
+        writeLog($pdo, 'catalog_auto_zero_refresh_failed', [
+            'event_key' => $eventKey,
+            'event_date' => $eventDate,
+            'error' => $error->getMessage(),
+        ]);
+    }
+}
+
 
 function explainCatalogDiagnostics(array $diagnostics): string
 {
@@ -2258,6 +2309,8 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
         ]);
     }
     $warehouses = $warehouseStatement->fetchAll();
+    refreshPurchaseEventCatalogAutoZeros($pdo, $eventKey, $eventDate, $batches, $warehouses);
+
     $batchIds = array_map(static fn (array $row): int => (int)$row['id'], $batches);
     $warehouseIds = array_map(static fn (array $row): int => (int)$row['id'], $warehouses);
     $stock = [];
