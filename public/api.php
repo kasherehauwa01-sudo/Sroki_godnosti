@@ -13,6 +13,29 @@ date_default_timezone_set(APP_TIMEZONE);
 
 header('Content-Type: application/json; charset=utf-8');
 
+register_shutdown_function(static function (): void {
+    $error = error_get_last();
+    if (!$error || !in_array((int)$error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        return;
+    }
+
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    echo json_encode([
+        'ok' => false,
+        'error' => 'Фатальная ошибка API: ' . (string)$error['message'],
+        'file' => basename((string)$error['file']),
+        'line' => (int)$error['line'],
+    ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+});
+
 require_once __DIR__ . '/../app/database.php';
 require_once __DIR__ . '/../app/mailer.php';
 require_once __DIR__ . '/../app/notification_templates.php';

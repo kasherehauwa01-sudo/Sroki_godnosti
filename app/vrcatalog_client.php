@@ -182,7 +182,7 @@ function vrCatalogFindStockRowsRecursive(array $value): array
     return $rows;
 }
 
-function vrCatalogParseStockQuantity(mixed $quantity): ?float
+function vrCatalogParseStockQuantity($quantity): ?float
 {
     if (is_int($quantity) || is_float($quantity)) return (float)$quantity;
     $text = trim((string)$quantity);
@@ -191,25 +191,6 @@ function vrCatalogParseStockQuantity(mixed $quantity): ?float
     if (is_numeric($text)) return (float)$text;
     if (preg_match('/-?\d+(?:\.\d+)?/u', $text, $match)) return (float)$match[0];
     return null;
-}
-
-
-function vrCatalogWarehouseMatches(string $catalogName, string $warehouseLookupKey): bool
-{
-    $catalogKey = vrCatalogWarehouseLookupKey($catalogName);
-    if ($catalogKey === '' || $warehouseLookupKey === '') return false;
-    if ($catalogKey === $warehouseLookupKey) return true;
-
-    // В catalogvr встречаются объединённые склады вида «Авиаторов Зал+Склад».
-    // Для настроек сервиса «Авиаторов Зал» и «Авиаторов Склад» считаем такой
-    // остаток подходящим, иначе складские формы ошибочно получают нули.
-    $parts = preg_split('/\s*\+\s*/u', $catalogName) ?: [];
-    foreach ($parts as $part) {
-        $partKey = vrCatalogWarehouseLookupKey($part);
-        if ($partKey === $warehouseLookupKey || ($partKey !== '' && str_contains($warehouseLookupKey, $partKey))) return true;
-    }
-
-    return str_contains($catalogKey, $warehouseLookupKey) || str_contains($warehouseLookupKey, $catalogKey);
 }
 
 
