@@ -122,7 +122,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients', 'email_notification_logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'run_notifications_now']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -1918,6 +1918,28 @@ function toggleSmtpPasswordVisibility() {
     button.textContent = input.type === 'password' ? 'Показать' : 'Скрыть';
 }
 
+
+async function runNotificationsNow() {
+    const button = qs('#runNotificationsNowButton');
+    const status = qs('#testNotificationStatus');
+    button.disabled = true;
+    status.textContent = 'Сохраняю настройки и ищу сегодняшние события...';
+    showToast('Запускаю отправку уведомлений складам...');
+
+    try {
+        await persistSettings();
+        const result = await api('run_notifications_now', { settings_password: state.settingsPassword });
+        await loadSettings();
+        status.textContent = result.message || `Уведомления поставлены в очередь: ${Number(result.sent || 0)}.`;
+        showToast(status.textContent);
+    } catch (error) {
+        status.textContent = error.message;
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
 async function sendTestNotification() {
     const button = qs('#sendTestNotificationButton');
     const status = qs('#testNotificationStatus');
@@ -2479,6 +2501,7 @@ function bindEvents() {
     qs('#confirmMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
+    qs('#runNotificationsNowButton').addEventListener('click', runNotificationsNow);
     qs('#testEmailDeliveryButton').addEventListener('click', testEmailDelivery);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
     qs('#openEmailNotificationLogButton')?.addEventListener('click', showNotificationLogs);

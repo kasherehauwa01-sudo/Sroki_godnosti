@@ -100,6 +100,7 @@ function handleApiRequest(): void
                 'delete_by_articles' => deleteBatchesByArticles($pdo, $payload),
                 'settings' => saveProtectedSettings($pdo, $payload),
                 'test_notification' => sendTestNotification($pdo, $payload),
+                'run_notifications_now' => sendManualExpiryNotifications($pdo, $payload),
                 'test_email_delivery' => testEmailDelivery($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
                 'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
@@ -1275,18 +1276,46 @@ function recordCatalogAutoZeroStocks(PDO $pdo, string $eventKey, string $eventDa
     }
 }
 
-function sendDueExpiryNotifications(PDO $pdo, array $settings): void
+function enabledNotificationDaysFromSettings(array $settings): array
+{
+    // Автоматическая и ручная отправка должны брать дни только из настроек,
+    // а не из фиксированной константы, иначе выбранные правила игнорируются.
+    $map = [
+        0 => 'notify_0_days',
+        180 => 'notify_180_days',
+        90 => 'notify_90_days',
+        60 => 'notify_60_days',
+        30 => 'notify_30_days',
+        15 => 'notify_15_days',
+        7 => 'notify_7_days',
+        1 => 'notify_1_day',
+    ];
+    $days = [];
+    foreach ($map as $day => $key) {
+        if (!empty($settings[$key])) $days[] = $day;
+    }
+    return $days;
+}
+
+function sendDueExpiryNotifications(PDO $pdo, array $settings, string $mode = 'daily_auto'): array
 {
     $emails = getWarehouseNotificationEmails($pdo);
     if (!$emails) {
         writeLog($pdo, 'expiry_check_skipped', [
-            'mode' => 'daily_auto',
+            'mode' => $mode,
             'reason' => 'Не указаны email складов для уведомлений',
         ]);
-        return;
+        return ['sent' => 0, 'events' => [], 'message' => 'Не указаны email складов для уведомлений.'];
     }
 
-    $notificationDays = NOTIFICATION_EVENT_DAYS;
+    $notificationDays = enabledNotificationDaysFromSettings($settings);
+    if (!$notificationDays) {
+        writeLog($pdo, 'expiry_check_skipped', [
+            'mode' => $mode,
+            'reason' => 'Не выбраны правила уведомлений',
+        ]);
+        return ['sent' => 0, 'events' => [], 'message' => 'Не выбраны правила уведомлений.'];
+    }
     $placeholders = implode(',', array_fill(0, count($notificationDays), '?'));
     $statement = $pdo->prepare(
         "SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
@@ -1299,10 +1328,10 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
 
     if (!$batches) {
         writeLog($pdo, 'expiry_check_no_matches', [
-            'mode' => 'daily_auto',
+            'mode' => $mode,
             'criteria' => $notificationDays,
         ]);
-        return;
+        return ['sent' => 0, 'events' => [], 'message' => 'Сегодня нет партий под выбранные правила уведомлений.'];
     }
 
     $sentEvents = [];
@@ -1345,10 +1374,20 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings): void
     }
 
     writeLog($pdo, 'expiry_notifications_sent', [
-        'mode' => 'daily_auto',
+        'mode' => $mode,
         'emails' => $emails,
         'events' => $sentEvents,
     ]);
+
+    return ['sent' => count(array_filter($sentEvents, static fn (array $event): bool => !empty($event['notification_id']))), 'events' => $sentEvents, 'message' => 'Уведомления складам поставлены в очередь.'];
+}
+
+function sendManualExpiryNotifications(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $result = sendDueExpiryNotifications($pdo, getRawSettings($pdo), 'manual_settings');
+    processDueNotificationEmailQueueSafely($pdo);
+    return ['ok' => true] + $result;
 }
 
 function sendDueOverdueStockCheckNotifications(PDO $pdo): void

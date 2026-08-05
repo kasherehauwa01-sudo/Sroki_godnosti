@@ -220,6 +220,7 @@ declare(strict_types=1);
                     </label>
                     <div class="settings-actions">
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                        <button class="ghost-button" id="runNotificationsNowButton" formnovalidate type="button">Запустить отправку</button>
                         <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">История уведомлений</button>
                     </div>
                     <label>Email для проверки доставки
