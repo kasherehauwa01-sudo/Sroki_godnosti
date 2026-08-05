@@ -33,8 +33,11 @@ declare(strict_types=1);
         <section class="panel active" id="tab-registry">
             <div class="registry-actions registry-top-actions">
                 <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
+                <button class="ghost-button" id="openRecountSelectionButton" type="button">Пересчитать</button>
                 <button class="ghost-button" id="openWriteOffButton" type="button">Изменить статус / Удалить</button>
                 <button class="small-button danger hidden" id="bulkDeleteButton" type="button">Удалить</button>
+                <button class="small-button hidden" id="sendRecountButton" type="button">Отправить на пересчет</button>
+                <button class="small-button ghost-button hidden" id="cancelRecountSelectionButton" type="button">Отмена</button>
             </div>
             <div class="card registry-filter-card">
                 <div class="registry-search-row">

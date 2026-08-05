@@ -24,6 +24,7 @@ const state = {
     writeOffAccessGranted: false,
     writeOffPassword: '',
     selectedBatchIds: new Set(),
+    recountSelectionMode: false,
     warehouses: [],
     editingWarehouseId: null,
     stockNotifications: [],
@@ -121,7 +122,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients', 'email_notification_logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -536,14 +537,18 @@ function updateSelectionControls() {
     const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
     const selectAll = qs('#selectAllBatches');
 
-    qs('#selectionHeader').classList.toggle('hidden', !state.writeOffAccessGranted);
+    const selectionVisible = state.writeOffAccessGranted || state.recountSelectionMode;
+    qs('#selectionHeader').classList.toggle('hidden', !selectionVisible);
     qs('#bulkDeleteButton').classList.toggle('hidden', !state.writeOffAccessGranted || state.selectedBatchIds.size === 0);
     qs('#bulkDeleteButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
+    qs('#sendRecountButton')?.classList.toggle('hidden', !state.recountSelectionMode);
+    qs('#sendRecountButton').disabled = !state.recountSelectionMode || state.selectedBatchIds.size === 0;
+    qs('#cancelRecountSelectionButton')?.classList.toggle('hidden', !state.recountSelectionMode);
 
     if (selectAll) {
         selectAll.checked = allVisibleSelected;
         selectAll.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
-        selectAll.disabled = !state.writeOffAccessGranted || visibleIds.length === 0;
+        selectAll.disabled = !selectionVisible || visibleIds.length === 0;
     }
 }
 
@@ -571,7 +576,7 @@ function renderRegistry() {
             && matchesEvent;
     });
     sortRegistryRows();
-    if (!state.writeOffAccessGranted) {
+    if (!state.writeOffAccessGranted && !state.recountSelectionMode) {
         state.selectedBatchIds.clear();
     }
     pruneSelectedBatchesToFilteredRows();
@@ -581,7 +586,8 @@ function renderRegistry() {
     qs('#registryBody').innerHTML = state.filteredBatches.map((batch) => {
         const days = batch.expiryInvalid ? null : (batch.daysLeft ?? daysLeft(batch.expiryDate));
         const options = statusOptions.map((option) => `<option ${option === batch.status ? 'selected' : ''}>${option}</option>`).join('');
-        const selectionCell = state.writeOffAccessGranted
+        const selectionVisible = state.writeOffAccessGranted || state.recountSelectionMode;
+        const selectionCell = selectionVisible
             ? `<td class="selection-column"><input class="batch-select-checkbox" data-id="${escapeHtml(batch.id)}" type="checkbox" ${state.selectedBatchIds.has(String(batch.id)) ? 'checked' : ''}></td>`
             : '';
         const invalidDateActions = batch.expiryInvalid
@@ -685,6 +691,38 @@ function toggleRegistrySort(field) {
         direction: state.registrySort.field === field && state.registrySort.direction === 'asc' ? 'desc' : 'asc',
     };
     renderRegistry();
+}
+
+function openRecountSelectionMode() {
+    state.recountSelectionMode = true;
+    state.selectedBatchIds.clear();
+    renderRegistry();
+    showToast('Отметьте товары для пересчета и нажмите «Отправить на пересчет».');
+}
+
+function cancelRecountSelectionMode() {
+    state.recountSelectionMode = false;
+    state.selectedBatchIds.clear();
+    renderRegistry();
+}
+
+async function sendSelectedBatchesToRecount() {
+    if (state.selectedBatchIds.size === 0) {
+        showToast('Отметьте хотя бы один товар для пересчета.', true);
+        return;
+    }
+    const button = qs('#sendRecountButton');
+    button.disabled = true;
+    try {
+        const result = await api('registry_recount', { batch_ids: [...state.selectedBatchIds].map(Number) });
+        showToast(result.message || 'Товары отправлены на пересчет.');
+        cancelRecountSelectionMode();
+        await loadStockBatchNotifications();
+    } catch (error) {
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
 }
 
 async function onStatusChange(event) {
@@ -1184,7 +1222,7 @@ function renderStockBatchNotifications() {
     if (markAllButton) markAllButton.disabled = !hasUnreadChanges;
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
         <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification ' : ''}${stockEventHasUnreadChanges(notification) ? 'stock-event-unread' : ''}" data-stock-event-key="${escapeHtml(stockEventViewKey(notification))}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
-            <td>${notification.event_key === 'overdue_stock_check' ? 'Проверка наличия товара' : `${Number(notification.event_days || 0)} дней`}</td>
+            <td>${notification.event_key === 'overdue_stock_check' ? 'Проверка наличия товара' : (String(notification.event_key || '').startsWith('recount_') ? 'Пересчет' : `${Number(notification.event_days || 0)} дней`)}</td>
             <td>${escapeHtml(formatDateRu(notification.event_date))}</td>
             <td>${escapeHtml(formatDateRu(notification.expiry_date))}</td>
             <td>${Number(notification.batch_count || 0)}</td>
@@ -2371,6 +2409,9 @@ function bindEvents() {
     qs('#leaveSettingsButton').addEventListener('click', leaveSettingsWithoutSaving);
     qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
     qs('#bulkDeleteButton').addEventListener('click', deleteSelectedBatches);
+    qs('#openRecountSelectionButton').addEventListener('click', openRecountSelectionMode);
+    qs('#sendRecountButton').addEventListener('click', sendSelectedBatchesToRecount);
+    qs('#cancelRecountSelectionButton').addEventListener('click', cancelRecountSelectionMode);
     qs('#selectAllBatches').addEventListener('change', toggleSelectAllBatches);
     qs('#writeOffPasswordForm').addEventListener('submit', submitWriteOffPassword);
     qs('#cancelWriteOffPasswordButton').addEventListener('click', closeWriteOffPasswordDialog);
