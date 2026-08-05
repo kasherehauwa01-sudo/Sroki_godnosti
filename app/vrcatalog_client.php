@@ -122,34 +122,94 @@ function vrCatalogWarehouseStockQuantity(array $product, array $warehouse): floa
     $warehouseName = vrCatalogWarehouseLookupKey((string)($warehouse['name'] ?? ''));
     if ($warehouseName === '') return 0.0;
 
-    foreach (['stocks', 'warehouse_stocks', 'warehouses'] as $field) {
-        $stocks = $product[$field] ?? null;
-        if (!is_array($stocks)) continue;
-
-        foreach ($stocks as $key => $stock) {
-            if (is_array($stock)) {
-                $name = (string)($stock['warehouse_name'] ?? $stock['warehouse'] ?? $stock['name'] ?? $key);
-                $quantity = $stock['quantity'] ?? $stock['stock'] ?? $stock['balance'] ?? $stock['available'] ?? 0;
-            } else {
-                $name = (string)$key;
-                $quantity = $stock;
-            }
-            if (vrCatalogWarehouseLookupKey($name) === $warehouseName && is_numeric($quantity)) {
-                return (float)$quantity;
-            }
-        }
-    }
-
-    $stockByWarehouse = $product['stock_by_warehouse'] ?? null;
-    if (is_array($stockByWarehouse)) {
-        foreach ($stockByWarehouse as $name => $quantity) {
-            if (vrCatalogWarehouseLookupKey((string)$name) === $warehouseName && is_numeric($quantity)) {
-                return (float)$quantity;
-            }
+    foreach (vrCatalogExtractWarehouseStockRows($product) as $row) {
+        if (vrCatalogWarehouseMatches((string)$row['name'], $warehouseName)) {
+            return (float)$row['quantity'];
         }
     }
 
     return 0.0;
+}
+
+function vrCatalogExtractWarehouseStockRows(array $product): array
+{
+    $rows = [];
+    foreach (['stocks', 'warehouse_stocks', 'warehouses', 'stock_by_warehouse', 'Остатки', 'остатки', 'Остатки по складам', 'остатки по складам'] as $field) {
+        if (isset($product[$field]) && is_array($product[$field])) {
+            $rows = array_merge($rows, vrCatalogNormalizeStockContainer($product[$field]));
+        }
+    }
+
+    // Если catalogvr переименовал контейнер остатков, ищем строки рекурсивно по
+    // паре признаков: название склада + количество. Это защищает синхронизацию
+    // от расхождения между UI catalogvr и внутренним API.
+    if (!$rows) {
+        $rows = vrCatalogFindStockRowsRecursive($product);
+    }
+
+    return $rows;
+}
+
+function vrCatalogNormalizeStockContainer(array $stocks): array
+{
+    $rows = [];
+    foreach ($stocks as $key => $stock) {
+        if (is_array($stock)) {
+            $name = (string)($stock['warehouse_name'] ?? $stock['warehouse'] ?? $stock['name'] ?? $stock['Склад'] ?? $stock['склад'] ?? $stock['Название склада'] ?? $stock['название склада'] ?? $key);
+            $quantity = $stock['quantity'] ?? $stock['stock'] ?? $stock['balance'] ?? $stock['available'] ?? $stock['Остаток'] ?? $stock['остаток'] ?? $stock['Количество'] ?? $stock['количество'] ?? null;
+        } else {
+            $name = (string)$key;
+            $quantity = $stock;
+        }
+        $parsedQuantity = vrCatalogParseStockQuantity($quantity);
+        if ($name !== '' && $parsedQuantity !== null) $rows[] = ['name' => $name, 'quantity' => $parsedQuantity];
+    }
+    return $rows;
+}
+
+function vrCatalogFindStockRowsRecursive(array $value): array
+{
+    $rows = [];
+    $name = $value['warehouse_name'] ?? $value['warehouse'] ?? $value['name'] ?? $value['Склад'] ?? $value['склад'] ?? $value['Название склада'] ?? $value['название склада'] ?? null;
+    $quantity = $value['quantity'] ?? $value['stock'] ?? $value['balance'] ?? $value['available'] ?? $value['Остаток'] ?? $value['остаток'] ?? $value['Количество'] ?? $value['количество'] ?? null;
+    $parsedQuantity = vrCatalogParseStockQuantity($quantity);
+    if ($name !== null && $parsedQuantity !== null) {
+        $rows[] = ['name' => (string)$name, 'quantity' => $parsedQuantity];
+    }
+    foreach ($value as $child) {
+        if (is_array($child)) $rows = array_merge($rows, vrCatalogFindStockRowsRecursive($child));
+    }
+    return $rows;
+}
+
+function vrCatalogParseStockQuantity($quantity): ?float
+{
+    if (is_int($quantity) || is_float($quantity)) return (float)$quantity;
+    $text = trim((string)$quantity);
+    if ($text === '') return null;
+    $text = str_replace(',', '.', $text);
+    if (is_numeric($text)) return (float)$text;
+    if (preg_match('/-?\d+(?:\.\d+)?/u', $text, $match)) return (float)$match[0];
+    return null;
+}
+
+
+function vrCatalogWarehouseMatches(string $catalogName, string $warehouseLookupKey): bool
+{
+    $catalogKey = vrCatalogWarehouseLookupKey($catalogName);
+    if ($catalogKey === '' || $warehouseLookupKey === '') return false;
+    if ($catalogKey === $warehouseLookupKey) return true;
+
+    // В catalogvr встречаются объединённые склады вида «Авиаторов Зал+Склад».
+    // Для настроек сервиса «Авиаторов Зал» и «Авиаторов Склад» считаем такой
+    // остаток подходящим, иначе складские формы ошибочно получают нули.
+    $parts = preg_split('/\s*\+\s*/u', $catalogName) ?: [];
+    foreach ($parts as $part) {
+        $partKey = vrCatalogWarehouseLookupKey($part);
+        if ($partKey === $warehouseLookupKey || ($partKey !== '' && str_contains($warehouseLookupKey, $partKey))) return true;
+    }
+
+    return str_contains($catalogKey, $warehouseLookupKey) || str_contains($warehouseLookupKey, $catalogKey);
 }
 
 function vrCatalogWarehouseLookupKey(string $name): string
