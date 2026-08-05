@@ -537,13 +537,12 @@ function updateSelectionControls() {
     const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
     const selectAll = qs('#selectAllBatches');
 
-    const selectionVisible = state.writeOffAccessGranted || state.recountSelectionMode;
+    const selectionVisible = state.writeOffAccessGranted;
     qs('#selectionHeader').classList.toggle('hidden', !selectionVisible);
     qs('#bulkDeleteButton').classList.toggle('hidden', !state.writeOffAccessGranted || state.selectedBatchIds.size === 0);
     qs('#bulkDeleteButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
-    qs('#sendRecountButton')?.classList.toggle('hidden', !state.recountSelectionMode);
-    qs('#sendRecountButton').disabled = !state.recountSelectionMode || state.selectedBatchIds.size === 0;
-    qs('#cancelRecountSelectionButton')?.classList.toggle('hidden', !state.recountSelectionMode);
+    qs('#sendRecountButton')?.classList.toggle('hidden', !state.writeOffAccessGranted);
+    qs('#sendRecountButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
 
     if (selectAll) {
         selectAll.checked = allVisibleSelected;
@@ -586,7 +585,7 @@ function renderRegistry() {
     qs('#registryBody').innerHTML = state.filteredBatches.map((batch) => {
         const days = batch.expiryInvalid ? null : (batch.daysLeft ?? daysLeft(batch.expiryDate));
         const options = statusOptions.map((option) => `<option ${option === batch.status ? 'selected' : ''}>${option}</option>`).join('');
-        const selectionVisible = state.writeOffAccessGranted || state.recountSelectionMode;
+        const selectionVisible = state.writeOffAccessGranted;
         const selectionCell = selectionVisible
             ? `<td class="selection-column"><input class="batch-select-checkbox" data-id="${escapeHtml(batch.id)}" type="checkbox" ${state.selectedBatchIds.has(String(batch.id)) ? 'checked' : ''}></td>`
             : '';
@@ -693,19 +692,6 @@ function toggleRegistrySort(field) {
     renderRegistry();
 }
 
-function openRecountSelectionMode() {
-    state.recountSelectionMode = true;
-    state.selectedBatchIds.clear();
-    renderRegistry();
-    showToast('Отметьте товары для пересчета и нажмите «Отправить на пересчет».');
-}
-
-function cancelRecountSelectionMode() {
-    state.recountSelectionMode = false;
-    state.selectedBatchIds.clear();
-    renderRegistry();
-}
-
 async function sendSelectedBatchesToRecount() {
     if (state.selectedBatchIds.size === 0) {
         showToast('Отметьте хотя бы один товар для пересчета.', true);
@@ -716,7 +702,8 @@ async function sendSelectedBatchesToRecount() {
     try {
         const result = await api('registry_recount', { batch_ids: [...state.selectedBatchIds].map(Number) });
         showToast(result.message || 'Товары отправлены на пересчет.');
-        cancelRecountSelectionMode();
+        state.selectedBatchIds.clear();
+        renderRegistry();
         await loadStockBatchNotifications();
     } catch (error) {
         showToast(error.message, true);
@@ -794,7 +781,7 @@ function showBatchStockStatusControls() {
         return;
     }
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         openWriteOffPasswordDialog();
         return;
     }
@@ -951,7 +938,7 @@ async function deleteBatch(id) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         return;
     }
     if (!confirm('Уверены, что хотите удалить партию безвозвратно?')) return;
@@ -969,7 +956,7 @@ async function deleteSelectedBatches() {
     const ids = [...state.selectedBatchIds];
     if (!ids.length) return;
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         return;
     }
     if (!confirm(`Удалить выбранные партии (${ids.length}) безвозвратно?`)) return;
@@ -1256,7 +1243,7 @@ async function saveSelectedStockBatchStatus() {
         return;
     }
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         openWriteOffPasswordDialog();
         return;
     }
@@ -1452,7 +1439,7 @@ async function leaveSettingsWithoutSaving() {
 
 function openWriteOffPasswordDialog() {
     if (state.writeOffAccessGranted) {
-        showToast('Изменение статусов уже разрешено.');
+        showToast('Режим супервайзера уже включен.');
         return;
     }
 
@@ -1477,7 +1464,7 @@ async function submitWriteOffPassword(event) {
         state.writeOffAccessGranted = true;
         closeWriteOffPasswordDialog();
         renderRegistry();
-        showToast('Теперь можно выделять, изменять статусы и удалять партии в реестре.');
+        showToast('Режим супервайзера включен: можно выделять, менять статусы, удалять партии и отправлять товары на пересчет.');
     } catch (verifyError) {
         state.writeOffPassword = '';
         error.textContent = verifyError.message;
@@ -2409,9 +2396,7 @@ function bindEvents() {
     qs('#leaveSettingsButton').addEventListener('click', leaveSettingsWithoutSaving);
     qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
     qs('#bulkDeleteButton').addEventListener('click', deleteSelectedBatches);
-    qs('#openRecountSelectionButton').addEventListener('click', openRecountSelectionMode);
     qs('#sendRecountButton').addEventListener('click', sendSelectedBatchesToRecount);
-    qs('#cancelRecountSelectionButton').addEventListener('click', cancelRecountSelectionMode);
     qs('#selectAllBatches').addEventListener('change', toggleSelectAllBatches);
     qs('#writeOffPasswordForm').addEventListener('submit', submitWriteOffPassword);
     qs('#cancelWriteOffPasswordButton').addEventListener('click', closeWriteOffPasswordDialog);
