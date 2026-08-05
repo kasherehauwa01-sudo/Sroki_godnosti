@@ -450,6 +450,11 @@ function ensurePurchaseNotificationSchema(PDO $pdo): void
             CONSTRAINT fk_stock_auto_zero_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+    $columnCheck->execute([':table' => 'stock_auto_zero_entries', ':column' => 'source']);
+    if ((int)$columnCheck->fetchColumn() === 0) {
+        $pdo->exec("ALTER TABLE stock_auto_zero_entries ADD COLUMN source VARCHAR(64) NOT NULL DEFAULT 'catalog_missing_legacy' AFTER warehouse_id");
+    }
+
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS stock_notification_reminder_log (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -1283,9 +1288,9 @@ function recordCatalogAutoZeroStocks(PDO $pdo, string $eventKey, string $eventDa
          ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)'
     );
     $marker = $pdo->prepare(
-        'INSERT INTO stock_auto_zero_entries (event_key, event_date, batch_id, warehouse_id)
-         VALUES (:event_key, :event_date, :batch_id, :warehouse_id)
-         ON DUPLICATE KEY UPDATE created_at = created_at'
+        'INSERT INTO stock_auto_zero_entries (event_key, event_date, batch_id, warehouse_id, source)
+         VALUES (:event_key, :event_date, :batch_id, :warehouse_id, :source)
+         ON DUPLICATE KEY UPDATE source = VALUES(source), created_at = created_at'
     );
     foreach ($batches as $batch) {
         $batchId = (int)($batch['id'] ?? 0);
@@ -1296,6 +1301,7 @@ function recordCatalogAutoZeroStocks(PDO $pdo, string $eventKey, string $eventDa
             ':event_date' => $eventDate,
             ':batch_id' => $batchId,
             ':warehouse_id' => (int)$warehouse['id'],
+            ':source' => 'catalog_explicit_zero',
         ]);
     }
 }
@@ -2269,6 +2275,17 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
 
         // Матрица содержит только позиции, которые catalogvr разрешил показать
         // конкретному складу. Для старых уведомлений она естественно остаётся полной.
+        $legacyAutoZeroStatement = $pdo->prepare(
+            "SELECT batch_id, warehouse_id
+             FROM stock_auto_zero_entries
+             WHERE event_key = ? AND event_date = ? AND source <> 'catalog_explicit_zero'
+               AND batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)"
+        );
+        $legacyAutoZeroStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+        foreach ($legacyAutoZeroStatement->fetchAll() as $row) {
+            unset($stock[(int)$row['batch_id']][(int)$row['warehouse_id']]);
+        }
+
         $expectedStatement = $pdo->prepare(
             "SELECT DISTINCT i.batch_id, n.warehouse_id
              FROM stock_notifications n
@@ -2284,7 +2301,7 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
         $autoExpectedStatement = $pdo->prepare(
             "SELECT batch_id, warehouse_id
              FROM stock_auto_zero_entries
-             WHERE event_key = ? AND event_date = ?
+             WHERE event_key = ? AND event_date = ? AND source = 'catalog_explicit_zero'
                AND batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)"
         );
         $autoExpectedStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
@@ -2765,7 +2782,7 @@ function purchaseEventAutoZeroMatrix(PDO $pdo, array $event): array
     $statement = $pdo->prepare(
         "SELECT batch_id, warehouse_id
          FROM stock_auto_zero_entries
-         WHERE event_key = ? AND event_date = ?
+         WHERE event_key = ? AND event_date = ? AND source = 'catalog_explicit_zero'
            AND batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)"
     );
     $statement->execute(array_merge([(string)$event['event_key'], (string)$event['event_date']], $batchIds, $warehouseIds));
