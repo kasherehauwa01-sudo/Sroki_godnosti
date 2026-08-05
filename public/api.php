@@ -61,9 +61,11 @@ function handleApiRequest(): void
         refreshDaysLeft($pdo);
         runApiBackgroundTask($pdo, 'overdue_stock_check', static fn () => sendDueOverdueStockCheckNotifications($pdo));
         runApiBackgroundTask($pdo, 'stock_reminders', static fn () => sendDueStockReminderNotifications($pdo));
+        runApiBackgroundTask($pdo, 'email_queue', static fn () => processDueNotificationEmailQueueSafely($pdo));
         if (!in_array($action, ['test_notification', 'test_purchase_notification'], true)) {
             runApiBackgroundTask($pdo, 'expiry_notifications', static fn () => runDueExpiryNotifications($pdo));
             runApiBackgroundTask($pdo, 'expired_purchase_events', static fn () => sendExpiredPurchaseEventNotifications($pdo));
+            runApiBackgroundTask($pdo, 'email_queue_after_notifications', static fn () => processDueNotificationEmailQueueSafely($pdo));
         }
 
         if ($method === 'GET') {
@@ -146,6 +148,22 @@ function runApiBackgroundTask(PDO $pdo, string $task, callable $callback): void
             writeLog($pdo, 'background_task_failed', ['task' => $task, 'error' => $error->getMessage()]);
         } catch (Throwable) {
             // Даже сбой таблицы logs не должен заменить ответ запрошенного API.
+        }
+    }
+}
+
+
+/** Обрабатывает одно наступившее письмо из очереди без риска сломать основной ответ API. */
+function processDueNotificationEmailQueueSafely(PDO $pdo): void
+{
+    try {
+        processDueNotificationEmailQueue($pdo, getRawSettings($pdo));
+    } catch (Throwable $error) {
+        error_log('Ошибка обработки очереди email: ' . $error->getMessage());
+        try {
+            writeLog($pdo, 'email_queue_processing_failed', ['error' => $error->getMessage()]);
+        } catch (Throwable) {
+            // Ошибка журналирования не должна мешать основной операции пользователя.
         }
     }
 }
@@ -1866,6 +1884,9 @@ function sendRegistryRecountNotifications(PDO $pdo, array $payload): array
             $errors[] = (string)$warehouse['name'] . ': ' . $error->getMessage();
         }
     }
+    // После ручного запуска пересчета сразу пытаемся отправить первое письмо,
+    // даже если отдельный cron очереди email еще не настроен или временно не сработал.
+    processDueNotificationEmailQueueSafely($pdo);
     writeLog($pdo, 'registry_recount_sent', ['event_key' => $eventKey, 'batch_ids' => array_map('intval', array_column($batches, 'id')), 'warehouse_count' => count($warehouses), 'sent' => $sent, 'errors' => $errors]);
     if ($errors) throw new RuntimeException('Часть уведомлений не поставлена в очередь: ' . implode('; ', $errors));
     return ['ok' => true, 'message' => 'Пересчет отправлен складам: ' . $sent . '.', 'event_key' => $eventKey, 'sent' => $sent];

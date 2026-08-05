@@ -18,6 +18,9 @@ try {
     ensureEmailNotificationLogSchema($pdo);
     refreshDaysLeft($pdo);
     runDueExpiryNotifications($pdo);
+    // Плановая проверка ставит письма в очередь; сразу обрабатываем первое
+    // наступившее письмо, чтобы рассылка началась в заданное в настройках время.
+    processDueNotificationEmailQueueSafely($pdo);
     exit(0);
 } catch (Throwable $error) {
     fwrite(STDERR, $error->getMessage() . PHP_EOL);
