@@ -81,7 +81,7 @@ function handleApiRequest(): void
                 'stock_notification' => ['ok' => true] + getStockNotificationDetails($pdo, (int)($_GET['id'] ?? 0)),
                 'purchase_recipients' => getProtectedPurchaseRecipients($pdo, $_GET),
                 'email_notification_logs' => getProtectedEmailNotificationLogs($pdo, $_GET),
-                'catalog_health' => checkVrCatalogHealth($pdo),
+                'catalog_health' => getCatalogSyncStatus($pdo),
                 'purchase_event_summary' => ['ok' => true] + getPurchaseEventSummary($pdo, (string)($_GET['token'] ?? '')),
                 'purchase_event_xls' => downloadPurchaseEventXls($pdo, (string)($_GET['token'] ?? '')),
                 'stock_batch_notifications' => ['ok' => true, 'notifications' => listPurchaseEventNotifications($pdo)],
@@ -101,6 +101,7 @@ function handleApiRequest(): void
                 'settings' => saveProtectedSettings($pdo, $payload),
                 'test_notification' => sendTestNotification($pdo, $payload),
                 'run_notifications_now' => sendManualExpiryNotifications($pdo, $payload),
+                'catalog_sync_test' => runCatalogSyncTest($pdo, $payload),
                 'test_email_delivery' => testEmailDelivery($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
                 'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
@@ -1276,6 +1277,54 @@ function recordCatalogAutoZeroStocks(PDO $pdo, string $eventKey, string $eventDa
     }
 }
 
+
+function explainCatalogDiagnostics(array $diagnostics): string
+{
+    // Расшифровка нужна в настройках, чтобы видеть не только «ошибка», но и
+    // конкретную причину: отключена интеграция, нет авторизации, HTTP-сбой и т.д.
+    if (empty($diagnostics['enabled'])) return 'Интеграция отключена: проверьте VRCATALOG_INTERNAL_API_URL и VRCATALOG_INTERNAL_API_TOKEN.';
+    if (($diagnostics['authentication_ok'] ?? null) === false) return 'Ошибка авторизации: catalogvr отклонил внутренний токен.';
+    if (!empty($diagnostics['error'])) return (string)$diagnostics['error'];
+    if (isset($diagnostics['http_code']) && (int)$diagnostics['http_code'] >= 400) return 'catalogvr вернул HTTP ' . (int)$diagnostics['http_code'] . '.';
+    if (!empty($diagnostics['available'])) return 'Синхронизация доступна.';
+    return 'Статус catalogvr не определён. Запустите тест синхронизации по артикулу.';
+}
+
+function getCatalogSyncStatus(PDO $pdo): array
+{
+    $status = checkVrCatalogHealth($pdo);
+    $status['message'] = explainCatalogDiagnostics($status);
+    return $status;
+}
+
+function runCatalogSyncTest(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $article = trim((string)($payload['article'] ?? ''));
+    if ($article === '') throw new InvalidArgumentException('Укажите артикул для теста синхронизации.');
+    $response = requestVrCatalogProducts([$article], $pdo);
+    $warehouses = listWarehouses($pdo, true);
+    $rows = [];
+    foreach ($response['items'] as $product) {
+        if (!is_array($product)) continue;
+        $manager = vrCatalogManagerValue($product);
+        $stocks = [];
+        foreach ($warehouses as $warehouse) {
+            $stocks[(string)$warehouse['id']] = vrCatalogWarehouseStockQuantity($product, $warehouse);
+        }
+        $rows[] = [
+            'article' => vrCatalogProductArticle($product) ?: $article,
+            'manager' => $manager['exists'] ? (string)$manager['value'] : '',
+            'found' => vrCatalogProductFound($product),
+            'stocks' => $stocks,
+        ];
+    }
+    if (!$rows) {
+        $rows[] = ['article' => $article, 'manager' => '', 'found' => false, 'stocks' => array_fill_keys(array_map(static fn (array $warehouse): string => (string)$warehouse['id'], $warehouses), 0)];
+    }
+    return ['ok' => true, 'warehouses' => array_map(static fn (array $warehouse): array => ['id' => (int)$warehouse['id'], 'name' => (string)$warehouse['name']], $warehouses), 'rows' => $rows, 'diagnostics' => $response['diagnostics'], 'message' => explainCatalogDiagnostics($response['diagnostics'])];
+}
+
 function enabledNotificationDaysFromSettings(array $settings): array
 {
     // Автоматическая и ручная отправка должны брать дни только из настроек,
@@ -1295,6 +1344,18 @@ function enabledNotificationDaysFromSettings(array $settings): array
         if (!empty($settings[$key])) $days[] = $day;
     }
     return $days;
+}
+
+
+function expiryNotificationBatchSummary(array $batches): array
+{
+    // В журнале показываем конкретные партии, чтобы было понятно, по каким товарам
+    // catalogvr повлиял на отправку или пропуск складской формы.
+    return array_map(static function (array $batch): string {
+        $code = trim((string)($batch['code'] ?? '')) ?: trim((string)($batch['article'] ?? ''));
+        $name = trim((string)($batch['name'] ?? ''));
+        return trim($code . ($name !== '' ? ' — ' . $name : ''));
+    }, $batches);
 }
 
 function sendDueExpiryNotifications(PDO $pdo, array $settings, string $mode = 'daily_auto'): array
@@ -1354,6 +1415,7 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings, string $mode = 'd
                     'warehouse_id' => (int)$warehouse['id'],
                     'warehouse' => (string)$warehouse['name'],
                     'count' => 0,
+                    'batches' => expiryNotificationBatchSummary($eventBatches),
                     'skipped' => 'В catalogvr нет положительных остатков для склада',
                 ];
                 continue;
@@ -1367,6 +1429,8 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings, string $mode = 'd
                 'warehouse' => (string)$warehouse['name'],
                 'notification_id' => (int)$form['id'],
                 'count' => count($warehouseBatches),
+                'batches' => expiryNotificationBatchSummary($warehouseBatches),
+                'source' => 'catalogvr',
                 'subject' => $subject,
                 'text' => $body,
             ];
