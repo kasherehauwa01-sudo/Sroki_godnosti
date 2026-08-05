@@ -1373,13 +1373,25 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings, string $mode = 'd
         }
     }
 
+    $sentCount = count(array_filter($sentEvents, static fn (array $event): bool => !empty($event['notification_id'])));
+    if ($sentCount === 0) {
+        writeLog($pdo, 'expiry_check_no_matches', [
+            'mode' => $mode,
+            'criteria' => $notificationDays,
+            'events' => $sentEvents,
+            'reason' => 'После фильтрации по складам нет партий для отправки',
+        ]);
+        return ['sent' => 0, 'events' => $sentEvents, 'message' => 'Сегодняшние события найдены, но после фильтрации по складам отправлять нечего.'];
+    }
+
     writeLog($pdo, 'expiry_notifications_sent', [
         'mode' => $mode,
         'emails' => $emails,
         'events' => $sentEvents,
+        'sent' => $sentCount,
     ]);
 
-    return ['sent' => count(array_filter($sentEvents, static fn (array $event): bool => !empty($event['notification_id']))), 'events' => $sentEvents, 'message' => 'Уведомления складам поставлены в очередь.'];
+    return ['sent' => $sentCount, 'events' => $sentEvents, 'message' => 'Уведомления складам поставлены в очередь.'];
 }
 
 function sendManualExpiryNotifications(PDO $pdo, array $payload): array

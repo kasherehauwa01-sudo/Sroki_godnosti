@@ -1607,11 +1607,29 @@ function formatHistoryDetails(action, payload) {
     }
 
     if (action === 'expiry_notifications_sent') {
-        return `Уведомления отправлены. Получатели: ${(parsed.recipients || []).join(', ') || 'не указаны'}. Партий: ${Number(parsed.count || parsed.batches?.length || 0)}.`;
+        const events = Array.isArray(parsed.events) ? parsed.events : [];
+        if (events.length > 0) {
+            const sentEvents = events.filter((event) => event.notification_id);
+            const recipients = [...new Set(sentEvents.map((event) => event.warehouse).filter(Boolean))];
+            const batchCount = sentEvents.reduce((sum, event) => sum + Number(event.count || 0), 0);
+            const skipped = events.filter((event) => event.skipped).map((event) => `${event.warehouse}: ${event.skipped}`);
+            return `Уведомления поставлены в очередь. Склады: ${recipients.join(', ') || 'не указаны'}. Партий в формах: ${batchCount}.${skipped.length ? ` Не отправлено: ${skipped.join('; ')}.` : ''}`;
+        }
+        return `Уведомления отправлены. Получатели: ${(parsed.recipients || parsed.emails || []).join(', ') || 'не указаны'}. Партий: ${Number(parsed.count || parsed.batches?.length || 0)}.`;
     }
 
     if (action === 'expiry_notifications_failed') {
         return `Ошибка отправки уведомлений. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
+
+    if (action === 'expiry_check_no_matches') {
+        const events = Array.isArray(parsed.events) ? parsed.events : [];
+        const skipped = events.filter((event) => event.skipped).map((event) => `${event.warehouse}: ${event.skipped}`);
+        return `${parsed.reason || 'Сегодня нет партий под выбранные правила уведомлений.'}${skipped.length ? ` ${skipped.join('; ')}.` : ''}`;
+    }
+
+    if (action === 'expiry_check_skipped') {
+        return parsed.reason || 'Проверка сроков пропущена.';
     }
 
     if (parsed.text) return parsed.text;
