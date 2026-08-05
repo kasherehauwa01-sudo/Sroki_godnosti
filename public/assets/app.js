@@ -24,6 +24,7 @@ const state = {
     writeOffAccessGranted: false,
     writeOffPassword: '',
     selectedBatchIds: new Set(),
+    recountSelectionMode: false,
     warehouses: [],
     editingWarehouseId: null,
     stockNotifications: [],
@@ -574,7 +575,7 @@ function renderRegistry() {
             && matchesEvent;
     });
     sortRegistryRows();
-    if (!state.writeOffAccessGranted) {
+    if (!state.writeOffAccessGranted && !state.recountSelectionMode) {
         state.selectedBatchIds.clear();
     }
     pruneSelectedBatchesToFilteredRows();
