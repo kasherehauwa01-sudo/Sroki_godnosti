@@ -2323,7 +2323,6 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
         $stockStatement->execute(array_merge($batchIds, $warehouseIds));
         foreach ($stockStatement->fetchAll() as $row) {
             $stock[(int)$row['batch_id']][(int)$row['warehouse_id']] = (float)$row['quantity'];
-            if ((string)$row['updated_at'] > $lastStockAt) $lastStockAt = (string)$row['updated_at'];
         }
 
         // Старые технические автонули скрываем из сводной, но ручной ввод склада
@@ -2369,6 +2368,19 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
         foreach ($autoExpectedStatement->fetchAll() as $row) {
             $expectedStock[(int)$row['batch_id']][(int)$row['warehouse_id']] = true;
         }
+
+        // Для признака «непрочитано» учитываем только фактические сохранения
+        // складских форм. Техническое обновление автонулей catalogvr не должно
+        // снова делать событие непрочитанным после обновления страницы.
+        $lastManualStockStatement = $pdo->prepare(
+            "SELECT MAX(l.created_at)
+             FROM stock_change_logs l
+             INNER JOIN stock_notifications n ON n.id = l.notification_id
+             WHERE n.event_key = ? AND DATE(n.sent_at) = ?
+               AND l.batch_id IN ($batchMarks) AND l.warehouse_id IN ($warehouseMarks)"
+        );
+        $lastManualStockStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+        $lastStockAt = (string)($lastManualStockStatement->fetchColumn() ?: '');
     }
 
     $filledCount = 0;
