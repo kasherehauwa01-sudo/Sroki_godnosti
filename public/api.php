@@ -115,6 +115,7 @@ function handleApiRequest(): void
                 'purchase_event_batch_status' => updatePurchaseEventBatchStatus($pdo, $payload),
                 'purchase_event_stocks' => updatePurchaseEventStocks($pdo, $payload),
                 'purchase_event_remind' => remindPurchaseEventWarehouses($pdo, $payload),
+                'registry_recount' => sendRegistryRecountNotifications($pdo, $payload),
                 'email_notification_retry' => retryEmailNotification($pdo, $payload),
                 default => throw new InvalidArgumentException('Неизвестное POST-действие API: ' . $action),
             };
@@ -1699,8 +1700,10 @@ function maybeSendPurchaseNotifications(PDO $pdo, array $notification, array $su
 {
     if (!$submittedBatchIds) return;
     $eventDays = parsePurchaseEventDays((string)($notification['event_key'] ?? ''));
-    $isOverdueStockCheck = (string)($notification['event_key'] ?? '') === 'overdue_stock_check';
-    if ($eventDays <= 0 && !$isOverdueStockCheck) return;
+    $eventKey = (string)($notification['event_key'] ?? '');
+    $isOverdueStockCheck = $eventKey === 'overdue_stock_check';
+    $isRecountEvent = str_starts_with($eventKey, 'recount_');
+    if ($eventDays <= 0 && !$isOverdueStockCheck && !$isRecountEvent) return;
     $eventDate = substr((string)($notification['sent_at'] ?? $notification['created_at'] ?? ''), 0, 10);
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $eventDate)) return;
     $event = getPurchaseEventData($pdo, (string)$notification['event_key'], $eventDate, false);
@@ -1799,6 +1802,73 @@ function sendStockReminderForWarehouse(PDO $pdo, array $event, array $warehouse)
         throw $error;
     }
     return $reminderNumber;
+}
+
+
+function registryRecountEmailSubject(array $warehouse): string
+{
+    // Тема должна совпадать с форматом из задачи и не получать служебный суффикс.
+    $today = (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->format('d.m.Y');
+    return 'Пересчет остатков | ' . (string)$warehouse['name'] . ' | ' . $today;
+}
+
+function registryRecountEmailBody(array $warehouse, string $expiryDate, array $form): string
+{
+    // Склад вносит только остатки выбранных партий с указанным сроком годности.
+    $expiryText = date('d.m.Y', strtotime($expiryDate));
+    return 'Остатки по событию заполнены некорректно. Прошу пересчитать. Склад ' . (string)$warehouse['name'] . ".\n"
+        . 'Внимание! Не нужно указывать общее количество товара на складе. Внесите только количество единиц, на упаковке которых указан срок годности до ' . $expiryText . ' включительно и нажмите «Сохранить».'
+        . "\n\n" . $form['url'];
+}
+
+function loadRegistryRecountBatches(PDO $pdo, array $batchIds): array
+{
+    $batchIds = array_values(array_unique(array_filter(array_map('intval', $batchIds), static fn (int $id): bool => $id > 0)));
+    if (!$batchIds) throw new InvalidArgumentException('Отметьте хотя бы один товар для пересчета.');
+    $marks = implode(',', array_fill(0, count($batchIds), '?'));
+    $statement = $pdo->prepare("SELECT id, article, code, name, expiry_date, expiry_full_date FROM batches WHERE id IN ($marks) AND status = ? AND expiry_invalid = 0 ORDER BY expiry_date ASC, article ASC, id ASC");
+    $statement->execute(array_merge($batchIds, [ACTIVE_STATUS]));
+    $batches = $statement->fetchAll();
+    if (count($batches) !== count($batchIds)) throw new InvalidArgumentException('Часть выбранных товаров не найдена, имеет некорректный срок годности или не находится в статусе «В наличии».');
+    return $batches;
+}
+
+function sendRegistryRecountNotifications(PDO $pdo, array $payload): array
+{
+    $batches = loadRegistryRecountBatches($pdo, (array)($payload['batch_ids'] ?? []));
+    $warehouses = getActiveWarehousesWithEmails($pdo);
+    if (!$warehouses) throw new InvalidArgumentException('Нет активных складов с email для отправки пересчета.');
+    $eventKey = 'recount_' . (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->format('Ymd_His') . '_' . bin2hex(random_bytes(3));
+    $expiryDate = max(array_map(static fn (array $batch): string => (string)$batch['expiry_date'], $batches));
+    $batchIds = array_map(static fn (array $batch): int => (int)$batch['id'], $batches);
+    $warehouseIds = array_map(static fn (array $warehouse): int => (int)$warehouse['id'], $warehouses);
+    $batchMarks = implode(',', array_fill(0, count($batchIds), '?'));
+    $warehouseMarks = implode(',', array_fill(0, count($warehouseIds), '?'));
+    // Старые остатки выбранных товаров очищаются, чтобы новое событие «Пересчет»
+    // считалось заполненным только после отправки новых форм всеми складами.
+    $clearStocks = $pdo->prepare("DELETE FROM batch_stock WHERE batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)");
+    $clearStocks->execute(array_merge($batchIds, $warehouseIds));
+    $sent = 0;
+    $errors = [];
+    foreach ($warehouses as $warehouse) {
+        try {
+            $subject = registryRecountEmailSubject($warehouse);
+            $form = createStockNotification($pdo, $warehouse, $batches, $eventKey, $subject, publicBaseUrl());
+            enqueueNotificationEmails($pdo, $form['emails'], $subject, registryRecountEmailBody($warehouse, $expiryDate, $form), [], [
+                'warehouse_name' => (string)$warehouse['name'],
+                'exact_subject' => true,
+                'notification_type' => 'Пересчет',
+                'event_key' => $eventKey,
+                'warehouse_id' => (int)$warehouse['id'],
+            ]);
+            $sent++;
+        } catch (Throwable $error) {
+            $errors[] = (string)$warehouse['name'] . ': ' . $error->getMessage();
+        }
+    }
+    writeLog($pdo, 'registry_recount_sent', ['event_key' => $eventKey, 'batch_ids' => array_map('intval', array_column($batches, 'id')), 'warehouse_count' => count($warehouses), 'sent' => $sent, 'errors' => $errors]);
+    if ($errors) throw new RuntimeException('Часть уведомлений не поставлена в очередь: ' . implode('; ', $errors));
+    return ['ok' => true, 'message' => 'Пересчет отправлен складам: ' . $sent . '.', 'event_key' => $eventKey, 'sent' => $sent];
 }
 
 function remindPurchaseEventWarehouses(PDO $pdo, array $payload): array
@@ -2085,7 +2155,7 @@ function listPurchaseEventNotifications(PDO $pdo): array
     $statement = $pdo->query(
         "SELECT event_key, DATE(sent_at) AS event_date, MAX(sent_at) AS sent_at
          FROM stock_notifications
-         WHERE event_key REGEXP '^expiry_[0-9]+$' OR event_key = 'overdue_stock_check'
+         WHERE event_key REGEXP '^expiry_[0-9]+$' OR event_key = 'overdue_stock_check' OR event_key LIKE 'recount_%'
          GROUP BY event_key, DATE(sent_at)
          ORDER BY sent_at DESC"
     );
@@ -2518,7 +2588,7 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
         $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'total' => $total, 'status' => $batch['status'], 'quantities' => $quantities, 'auto_zero_quantities' => $autoZeroQuantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'manager_email' => $managerEmails[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
     }
     usort($rows, static fn (array $left, array $right): int => ($left['section'] <=> $right['section']) ?: ($left['id'] <=> $right['id']));
-    return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => BATCH_STATUSES, 'can_remind' => purchaseEventMissingWarehouses($event) !== []];
+    return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'event_label' => str_starts_with((string)$log['event_key'], 'recount_') ? 'Пересчет' : ((int)$log['event_days'] . ' дней'), 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => BATCH_STATUSES, 'can_remind' => purchaseEventMissingWarehouses($event) !== []];
 }
 
 function purchaseEventAutoZeroMatrix(PDO $pdo, array $event): array
