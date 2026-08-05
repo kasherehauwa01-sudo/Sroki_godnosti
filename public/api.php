@@ -1308,6 +1308,7 @@ function runCatalogSyncTest(PDO $pdo, array $payload): array
     foreach ($response['items'] as $product) {
         if (!is_array($product)) continue;
         $manager = vrCatalogManagerValue($product);
+        $detectedStocks = function_exists('vrCatalogExtractWarehouseStockRows') ? vrCatalogExtractWarehouseStockRows($product) : [];
         $stocks = [];
         foreach ($warehouses as $warehouse) {
             $stocks[(string)$warehouse['id']] = vrCatalogWarehouseStockQuantity($product, $warehouse);
@@ -1317,6 +1318,8 @@ function runCatalogSyncTest(PDO $pdo, array $payload): array
             'manager' => $manager['exists'] ? (string)$manager['value'] : '',
             'found' => vrCatalogProductFound($product),
             'stocks' => $stocks,
+            'detected_stock_rows' => count($detectedStocks),
+            'detected_stock_names' => array_values(array_unique(array_map(static fn (array $row): string => (string)$row['name'], $detectedStocks))),
         ];
     }
     if (!$rows) {

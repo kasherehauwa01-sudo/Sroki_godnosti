@@ -48,6 +48,13 @@ assertSameValue(2.0, vrCatalogWarehouseStockQuantity($russianStockProduct, ['nam
 assertSameValue(13.0, vrCatalogWarehouseStockQuantity($russianStockProduct, ['name' => 'Авиаторов Зал']), 'Объединённый склад catalogvr должен сопоставляться с залом');
 assertSameValue(13.0, vrCatalogWarehouseStockQuantity($russianStockProduct, ['name' => 'Авиаторов Склад']), 'Объединённый склад catalogvr должен сопоставляться со складом');
 
+$nestedStockProduct = ['article' => '346051', 'found' => true, 'data' => ['remains' => [
+    ['Склад' => 'Козловская', 'Остаток' => '3 шт.'],
+    ['Название склада' => 'Стройград', 'Количество' => '7,5'],
+]]];
+assertSameValue(3.0, vrCatalogWarehouseStockQuantity($nestedStockProduct, ['name' => 'Козловская']), 'Остаток должен находиться рекурсивно и читаться из строки');
+assertSameValue(7.5, vrCatalogWarehouseStockQuantity($nestedStockProduct, ['name' => 'Стройград']), 'Дробный остаток с запятой должен читаться как число');
+
 foreach ([
     'ЖС2344-1' => 'ЖС2344',
     'ЖС2344-1-25' => 'ЖС2344',

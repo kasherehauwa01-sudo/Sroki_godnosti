@@ -1775,7 +1775,9 @@ function closeCatalogSyncResultDialog() {
 
 function renderCatalogSyncResult(result) {
     const warehouses = result.warehouses || [];
-    qs('#catalogSyncResultInfo').textContent = result.message || 'Тест выполнен.';
+    const detectedRows = (result.rows || []).reduce((sum, row) => sum + Number(row.detected_stock_rows || 0), 0);
+    const detectedNames = [...new Set((result.rows || []).flatMap((row) => row.detected_stock_names || []))];
+    qs('#catalogSyncResultInfo').textContent = `${result.message || 'Тест выполнен.'} Найдено строк остатков в ответе API: ${detectedRows}.${detectedNames.length ? ` Склады из ответа: ${detectedNames.join(', ')}.` : ' Если в catalogvr UI остатки есть, а здесь 0 строк — внутренний API catalogvr не отдаёт блок остатков.'}`;
     qs('#catalogSyncResultHead').innerHTML = ['Артикул', 'Менеджер', ...warehouses.map((warehouse) => warehouse.name)]
         .map((title) => `<th>${escapeHtml(title)}</th>`).join('');
     qs('#catalogSyncResultBody').innerHTML = (result.rows || []).map((row) => `
