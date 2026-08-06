@@ -214,3 +214,21 @@ CREATE TABLE IF NOT EXISTS stock_batch_notification_views (
     PRIMARY KEY (batch_id),
     CONSTRAINT fk_stock_batch_views_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS stock_manager_notifications (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    event_key VARCHAR(128) NOT NULL,
+    event_date DATE NOT NULL,
+    manager_name VARCHAR(255) NOT NULL,
+    manager_email VARCHAR(255) NOT NULL,
+    item_count INT UNSIGNED NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL DEFAULT 'SENT',
+    error_message TEXT NULL,
+    sent_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_manager_event_email (event_key, event_date, manager_email),
+    INDEX idx_manager_notifications_status (status),
+    INDEX idx_manager_notifications_sent_at (sent_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
