@@ -177,18 +177,30 @@ function normalizeWarehousePayload(array $payload): array
 
 function normalizeWarehouseEmails(string $emails): ?string
 {
+    $items = warehouseNotificationEmailList($emails);
+
+    return $items ? implode("\n", $items) : null;
+}
+
+/** Разбирает все адреса склада и сохраняет порядок, заданный в настройках. */
+function warehouseNotificationEmailList(string $emails): array
+{
     $items = array_values(array_filter(array_map(
         static fn (string $email): string => trim($email),
-        preg_split('/\R+/', $emails) ?: []
+        preg_split('/[\r\n,;]+/', $emails) ?: []
     ), static fn (string $email): bool => $email !== ''));
+
+    $uniqueItems = [];
 
     foreach ($items as $email) {
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            throw new InvalidArgumentException('Введите корректные email склада, каждый адрес с новой строки.');
+            throw new InvalidArgumentException('Введите корректные email склада, разделяя адреса новой строкой, запятой или точкой с запятой.');
         }
+        $key = mb_strtolower($email, 'UTF-8');
+        $uniqueItems[$key] ??= $email;
     }
 
-    return $items ? implode("\n", $items) : null;
+    return array_values($uniqueItems);
 }
 
 
@@ -201,7 +213,7 @@ function getWarehouseNotificationEmails(PDO $pdo): array
         if ($items === null) {
             continue;
         }
-        $emails = array_merge($emails, explode("\n", $items));
+        $emails = array_merge($emails, warehouseNotificationEmailList($items));
     }
 
     return array_values(array_unique($emails));
@@ -230,7 +242,7 @@ function warehouseHasStock(PDO $pdo, int $id): bool
 function getBatchStockByWarehouses(PDO $pdo, int $batchId): array
 {
     $statement = $pdo->prepare(
-        'SELECT w.id AS warehouse_id, w.name, w.sort_order, w.email, COALESCE(bs.quantity, 0) AS quantity
+        'SELECT w.id AS warehouse_id, w.name, w.sort_order, w.email, bs.id AS stock_id, bs.quantity
          FROM warehouses w
          LEFT JOIN batch_stock bs ON bs.warehouse_id = w.id AND bs.batch_id = :batch_id
          WHERE w.is_active = 1
@@ -244,10 +256,10 @@ function getBatchStockByWarehouses(PDO $pdo, int $batchId): array
         'name' => (string)$row['name'],
         'sort_order' => (int)$row['sort_order'],
         'email' => (string)($row['email'] ?? ''),
-        'quantity' => (float)$row['quantity'],
+        'quantity' => $row['stock_id'] === null ? null : (float)$row['quantity'],
     ], $rows);
 
-    return ['items' => $items, 'total' => array_sum(array_column($items, 'quantity'))];
+    return ['items' => $items, 'total' => array_sum(array_map(static fn (array $item): float => (float)($item['quantity'] ?? 0), $items))];
 }
 
 function ensureStockNotificationSchema(PDO $pdo): void
@@ -443,7 +455,7 @@ function createStockNotification(PDO $pdo, array $warehouse, array $batches, str
         'token' => $token,
         'url' => rtrim($baseUrl, '/') . '/fill-stock.php?token=' . rawurlencode($token),
         'expires_at' => $expiresAt,
-        'emails' => explode("\n", $emails),
+        'emails' => warehouseNotificationEmailList($emails),
     ];
 }
 
@@ -531,7 +543,7 @@ function getStockNotificationItems(PDO $pdo, int $notificationId, int $warehouse
         'name' => (string)$row['name'],
         'expiry_date' => (string)($row['expiry_date'] ?? ''),
         'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
-        'quantity' => (int)$row['quantity'],
+        'quantity' => $row['stock_id'] === null ? null : (int)$row['quantity'],
     ], $statement->fetchAll());
 }
 
@@ -547,7 +559,12 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
     foreach ($form['items'] as $item) {
         $itemsById[(int)$item['id']] = $item;
     }
+    $submittedItemIds = array_map('intval', array_keys($quantities));
+    if (array_diff(array_keys($itemsById), $submittedItemIds)) {
+        throw new InvalidArgumentException('Заполните остатки по всем партиям. Если остатка нет, укажите 0.');
+    }
 
+    $submittedBatchIds = [];
     $pdo->beginTransaction();
     try {
         $upsert = $pdo->prepare(
@@ -559,46 +576,89 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
             'INSERT INTO stock_change_logs (notification_id, warehouse_id, batch_id, old_quantity, new_quantity, ip, user_agent)
              VALUES (:notification_id, :warehouse_id, :batch_id, :old_quantity, :new_quantity, :ip, :user_agent)'
         );
+        $submittedBatchIds = [];
         foreach ($quantities as $itemId => $quantity) {
             $itemId = (int)$itemId;
             if (!isset($itemsById[$itemId]) || empty($itemsById[$itemId]['batch_id'])) {
                 continue;
             }
-            if (!is_int($quantity) && !ctype_digit((string)$quantity)) {
-                throw new InvalidArgumentException('Остаток должен быть целым числом больше или равным 0.');
+            if ((!is_int($quantity) && !ctype_digit((string)$quantity)) || trim((string)$quantity) === '') {
+                throw new InvalidArgumentException('Заполните остатки по всем партиям целыми числами больше или равными 0.');
             }
             $newQuantity = (int)$quantity;
             if ($newQuantity < 0) {
-                throw new InvalidArgumentException('Остаток должен быть целым числом больше или равным 0.');
+                throw new InvalidArgumentException('Заполните остатки по всем партиям целыми числами больше или равными 0.');
             }
-            $oldQuantity = (int)$itemsById[$itemId]['quantity'];
+            $oldQuantity = $itemsById[$itemId]['quantity'] === null ? null : (int)$itemsById[$itemId]['quantity'];
+            $batchId = (int)$itemsById[$itemId]['batch_id'];
             $upsert->execute([
-                ':batch_id' => (int)$itemsById[$itemId]['batch_id'],
+                ':batch_id' => $batchId,
                 ':warehouse_id' => (int)$notification['warehouse_id'],
                 ':quantity' => $newQuantity,
             ]);
-            if ($oldQuantity !== $newQuantity) {
-                $log->execute([
-                    ':notification_id' => (int)$notification['id'],
-                    ':warehouse_id' => (int)$notification['warehouse_id'],
-                    ':batch_id' => (int)$itemsById[$itemId]['batch_id'],
-                    ':old_quantity' => $oldQuantity,
-                    ':new_quantity' => $newQuantity,
-                    ':ip' => $ip,
-                    ':user_agent' => $userAgent,
-                ]);
+            clearStockAutoZeroEntryForManualStock($pdo, $notification, $batchId);
+            $submittedBatchIds[] = $batchId;
+            // Записываем каждое подтвержденное значение, даже если оно совпало со
+            // старым batch_stock: совпадение не означает заполнение нового события.
+            $log->execute([
+                ':notification_id' => (int)$notification['id'],
+                ':warehouse_id' => (int)$notification['warehouse_id'],
+                ':batch_id' => $batchId,
+                ':old_quantity' => $oldQuantity,
+                ':new_quantity' => $newQuantity,
+                ':ip' => $ip,
+                ':user_agent' => $userAgent,
+            ]);
+            if (function_exists('recordPurchaseEventStockEntry')) {
+                $eventDate = substr((string)($notification['sent_at'] ?? $notification['created_at'] ?? ''), 0, 10);
+                recordPurchaseEventStockEntry(
+                    $pdo,
+                    (string)$notification['event_key'],
+                    $eventDate,
+                    $batchId,
+                    (int)$notification['warehouse_id'],
+                    (float)$newQuantity,
+                    'warehouse_form',
+                    (int)$notification['id']
+                );
             }
         }
         updateStockNotificationProgress($pdo, (int)$notification['id']);
         $pdo->commit();
     } catch (Throwable $error) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         throw $error;
     }
 
     sendCompletedEventManagerNotifications($pdo, (int)$notification['id']);
 
     return ['ok' => true] + loadStockFormByToken($pdo, $token, false);
+}
+
+function clearStockAutoZeroEntryForManualStock(PDO $pdo, array $notification, int $batchId): void
+{
+    $eventKey = (string)($notification['event_key'] ?? '');
+    $eventDate = substr((string)($notification['sent_at'] ?? $notification['created_at'] ?? ''), 0, 10);
+    $warehouseId = (int)($notification['warehouse_id'] ?? 0);
+    if ($eventKey === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $eventDate) || $batchId <= 0 || $warehouseId <= 0) return;
+
+    try {
+        // Ручной ввод склада важнее технического автонуля: если склад сохранил
+        // значение в форме, сводная должна показывать именно это значение.
+        $pdo->prepare(
+            'DELETE FROM stock_auto_zero_entries
+             WHERE event_key = :event_key AND event_date = :event_date AND batch_id = :batch_id AND warehouse_id = :warehouse_id'
+        )->execute([
+            ':event_key' => $eventKey,
+            ':event_date' => $eventDate,
+            ':batch_id' => $batchId,
+            ':warehouse_id' => $warehouseId,
+        ]);
+    } catch (Throwable $error) {
+        error_log('Не удалось удалить технический автоноль после ввода склада: ' . $error->getMessage());
+    }
 }
 
 function updateStockNotificationProgress(PDO $pdo, int $notificationId): void
@@ -1110,6 +1170,9 @@ function normalizeStockNotificationSummary(array $row): array
         'status' => (string)$row['status'],
         'last_changed_at' => (string)($row['last_changed_at'] ?? ''),
         'created_at' => (string)$row['created_at'],
+        'sent_at' => (string)($row['sent_at'] ?? ''),
+        'event_key' => (string)($row['event_key'] ?? ''),
+        'subject' => (string)($row['subject'] ?? ''),
     ];
 }
 
@@ -1121,6 +1184,7 @@ function normalizeStockNotificationRow(array $row, array $items): array
         'warehouse' => (string)($row['warehouse_name'] ?? ''),
         'email' => (string)$row['email'],
         'subject' => (string)$row['subject'],
+        'event_key' => (string)($row['event_key'] ?? ''),
         'status' => (string)$row['status'],
         'created_at' => (string)$row['created_at'],
         'sent_at' => (string)($row['sent_at'] ?? ''),
@@ -1179,6 +1243,8 @@ function listStockBatchNotifications(PDO $pdo): array
             'last_stock_at' => $lastStockAt,
             'viewed_at' => $viewedAt,
             'unread' => $viewedAt === '' || ($lastStockAt !== '' && strtotime($lastStockAt) > strtotime($viewedAt)),
+            'filled_warehouse_count' => (int)($row['filled_warehouse_count'] ?? 0),
+            'active_warehouse_count' => (int)($row['active_warehouse_count'] ?? 0),
             'all_warehouses_reported' => (int)($row['active_warehouse_count'] ?? 0) > 0 && (int)($row['filled_warehouse_count'] ?? 0) >= (int)($row['active_warehouse_count'] ?? 0),
         ];
     }, $statement->fetchAll());

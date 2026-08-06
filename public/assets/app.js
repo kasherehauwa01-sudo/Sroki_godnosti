@@ -1,8 +1,18 @@
+const STOCK_EVENT_VIEWS_KEY = 'stockEventViews';
+const storedStockEventViews = (() => {
+    try {
+        const value = JSON.parse(window.localStorage.getItem(STOCK_EVENT_VIEWS_KEY) || '{}');
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    } catch {
+        return {};
+    }
+})();
+
 const state = {
     batches: [],
     filteredBatches: [],
     importRows: [],
-    settings: { emails: [], rules: [] },
+    settings: { emails: [], rules: [], purchase_recipients: [] },
     history: [],
     allHistory: [],
     notificationDetails: '',
@@ -14,16 +24,19 @@ const state = {
     writeOffAccessGranted: false,
     writeOffPassword: '',
     selectedBatchIds: new Set(),
+    recountSelectionMode: false,
     warehouses: [],
     editingWarehouseId: null,
     stockNotifications: [],
+    expandedStockNotificationGroups: new Set(),
     stockBatchNotifications: [],
+    stockEventViews: storedStockEventViews,
     selectedStockBatchId: null,
     events: [],
     eventPeriodFilters: new Set(['today', 'future']),
 };
 
-const statusOptions = ['В наличии', 'Реализована', 'Списана'];
+const statusOptions = ['В наличии', 'Перемещено на СБ', 'Нет в наличии'];
 
 const qs = (selector) => document.querySelector(selector);
 const qsa = (selector) => [...document.querySelectorAll(selector)];
@@ -105,8 +118,8 @@ async function copyDeployCommand() {
 }
 
 function getApiMethod(action, data = {}) {
-    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_auto_import', 'test_missing_filter_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed']);
+    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients', 'email_notification_logs', 'catalog_health']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'run_notifications_now', 'catalog_sync_test']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -143,7 +156,10 @@ async function api(action, data = {}) {
         if (response.status === 413) {
             throw new Error('Файл слишком большой для одной загрузки. Попробуйте загрузить его частями или обратитесь к администратору.');
         }
-        throw new Error(text || 'API вернул некорректный JSON.');
+        const details = text.trim();
+        throw new Error(details
+            ? `API вернул некорректный JSON: ${details.slice(0, 500)}`
+            : `API вернул пустой ответ (HTTP ${response.status}). Обновите страницу; если ошибка повторится, сообщите администратору.`);
     }
     if (!response.ok || !json.ok) {
         // Некоторые служебные действия API (например, тест автозагрузки)
@@ -445,7 +461,6 @@ function normalizeSpreadsheetRowEncoding(row) {
 function normalizeBatch(row) {
     const codeRaw = getRowValue(row, ['code', 'Код', 'Код товара']);
     const nameRaw = getRowValue(row, ['name', 'Наименование', 'Название']);
-    const quantityRaw = getRowValue(row, ['quantity', 'Количество в партии', 'Количество', 'Кол-во', 'Кол-во в партии', 'Количестс', 'Количест', 'Количествовпартии']);
     const expiryRawValue = getRowValue(row, ['expiryRaw', 'expiry_raw', 'expiryDate', 'expiry_date', 'Срок годности до', 'Срок годности до.', 'Срок годности', 'Годен до', 'Срокгодностидо']);
     const expiryInfo = expiryDateInfo(expiryRawValue);
     const serverInvalid = row.expiryInvalid ?? row.expiry_invalid;
@@ -461,8 +476,6 @@ function normalizeBatch(row) {
         article: String(getRowValue(row, ['article', 'Артикул', 'арт', 'Арт', 'Артикул товара', 'Артикул.'])).trim(),
         code: String(codeRaw || '').trim(),
         name: String(nameRaw || '').trim(),
-        quantity: Number(quantityRaw || 0),
-        hasQuantity: String(quantityRaw).trim() !== '',
         expiryDate: toExpiryDateValue(expiryRawValue),
         expiryFullDate,
         expiryRaw: String(getRowValue(row, ['expiryRaw', 'expiry_raw']) || (expiryInvalid ? expiryInfo.raw : '') || '').trim(),
@@ -521,14 +534,17 @@ function updateSelectionControls() {
     const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
     const selectAll = qs('#selectAllBatches');
 
-    qs('#selectionHeader').classList.toggle('hidden', !state.writeOffAccessGranted);
+    const selectionVisible = state.writeOffAccessGranted;
+    qs('#selectionHeader').classList.toggle('hidden', !selectionVisible);
     qs('#bulkDeleteButton').classList.toggle('hidden', !state.writeOffAccessGranted || state.selectedBatchIds.size === 0);
     qs('#bulkDeleteButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
+    qs('#sendRecountButton')?.classList.toggle('hidden', !state.writeOffAccessGranted);
+    qs('#sendRecountButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
 
     if (selectAll) {
         selectAll.checked = allVisibleSelected;
         selectAll.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
-        selectAll.disabled = !state.writeOffAccessGranted || visibleIds.length === 0;
+        selectAll.disabled = !selectionVisible || visibleIds.length === 0;
     }
 }
 
@@ -556,7 +572,7 @@ function renderRegistry() {
             && matchesEvent;
     });
     sortRegistryRows();
-    if (!state.writeOffAccessGranted) {
+    if (!state.writeOffAccessGranted && !state.recountSelectionMode) {
         state.selectedBatchIds.clear();
     }
     pruneSelectedBatchesToFilteredRows();
@@ -566,7 +582,8 @@ function renderRegistry() {
     qs('#registryBody').innerHTML = state.filteredBatches.map((batch) => {
         const days = batch.expiryInvalid ? null : (batch.daysLeft ?? daysLeft(batch.expiryDate));
         const options = statusOptions.map((option) => `<option ${option === batch.status ? 'selected' : ''}>${option}</option>`).join('');
-        const selectionCell = state.writeOffAccessGranted
+        const selectionVisible = state.writeOffAccessGranted;
+        const selectionCell = selectionVisible
             ? `<td class="selection-column"><input class="batch-select-checkbox" data-id="${escapeHtml(batch.id)}" type="checkbox" ${state.selectedBatchIds.has(String(batch.id)) ? 'checked' : ''}></td>`
             : '';
         const invalidDateActions = batch.expiryInvalid
@@ -631,11 +648,16 @@ function sortRegistryRows() {
 
     const multiplier = direction === 'desc' ? -1 : 1;
     state.filteredBatches.sort((left, right) => {
-        const leftWrittenOff = left.status === 'Списана';
-        const rightWrittenOff = right.status === 'Списана';
-        if (leftWrittenOff !== rightWrittenOff) {
-            // Списанные партии всегда показываем в конце реестра независимо от выбранной сортировки.
-            return leftWrittenOff ? 1 : -1;
+        const terminalStatusRank = (status) => {
+            if (status === 'Нет в наличии') return 2;
+            if (status === 'Перемещено на СБ') return 1;
+            return 0;
+        };
+        const leftStatusRank = terminalStatusRank(left.status);
+        const rightStatusRank = terminalStatusRank(right.status);
+        if (leftStatusRank !== rightStatusRank) {
+            // Партии без наличия и перемещённые на СБ всегда показываем в конце реестра независимо от выбранной сортировки.
+            return leftStatusRank - rightStatusRank;
         }
 
         if (field === 'daysLeft') {
@@ -645,9 +667,6 @@ function sortRegistryRows() {
         }
         if (field === 'article') {
             return String(left.article || '').localeCompare(String(right.article || ''), 'ru', { numeric: true }) * multiplier;
-        }
-        if (field === 'quantity') {
-            return (Number(left.quantity || 0) - Number(right.quantity || 0)) * multiplier;
         }
 
         return toDateInputValue(left[field]).localeCompare(toDateInputValue(right[field])) * multiplier;
@@ -670,6 +689,89 @@ function toggleRegistrySort(field) {
     renderRegistry();
 }
 
+async function openRecountWarehousesDialog() {
+    if (state.selectedBatchIds.size === 0) {
+        showToast('Отметьте хотя бы один товар для пересчета.', true);
+        return;
+    }
+
+    try {
+        // Список обновляется непосредственно перед показом окна, чтобы нельзя было
+        // выбрать отключенный или уже удаленный склад из устаревших данных страницы.
+        const result = await api('warehouses');
+        state.warehouses = result.warehouses || [];
+        const availableWarehouses = state.warehouses.filter((warehouse) => warehouse.is_active && String(warehouse.email || '').trim());
+        qs('#recountWarehousesList').innerHTML = availableWarehouses.map((warehouse) => `
+            <label class="checkbox-row">
+                <input class="recount-warehouse-checkbox" type="checkbox" value="${escapeHtml(warehouse.id)}">
+                ${escapeHtml(warehouse.name)}
+            </label>
+        `).join('') || '<p class="subtitle">Нет активных складов с указанным email.</p>';
+        qs('#selectAllRecountWarehouses').checked = false;
+        qs('#selectAllRecountWarehouses').indeterminate = false;
+        qs('#selectAllRecountWarehouses').disabled = availableWarehouses.length === 0;
+        // По умолчанию ни один склад не выбран, поэтому отправка недоступна
+        // до первого осознанного выбора пользователя.
+        qs('#confirmRecountWarehousesButton').disabled = true;
+        qs('#recountWarehousesError').textContent = '';
+        qsa('.recount-warehouse-checkbox').forEach((checkbox) => checkbox.addEventListener('change', updateRecountWarehouseSelection));
+        qs('#recountWarehousesDialog').showModal();
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+function updateRecountWarehouseSelection() {
+    const checkboxes = qsa('.recount-warehouse-checkbox');
+    const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+    const selectAll = qs('#selectAllRecountWarehouses');
+    selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+    selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+    qs('#confirmRecountWarehousesButton').disabled = selectedCount === 0;
+    qs('#recountWarehousesError').textContent = '';
+}
+
+function setAllRecountWarehouses(checked) {
+    qsa('.recount-warehouse-checkbox').forEach((checkbox) => {
+        checkbox.checked = checked;
+    });
+    updateRecountWarehouseSelection();
+}
+
+function closeRecountWarehousesDialog() {
+    qs('#recountWarehousesDialog').close();
+    qs('#recountWarehousesForm').reset();
+    qs('#recountWarehousesList').innerHTML = '';
+    qs('#recountWarehousesError').textContent = '';
+}
+
+async function sendSelectedBatchesToRecount(event) {
+    event.preventDefault();
+    const warehouseIds = qsa('.recount-warehouse-checkbox:checked').map((checkbox) => Number(checkbox.value));
+    if (warehouseIds.length === 0) {
+        qs('#recountWarehousesError').textContent = 'Отметьте хотя бы один склад.';
+        return;
+    }
+
+    const button = qs('#confirmRecountWarehousesButton');
+    button.disabled = true;
+    try {
+        const result = await api('registry_recount', {
+            batch_ids: [...state.selectedBatchIds].map(Number),
+            warehouse_ids: warehouseIds,
+        });
+        closeRecountWarehousesDialog();
+        showToast(result.message || 'Товары отправлены на пересчет.');
+        state.selectedBatchIds.clear();
+        renderRegistry();
+        await loadStockBatchNotifications();
+    } catch (error) {
+        showToast(error.message, true);
+    } finally {
+        if (qs('#recountWarehousesDialog').open) button.disabled = false;
+    }
+}
+
 async function onStatusChange(event) {
     const id = event.target.dataset.id;
     const status = event.target.value;
@@ -690,11 +792,17 @@ async function openBatchStockDialog(id, options = {}) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
 
+    const expiryText = batch.expiryInvalid
+        ? (batch.expiryRaw || 'не указан')
+        : (formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate) || 'не указан');
+    const numericDays = batch.expiryInvalid ? null : (batch.daysLeft ?? (batch.expiryDate ? daysLeft(batch.expiryDate) : null));
+    const daysText = Number.isFinite(Number(numericDays)) ? formatDays(Number(numericDays)) : 'не рассчитан';
     qs('#batchStockTitle').textContent = `Остатки партии: ${batch.article}`;
-    qs('#batchStockMeta').textContent = `${batch.code ? `Код: ${batch.code}. ` : ''}${batch.name || ''}`;
+    qs('#batchStockMeta').textContent = `${batch.code ? `Код: ${batch.code}. ` : ''}${batch.name || ''}. Срок годности до: ${expiryText}. Остаток дней: ${daysText}`;
     qs('#batchStockBody').innerHTML = '<tr><td colspan="2">Загрузка...</td></tr>';
     qs('#batchStockTotal').textContent = '0';
-    state.selectedStockBatchId = options.showWriteOff ? String(id) : null;
+    state.selectedStockBatchId = String(id);
+    resetBatchStockStatusControls(batch.status);
     qs('#writeOffStockBatchButton').classList.toggle('hidden', !options.showWriteOff);
     qs('#writeOffStatusPanel').classList.add('hidden');
     setValueIfPresent('#writeOffStockBatchStatus', batch.status || 'Списана');
@@ -705,7 +813,7 @@ async function openBatchStockDialog(id, options = {}) {
         const items = result.stock?.items || [];
         const total = Number(result.stock?.total || 0);
         qs('#batchStockBody').innerHTML = items.map((item) => `
-            <tr><td>${escapeHtml(item.name)}</td><td class="numeric-cell">${formatQuantity(item.quantity)}</td></tr>
+            <tr><td>${escapeHtml(item.name)}</td><td class="numeric-cell">${formatOptionalQuantity(item.quantity)}</td></tr>
         `).join('') || '<tr><td colspan="2">Активные склады не найдены.</td></tr>';
         qs('#batchStockTotal').textContent = formatQuantity(total);
         if (options.markViewed) {
@@ -718,12 +826,42 @@ async function openBatchStockDialog(id, options = {}) {
 }
 
 function closeBatchStockDialog() {
+    resetBatchStockStatusControls();
     qs('#batchStockDialog').close();
+}
+
+function resetBatchStockStatusControls(status = '') {
+    setValueIfPresent('#batchStockStatusSelect', statusOptions.includes(status) ? status : statusOptions[0]);
+    const actions = qs('#stockStatusActions');
+    if (actions) actions.hidden = true;
+}
+
+function showBatchStockStatusControls() {
+    const batch = state.batches.find((item) => String(item.id) === String(state.selectedStockBatchId));
+    if (!batch) {
+        showToast('Партия не найдена в реестре.', true);
+        return;
+    }
+    if (!state.writeOffAccessGranted) {
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
+        openWriteOffPasswordDialog();
+        return;
+    }
+
+    // Пользователь выбирает новый статус прямо в окне остатков, без ручного ввода через prompt.
+    setValueIfPresent('#batchStockStatusSelect', batch.status || statusOptions[0]);
+    const actions = qs('#stockStatusActions');
+    if (actions) actions.hidden = false;
+    focusIfPresent('#batchStockStatusSelect');
 }
 
 function formatQuantity(value) {
     const number = Number(value || 0);
     return Number.isInteger(number) ? String(number) : number.toLocaleString('ru-RU', { maximumFractionDigits: 3 });
+}
+
+function formatOptionalQuantity(value) {
+    return value === null || value === undefined || value === '' ? '—' : formatQuantity(value);
 }
 
 function openEditDialog(id) {
@@ -734,7 +872,6 @@ function openEditDialog(id) {
     qs('#editArticle').value = batch.article;
     qs('#editCode').value = batch.code || '';
     qs('#editName').value = batch.name || '';
-    qs('#editQuantity').value = batch.quantity;
     qs('#editExpiryDate').value = batch.expiryInvalid ? (batch.expiryRaw || formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate)) : formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate);
     qs('#editStatus').value = batch.status;
     qs('#editCreatedAt').value = batch.createdAt;
@@ -753,7 +890,6 @@ function createBatchRow(values = {}) {
         <label>Артикул<input class="batch-row-article" required autocomplete="off" value="${escapeHtml(values.article || '')}"></label>
         <label>Код<input class="batch-row-code" autocomplete="off" value="${escapeHtml(values.code || '')}"></label>
         <label>Наименование<input class="batch-row-name" autocomplete="off" value="${escapeHtml(values.name || '')}"></label>
-        <label>Количество в партии<input class="batch-row-quantity" required min="0" step="1" type="number" value="${escapeHtml(values.quantity ?? '')}"></label>
         <label>Срок годности<input class="batch-row-expiry" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10" value="${escapeHtml(values.expiryDate || '')}"></label>
         <button class="small-button danger remove-batch-row-button" type="button" aria-label="Удалить строку">🗑️</button>
     `;
@@ -791,7 +927,6 @@ function collectBatchRows() {
         code: row.querySelector('.batch-row-code').value,
         name: row.querySelector('.batch-row-name').value,
         createdSource: 'Ручной',
-        quantity: row.querySelector('.batch-row-quantity').value,
         expiryDate: row.querySelector('.batch-row-expiry').value,
     }));
 }
@@ -865,14 +1000,14 @@ async function deleteBatch(id) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         return;
     }
-    if (!confirm('Уверены, что хотите списать/удалить партию безвозвратно?')) return;
+    if (!confirm('Уверены, что хотите удалить партию безвозвратно?')) return;
 
     try {
         await api('delete', { id, write_off_password: state.writeOffPassword });
-        showToast('Партия списана/удалена.');
+        showToast('Партия удалена.');
         await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
     } catch (error) {
         showToast(error.message, true);
@@ -883,7 +1018,7 @@ async function deleteSelectedBatches() {
     const ids = [...state.selectedBatchIds];
     if (!ids.length) return;
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         return;
     }
     if (!confirm(`Удалить выбранные партии (${ids.length}) безвозвратно?`)) return;
@@ -1124,11 +1259,47 @@ async function loadStockBatchNotifications() {
     renderStockBatchNotifications();
 }
 
+function stockEventViewKey(notification) {
+    return `${notification.event_key || ''}|${notification.event_date || ''}`;
+}
+
+function stockEventHasUnreadChanges(notification) {
+    const changedAt = String(notification.last_stock_at || '');
+    return changedAt !== '' && changedAt > String(state.stockEventViews[stockEventViewKey(notification)] || '');
+}
+
+function markStockEventViewed(notification, row) {
+    const changedAt = String(notification.last_stock_at || '');
+    if (changedAt === '') return;
+    state.stockEventViews[stockEventViewKey(notification)] = changedAt;
+    try {
+        window.localStorage.setItem(STOCK_EVENT_VIEWS_KEY, JSON.stringify(state.stockEventViews));
+    } catch {
+        // В закрытом режиме браузер может запрещать localStorage — строка всё равно обновится до перехода.
+    }
+    row?.classList.remove('stock-event-unread');
+}
+
+function markAllStockEventsViewed() {
+    state.stockBatchNotifications.forEach((notification) => {
+        const changedAt = String(notification.last_stock_at || '');
+        if (changedAt !== '') state.stockEventViews[stockEventViewKey(notification)] = changedAt;
+    });
+    try {
+        window.localStorage.setItem(STOCK_EVENT_VIEWS_KEY, JSON.stringify(state.stockEventViews));
+    } catch {
+        // Состояние всё равно обновлено для текущей страницы.
+    }
+    renderStockBatchNotifications();
+}
+
 function renderStockBatchNotifications() {
     const body = qs('#stockBatchNotificationsBody');
     if (!body) return;
-    const hasUnread = state.stockBatchNotifications.some((notification) => notification.unread);
-    qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnread);
+    const hasUnreadChanges = state.stockBatchNotifications.some(stockEventHasUnreadChanges);
+    qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnreadChanges);
+    const markAllButton = qs('#markAllStockEventsReadButton');
+    if (markAllButton) markAllButton.disabled = !hasUnreadChanges;
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
         <tr class="${[notification.unread ? 'unread-stock-notification' : '', notification.all_warehouses_reported ? 'complete-stock-notification' : ''].filter(Boolean).join(' ')}" data-stock-batch-id="${notification.id}">
             <td>${escapeHtml(notification.article)}</td>
@@ -1137,7 +1308,6 @@ function renderStockBatchNotifications() {
             <td>${formatQuantity(notification.total_stock || 0)}</td>
             <td>${Number(notification.filled_warehouse_count || 0)} из ${Number(notification.active_warehouse_count || 0)}</td>
             <td>${escapeHtml(notification.status || '')}</td>
-            <td>${escapeHtml(notification.last_stock_at || '—')}</td>
         </tr>
     `).join('') || '<tr><td colspan="7">Остатков по партиям пока нет.</td></tr>';
     qsa('[data-stock-batch-id]').forEach((row) => row.addEventListener('click', () => openBatchStockDialog(row.dataset.stockBatchId, { markViewed: true, showWriteOff: true })));
@@ -1160,7 +1330,7 @@ async function saveSelectedStockBatchStatus() {
         return;
     }
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Списать / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         openWriteOffPasswordDialog();
         return;
     }
@@ -1172,7 +1342,7 @@ async function saveSelectedStockBatchStatus() {
     try {
         await api('update', { ...batch, status, write_off_password: state.writeOffPassword });
         showToast('Статус партии обновлен.');
-        qs('#batchStockDialog').close();
+        closeBatchStockDialog();
         await Promise.all([loadBatches(), loadStockBatchNotifications(), loadHistory()]);
     } catch (error) {
         showToast(error.message, true);
@@ -1185,20 +1355,77 @@ async function loadStockNotifications() {
     renderStockNotifications();
 }
 
+function stockNotificationEventType(notification) {
+    const match = String(notification.event_key || '').match(/expiry_(\d+)/);
+    if (match) return `${match[1]} день`;
+    return notification.subject || 'Событие не указано';
+}
+
+function stockNotificationSentAt(notification) {
+    return notification.sent_at || notification.created_at || '';
+}
+
+function stockNotificationGroupKey(notification) {
+    const sentAt = stockNotificationSentAt(notification).slice(0, 16);
+    return `${sentAt}|${notification.event_key || notification.subject || ''}`;
+}
+
+function groupedStockNotifications() {
+    const groups = new Map();
+    state.stockNotifications.forEach((notification) => {
+        const key = stockNotificationGroupKey(notification);
+        if (!groups.has(key)) {
+            groups.set(key, {
+                key,
+                sentAt: stockNotificationSentAt(notification),
+                eventType: stockNotificationEventType(notification),
+                notifications: [],
+            });
+        }
+        groups.get(key).notifications.push(notification);
+    });
+    return [...groups.values()];
+}
+
 function renderStockNotifications() {
     const body = qs('#stockNotificationsBody');
     if (!body) return;
-    body.innerHTML = state.stockNotifications.map((notification) => `
-        <tr>
-            <td>${escapeHtml(notification.warehouse)}</td>
-            <td>${Number(notification.total_items || 0)} партий</td>
-            <td>${Number(notification.filled_items || 0)} заполнено</td>
-            <td>${escapeHtml(notification.status)}</td>
-            <td>${escapeHtml(notification.last_changed_at || '—')}</td>
-            <td><button class="small-button stock-notification-details-button" data-id="${notification.id}" type="button">Открыть</button></td>
-        </tr>
-    `).join('') || '<tr><td colspan="6">Уведомлений по заполнению остатков пока нет.</td></tr>';
+    const groups = groupedStockNotifications();
+    body.innerHTML = groups.map((group) => {
+        const expanded = state.expandedStockNotificationGroups.has(group.key);
+        const warehouses = group.notifications.map((notification) => `
+            <tr class="stock-notification-child-row">
+                <td></td>
+                <td></td>
+                <td>${escapeHtml(notification.warehouse)}</td>
+                <td>${Number(notification.total_items || 0)} партий</td>
+                <td>${Number(notification.filled_items || 0)} заполнено</td>
+                <td>${escapeHtml(notification.status)}</td>
+                <td>${escapeHtml(notification.last_changed_at || '—')}</td>
+                <td><button class="small-button stock-notification-details-button" data-id="${notification.id}" type="button">Открыть</button></td>
+            </tr>
+        `).join('');
+        return `
+            <tr class="stock-notification-group-row">
+                <td>${escapeHtml(formatDateTimeRu(group.sentAt))}</td>
+                <td>${escapeHtml(group.eventType)}</td>
+                <td colspan="5">Складов: ${group.notifications.length}</td>
+                <td><button class="small-button stock-notification-group-toggle" data-group-key="${escapeHtml(group.key)}" type="button">${expanded ? 'Свернуть' : 'Развернуть'}</button></td>
+            </tr>
+            ${expanded ? warehouses : ''}
+        `;
+    }).join('') || '<tr><td colspan="8">Уведомлений по заполнению остатков пока нет.</td></tr>';
+    qsa('.stock-notification-group-toggle').forEach((button) => button.addEventListener('click', () => toggleStockNotificationGroup(button.dataset.groupKey)));
     qsa('.stock-notification-details-button').forEach((button) => button.addEventListener('click', () => openStockNotificationDetails(button.dataset.id)));
+}
+
+function toggleStockNotificationGroup(groupKey) {
+    if (state.expandedStockNotificationGroups.has(groupKey)) {
+        state.expandedStockNotificationGroups.delete(groupKey);
+    } else {
+        state.expandedStockNotificationGroups.add(groupKey);
+    }
+    renderStockNotifications();
 }
 
 async function openStockNotificationDetails(id) {
@@ -1217,14 +1444,16 @@ async function openStockNotificationDetails(id) {
 }
 
 async function loadSettings() {
-    const [settingsResult, warehousesResult, stockNotificationsResult] = await Promise.all([
+    const [settingsResult, warehousesResult, stockNotificationsResult, catalogHealthResult] = await Promise.all([
         api('settings', { settings_password: state.settingsPassword }),
         api('warehouses'),
         api('stock_notifications'),
+        api('catalog_health'),
     ]);
     state.settings = settingsResult.settings || { emails: [], rules: [] };
     state.warehouses = warehousesResult.warehouses || [];
     state.stockNotifications = stockNotificationsResult.notifications || [];
+    state.catalogSyncStatus = catalogHealthResult || null;
     renderSettings();
     renderWarehouses();
     renderStockNotifications();
@@ -1248,6 +1477,17 @@ function switchSettingsTab(tabName) {
     });
     qsa('[data-settings-panel]').forEach((panel) => {
         const isActive = panel.dataset.settingsPanel === tabName;
+        panel.classList.toggle('active', isActive);
+        panel.hidden = !isActive;
+    });
+}
+
+function switchHelpTab(tabName) {
+    qsa('.help-subtab').forEach((button) => {
+        button.classList.toggle('active', button.dataset.helpTab === tabName);
+    });
+    qsa('[data-help-panel]').forEach((panel) => {
+        const isActive = panel.dataset.helpPanel === tabName;
         panel.classList.toggle('active', isActive);
         panel.hidden = !isActive;
     });
@@ -1299,7 +1539,7 @@ async function leaveSettingsWithoutSaving() {
 
 function openWriteOffPasswordDialog() {
     if (state.writeOffAccessGranted) {
-        showToast('Изменение статусов уже разрешено.');
+        showToast('Режим супервайзера уже включен.');
         return;
     }
 
@@ -1324,7 +1564,7 @@ async function submitWriteOffPassword(event) {
         state.writeOffAccessGranted = true;
         closeWriteOffPasswordDialog();
         renderRegistry();
-        showToast('Теперь можно выделять, изменять статусы и удалять партии в реестре.');
+        showToast('Режим супервайзера включен: можно выделять, менять статусы, удалять партии и отправлять товары на пересчет.');
     } catch (verifyError) {
         state.writeOffPassword = '';
         error.textContent = verifyError.message;
@@ -1391,10 +1631,9 @@ function formatHistoryBatch(batch) {
     const expiry = batch.expiry_date || batch.expiryDate
         ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate, batch.expiry_full_date || batch.expiryFullDate)}`
         : 'без указанного срока годности';
-    const quantity = batch.quantity !== null && batch.quantity !== undefined && batch.quantity !== '' ? `, количество ${batch.quantity}` : '';
     const status = batch.status ? `, статус «${batch.status}»` : '';
 
-    return `партия ${article}${code}${name} ${expiry}${quantity}${status}`;
+    return `партия ${article}${code}${name} ${expiry}${status}`;
 }
 
 function formatHistoryBatchList(batches) {
@@ -1410,9 +1649,6 @@ function formatChangedFields(before, after) {
     }
     if (before.expiry_date && after.expiry_date && before.expiry_date !== after.expiry_date) {
         changes.push(`срок годности изменён с ${formatExpiryMonthRu(before.expiry_date, before.expiry_full_date)} на ${formatExpiryMonthRu(after.expiry_date, after.expiry_full_date)}`);
-    }
-    if (before.quantity !== null && before.quantity !== undefined && after.quantity !== null && after.quantity !== undefined && Number(before.quantity) !== Number(after.quantity)) {
-        changes.push(`количество изменено с ${before.quantity} на ${after.quantity}`);
     }
     if (before.status && after.status && before.status !== after.status) {
         changes.push(`статус изменён с «${before.status}» на «${after.status}»`);
@@ -1460,6 +1696,43 @@ function formatHistoryDetails(action, payload) {
         return `Удалена ${formatHistoryBatch(parsed.batch || parsed)}.`;
     }
 
+    if (action === 'delete_by_articles') {
+        const articles = (parsed.articles || []).join(', ') || 'не указаны';
+        return `Удаление по артикулам: ${articles}. Удалено партий: ${Number(parsed.deleted || 0)}.`;
+    }
+
+    if (action === 'delete_by_articles_no_matches') {
+        const articles = (parsed.articles || []).join(', ') || 'не указаны';
+        return `Удаление по артикулам: ${articles}. Совпадений не найдено.`;
+    }
+
+    if (action === 'expiry_notifications_sent') {
+        const events = Array.isArray(parsed.events) ? parsed.events : [];
+        if (events.length > 0) {
+            const sentEvents = events.filter((event) => event.notification_id);
+            const recipients = [...new Set(sentEvents.map((event) => event.warehouse).filter(Boolean))];
+            const batchCount = sentEvents.reduce((sum, event) => sum + Number(event.count || 0), 0);
+            const sentDetails = sentEvents.map((event) => `${event.warehouse}: ${(event.batches || []).join(', ') || `${Number(event.count || 0)} партий`}`);
+            const skipped = events.filter((event) => event.skipped).map((event) => `${event.warehouse}: ${event.skipped}${event.batches?.length ? ` (${event.batches.join(', ')})` : ''}`);
+            return `Уведомления поставлены в очередь. Склады: ${recipients.join(', ') || 'не указаны'}. Партий в формах: ${batchCount}.${sentDetails.length ? ` Партии: ${sentDetails.join('; ')}.` : ''}${skipped.length ? ` Не отправлено: ${skipped.join('; ')}.` : ''}`;
+        }
+        return `Уведомления отправлены. Получатели: ${(parsed.recipients || parsed.emails || []).join(', ') || 'не указаны'}. Партий: ${Number(parsed.count || parsed.batches?.length || 0)}.`;
+    }
+
+    if (action === 'expiry_notifications_failed') {
+        return `Ошибка отправки уведомлений. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
+
+    if (action === 'expiry_check_no_matches') {
+        const events = Array.isArray(parsed.events) ? parsed.events : [];
+        const skipped = events.filter((event) => event.skipped).map((event) => `${event.warehouse}: ${event.skipped}${event.batches?.length ? ` (${event.batches.join(', ')})` : ''}`);
+        return `${parsed.reason || 'Сегодня нет партий под выбранные правила уведомлений.'}${skipped.length ? ` ${skipped.join('; ')}.` : ''}`;
+    }
+
+    if (action === 'expiry_check_skipped') {
+        return parsed.reason || 'Проверка сроков пропущена.';
+    }
+
     if (parsed.text) return parsed.text;
 
     // Запасной вариант нужен для старых записей истории со служебными полями.
@@ -1468,12 +1741,16 @@ function formatHistoryDetails(action, payload) {
 
 async function loadHistory() {
     const result = await api('logs');
-    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found']);
+    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'delete_by_articles', 'delete_by_articles_no_matches', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found', 'expiry_notifications_sent', 'expiry_notifications_failed', 'expiry_check_no_matches', 'expiry_check_skipped']);
     state.allHistory = (result.logs || []).filter((log) => registryActions.has(log.event || log.action));
     renderHistory();
 }
 
 function getDateRangeByPreset(preset) {
+    if (preset === 'all') {
+        return { start: null, end: null };
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const start = new Date(today);
@@ -1542,7 +1819,8 @@ function renderSettings() {
     setValueIfPresent('#notificationEmails', (settings.emails || []).join('\n'));
     setValueIfPresent('#notificationTime', settings.notification_time || '09:00');
     setValueIfPresent('#missingFilterEmails', (settings.missing_filter_emails || []).join('\n'));
-    renderNotificationHistory(settings.notification_history || []);
+    setValueIfPresent('#emailLogRetentionDays', settings.email_log_retention_days || 365);
+    renderPurchaseRecipients();
 
     const autoImport = settings.auto_import || {};
     setTextIfPresent('#autoImportLastDate', autoImport.last_date || 'Не выполнялось');
@@ -1555,23 +1833,236 @@ function renderSettings() {
     setTextIfPresent('#systemLastCheck', system.last_check || 'Не выполнялось');
     setTextIfPresent('#systemLastSent', system.last_sent || 'Не выполнялось');
     setTextIfPresent('#systemSmtpStatus', system.smtp_status || 'Не выполнялось');
+    renderCatalogSyncStatus();
     state.settingsDirty = false;
 }
 
-function renderNotificationHistory(history) {
-    const container = qs('#notificationHistoryList');
-    if (!history.length) {
-        container.textContent = 'Уведомления пока не отправлялись.';
+
+
+function formatCatalogSyncDate(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('ru-RU');
+}
+
+function renderCatalogSyncStatus() {
+    const status = state.catalogSyncStatus || {};
+    const available = Boolean(status.available);
+    setTextIfPresent('#catalogSyncStatus', available ? 'Доступна' : (status.enabled === false ? 'Отключена' : 'Ошибка'));
+    setTextIfPresent('#catalogSyncHttp', status.http_code ? String(status.http_code) : '—');
+    setTextIfPresent('#catalogSyncAuth', status.authentication_ok === true ? 'Успешно' : (status.authentication_ok === false ? 'Ошибка' : '—'));
+    setTextIfPresent('#catalogSyncCheckedAt', formatCatalogSyncDate(status.checked_at));
+    setTextIfPresent('#catalogSyncError', status.message || status.error || '—');
+}
+
+function openCatalogSyncTestDialog() {
+    setValueIfPresent('#catalogSyncArticle', '');
+    setTextIfPresent('#catalogSyncTestError', '');
+    qs('#catalogSyncTestDialog').showModal();
+    focusIfPresent('#catalogSyncArticle');
+}
+
+function closeCatalogSyncTestDialog() {
+    qs('#catalogSyncTestDialog').close();
+}
+
+function closeCatalogSyncResultDialog() {
+    qs('#catalogSyncResultDialog').close();
+}
+
+function renderCatalogSyncResult(result) {
+    const warehouses = result.warehouses || [];
+    const detectedRows = (result.rows || []).reduce((sum, row) => sum + Number(row.detected_stock_rows || 0), 0);
+    const detectedNames = [...new Set((result.rows || []).flatMap((row) => row.detected_stock_names || []))];
+    qs('#catalogSyncResultInfo').textContent = `${result.message || 'Тест выполнен.'} Найдено строк остатков в ответе API: ${detectedRows}.${detectedNames.length ? ` Склады из ответа: ${detectedNames.join(', ')}.` : ' Если в catalogvr UI остатки есть, а здесь 0 строк — внутренний API catalogvr не отдаёт блок остатков.'}`;
+    qs('#catalogSyncResultHead').innerHTML = ['Артикул', 'Менеджер', ...warehouses.map((warehouse) => warehouse.name)]
+        .map((title) => `<th>${escapeHtml(title)}</th>`).join('');
+    qs('#catalogSyncResultBody').innerHTML = (result.rows || []).map((row) => `
+        <tr>
+            <td>${escapeHtml(row.article || '')}${row.found === false ? '<br><small>не найден</small>' : ''}</td>
+            <td>${escapeHtml(row.manager || '—')}</td>
+            ${warehouses.map((warehouse) => `<td class="numeric-cell">${formatQuantity(row.stocks?.[warehouse.id] || 0)}</td>`).join('')}
+        </tr>
+    `).join('') || `<tr><td colspan="${2 + warehouses.length}">catalogvr не вернул строки по артикулу.</td></tr>`;
+    qs('#catalogSyncResultDialog').showModal();
+}
+
+async function submitCatalogSyncTest(event) {
+    event.preventDefault();
+    const button = qs('#runCatalogSyncTestButton');
+    const article = qs('#catalogSyncArticle').value.trim();
+    button.disabled = true;
+    setTextIfPresent('#catalogSyncTestError', '');
+    try {
+        const result = await api('catalog_sync_test', { settings_password: state.settingsPassword, article });
+        state.catalogSyncStatus = result.diagnostics ? { ok: true, available: true, ...result.diagnostics, message: result.message } : state.catalogSyncStatus;
+        renderCatalogSyncStatus();
+        closeCatalogSyncTestDialog();
+        renderCatalogSyncResult(result);
+    } catch (error) {
+        setTextIfPresent('#catalogSyncTestError', error.message);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function renderPurchaseRecipients() {
+    const container = qs('#purchaseRecipientsList');
+    if (!container) return;
+    const recipients = state.settings?.purchase_recipients || [];
+    container.innerHTML = recipients.map((recipient) => `
+        <article class="notification-history-item purchase-recipient-item">
+            <p><strong>${escapeHtml(recipient.full_name)}</strong></p>
+            <p>${escapeHtml(recipient.email)}</p>
+            ${recipient.is_supervisor ? '<p><strong>Супервайзер</strong></p>' : ''}
+            <button class="small-button edit-purchase-recipient-button" data-id="${recipient.id}" type="button">Редактировать</button>
+            <button class="small-button danger delete-purchase-recipient-button" data-id="${recipient.id}" type="button">Удалить</button>
+        </article>
+    `).join('') || 'Получатели пока не добавлены.';
+    qsa('.edit-purchase-recipient-button').forEach((button) => button.addEventListener('click', () => openPurchaseRecipientDialog(null, button.dataset.id)));
+    qsa('.delete-purchase-recipient-button').forEach((button) => button.addEventListener('click', () => deletePurchaseRecipient(button.dataset.id)));
+}
+
+function openPurchaseRecipientDialog(event = null, recipientId = null) {
+    event?.preventDefault();
+    const recipient = (state.settings?.purchase_recipients || []).find((item) => Number(item.id) === Number(recipientId));
+    state.editingPurchaseRecipientId = recipient ? Number(recipient.id) : null;
+    setTextIfPresent('#purchaseRecipientDialogTitle', recipient ? 'Редактирование получателя' : 'Получатель отдела закупок');
+    setValueIfPresent('#purchaseRecipientName', recipient?.full_name || '');
+    setValueIfPresent('#purchaseRecipientEmail', recipient?.email || '');
+    setCheckedIfPresent('#purchaseRecipientSupervisor', Boolean(recipient?.is_supervisor));
+    setTextIfPresent('#purchaseRecipientError', '');
+    qs('#purchaseRecipientDialog').showModal();
+    focusIfPresent('#purchaseRecipientName');
+}
+
+function closePurchaseRecipientDialog() {
+    qs('#purchaseRecipientDialog').close();
+    state.editingPurchaseRecipientId = null;
+}
+
+async function submitPurchaseRecipient(event) {
+    event.preventDefault();
+    const fullName = qs('#purchaseRecipientName').value.trim();
+    const email = qs('#purchaseRecipientEmail').value.trim();
+    const isSupervisor = Boolean(qs('#purchaseRecipientSupervisor').checked);
+    if (!fullName || !email) {
+        setTextIfPresent('#purchaseRecipientError', 'Заполните ФИО и email.');
+        return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setTextIfPresent('#purchaseRecipientError', 'Укажите корректный email.');
+        return;
+    }
+    try {
+        const action = state.editingPurchaseRecipientId ? 'purchase_recipient_update' : 'purchase_recipient_create';
+        const result = await api(action, { settings_password: state.settingsPassword, id: state.editingPurchaseRecipientId, full_name: fullName, email, is_supervisor: isSupervisor });
+        state.settings.purchase_recipients = result.recipients || [];
+        renderPurchaseRecipients();
+        closePurchaseRecipientDialog();
+    } catch (error) {
+        setTextIfPresent('#purchaseRecipientError', error.message);
+    }
+}
+
+function bindPurchaseRecipientEvents() {
+    const openButton = qs('#openPurchaseRecipientButton');
+    if (!openButton || openButton.dataset.purchaseRecipientBound === '1') return;
+    openButton.dataset.purchaseRecipientBound = '1';
+    openButton.addEventListener('click', openPurchaseRecipientDialog);
+    qs('#purchaseRecipientForm')?.addEventListener('submit', submitPurchaseRecipient);
+    qs('#closePurchaseRecipientDialogButton')?.addEventListener('click', closePurchaseRecipientDialog);
+    qs('#cancelPurchaseRecipientButton')?.addEventListener('click', closePurchaseRecipientDialog);
+}
+
+async function deletePurchaseRecipient(id) {
+    try {
+        const result = await api('purchase_recipient_delete', { settings_password: state.settingsPassword, id });
+        state.settings.purchase_recipients = result.recipients || [];
+        renderPurchaseRecipients();
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+function downloadBatchStockXlsx() {
+    if (!state.selectedStockBatchId) return;
+    const url = new URL('api.php', window.location.href);
+    url.searchParams.set('action', 'batch_stock_xlsx');
+    url.searchParams.set('batch_id', state.selectedStockBatchId);
+    window.location.href = url.toString();
+}
+
+function openTestPurchaseNotificationDialog() {
+    setValueIfPresent('#testPurchaseNotificationEmail', '');
+    setTextIfPresent('#testPurchaseNotificationError', '');
+    qs('#testPurchaseNotificationDialog').showModal();
+    focusIfPresent('#testPurchaseNotificationEmail');
+}
+
+function closeTestPurchaseNotificationDialog() {
+    qs('#testPurchaseNotificationDialog').close();
+}
+
+async function submitTestPurchaseNotification(event) {
+    event.preventDefault();
+    const email = qs('#testPurchaseNotificationEmail').value.trim();
+    const errorField = qs('#testPurchaseNotificationError');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errorField.textContent = 'Укажите корректный email.';
         return;
     }
 
-    container.innerHTML = history.map((item) => `
-        <article class="notification-history-item">
-            <time>${escapeHtml(item.date || 'Дата не указана')}</time>
-            <p><strong>${escapeHtml(item.status || 'Статус не указан')}</strong></p>
-            <p>${escapeHtml(item.text || 'Текст уведомления не указан')}</p>
-        </article>
-    `).join('');
+    const button = event.submitter || qs('#confirmTestPurchaseNotificationButton');
+    button.disabled = true;
+    errorField.textContent = '';
+    try {
+        const result = await api('test_purchase_notification', { settings_password: state.settingsPassword, email });
+        await loadSettings();
+        const message = result.message || 'Тестовое уведомление отправлено.';
+        setTextIfPresent('#testPurchaseNotificationStatus', message);
+        closeTestPurchaseNotificationDialog();
+        showToast(message);
+    } catch (error) {
+        errorField.textContent = error.message;
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function showPurchaseNotificationLogs() {
+    const logs = (state.settings?.notification_history || []).filter((log) => log.type === 'Отдел закупок');
+    const body = qs('#purchaseNotificationLogsBody');
+    if (!logs.length) {
+        body.innerHTML = '<tr><td colspan="4">Логи уведомлений отдела закупок пока отсутствуют.</td></tr>';
+    } else {
+        body.innerHTML = logs.map((log, index) => `
+            <tr class="${log.url ? 'clickable-row' : ''}" data-purchase-log-index="${index}" tabindex="${log.url ? '0' : '-1'}">
+                <td>${escapeHtml(log.date || 'Дата не указана')}</td>
+                <td>${escapeHtml(log.event || log.text || 'Описание отсутствует')}</td>
+                <td>${escapeHtml((log.recipients || []).join(', ') || '—')}</td>
+                <td>${escapeHtml(log.status || 'Статус не указан')}</td>
+            </tr>
+        `).join('');
+        body.querySelectorAll('[data-purchase-log-index]').forEach((row) => {
+            const log = logs[Number(row.dataset.purchaseLogIndex)];
+            if (!log?.url) return;
+            const open = () => { window.location.href = log.url; };
+            row.addEventListener('click', open);
+            row.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    open();
+                }
+            });
+        });
+    }
+    qs('#purchaseNotificationLogsDialog').showModal();
+}
+
+function closePurchaseNotificationLogs() {
+    qs('#purchaseNotificationLogsDialog').close();
 }
 
 function collectSettingsForm() {
@@ -1595,6 +2086,7 @@ function collectSettingsForm() {
         auto_import_time: '23:50',
         emails,
         missing_filter_email: missingFilterEmails.join(','),
+        email_log_retention_days: Number(qs('#emailLogRetentionDays')?.value || 365),
     };
 }
 
@@ -1614,6 +2106,28 @@ function toggleSmtpPasswordVisibility() {
     button.textContent = input.type === 'password' ? 'Показать' : 'Скрыть';
 }
 
+
+async function runNotificationsNow() {
+    const button = qs('#runNotificationsNowButton');
+    const status = qs('#testNotificationStatus');
+    button.disabled = true;
+    status.textContent = 'Сохраняю настройки и ищу сегодняшние события...';
+    showToast('Запускаю отправку уведомлений складам...');
+
+    try {
+        await persistSettings();
+        const result = await api('run_notifications_now', { settings_password: state.settingsPassword });
+        await loadSettings();
+        status.textContent = result.message || `Уведомления поставлены в очередь: ${Number(result.sent || 0)}.`;
+        showToast(status.textContent);
+    } catch (error) {
+        status.textContent = error.message;
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
 async function sendTestNotification() {
     const button = qs('#sendTestNotificationButton');
     const status = qs('#testNotificationStatus');
@@ -1630,6 +2144,40 @@ async function sendTestNotification() {
     } catch (error) {
         status.textContent = error.message;
         showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function testEmailDelivery() {
+    const button = qs('#testEmailDeliveryButton');
+    const output = qs('#emailDeliveryTestOutput');
+    const email = qs('#deliveryTestEmail').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        output.textContent = 'Укажите корректный email.';
+        return;
+    }
+    button.disabled = true;
+    output.textContent = 'Выполняется SMTP-отправка...';
+    try {
+        await persistSettings();
+        const result = await api('test_email_delivery', { settings_password: state.settingsPassword, email });
+        const delivery = result.delivery || {};
+        output.textContent = [
+            result.message,
+            `TO: ${(delivery.smtp_to || []).join(', ') || '—'}`,
+            `CC: ${(delivery.smtp_cc || []).join(', ') || '—'}`,
+            `BCC: ${(delivery.smtp_bcc || []).join(', ') || '—'}`,
+            `Количество: ${delivery.recipient_count ?? 0}`,
+            `Message-ID: ${delivery.message_id || '—'}`,
+            `SMTP-код: ${delivery.smtp_code || '—'}`,
+            `SMTP-ответ:\n${delivery.smtp_response || '—'}`,
+            `Полный SMTP-лог:\n${delivery.smtp_transcript || '—'}`,
+            `Заголовки письма:\n${delivery.message_headers || '—'}`,
+        ].join('\n');
+        await showNotificationLogs();
+    } catch (error) {
+        output.textContent = error.message;
     } finally {
         button.disabled = false;
     }
@@ -1733,25 +2281,98 @@ async function submitDeleteArticles(event) {
     }
 }
 
-function showNotificationLogs() {
-    const logs = state.settings?.notification_history || [];
+async function showNotificationLogs() {
+    const result = await api('email_notification_logs', {
+        settings_password: state.settingsPassword,
+        search: qs('#emailLogSearch')?.value || '',
+        status: qs('#emailLogStatusFilter')?.value || '',
+        type: qs('#emailLogTypeFilter')?.value || '',
+        recipient: qs('#emailLogRecipientFilter')?.value || '',
+        direction: qs('#emailLogDirection')?.value || 'DESC',
+    });
+    const logs = result.logs || [];
+    state.emailNotificationLogs = logs;
     const body = qs('#notificationLogsBody');
     if (!logs.length) {
-        body.textContent = 'Логи уведомлений пока отсутствуют.';
+        body.innerHTML = '<tr><td colspan="4">История уведомлений пока отсутствует.</td></tr>';
     } else {
         body.innerHTML = logs.map((log) => `
-            <article class="notification-history-item">
-                <time>${escapeHtml(log.date || 'Дата не указана')}</time>
-                <p><strong>${escapeHtml(log.status || 'Статус не указан')}</strong></p>
-                <p>${escapeHtml(log.text || 'Описание отсутствует')}</p>
-            </article>
+            <tr class="clickable-row" data-email-log-id="${Number(log.id)}" tabindex="0">
+                <td>${escapeHtml(log.date || 'Дата не указана')}</td>
+                <td>${escapeHtml(log.notification_type || 'Уведомление')}</td>
+                <td class="multiline-cell">${escapeHtml((log.recipients || []).join('\n') || '—')}</td>
+                <td>${escapeHtml(log.status_text || '—')}${log.error_reason ? `<br><small>${escapeHtml(log.error_reason)}</small>` : ''}</td>
+            </tr>
         `).join('');
+        body.querySelectorAll('[data-email-log-id]').forEach((row) => {
+            const open = () => showEmailNotificationLogDetails(Number(row.dataset.emailLogId));
+            row.addEventListener('click', open);
+            row.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') open();
+            });
+        });
     }
     qs('#notificationLogsDialog').showModal();
 }
 
 function closeNotificationLogs() {
     qs('#notificationLogsDialog').close();
+}
+
+function showEmailNotificationLogDetails(id) {
+    const log = state.emailNotificationLogs.find((item) => Number(item.id) === Number(id));
+    if (!log) return;
+    state.selectedEmailNotificationLogId = Number(id);
+    const details = [
+        ['Дата', log.date],
+        ['Тип уведомления', log.notification_type],
+        ['Получатели до фильтров', (log.distribution_details?.email_delivery?.recipients_before_filters || log.recipients || []).join('\n')],
+        ['Получатели после фильтров', (log.distribution_details?.email_delivery?.recipients_after_filters || log.recipients || []).join('\n')],
+        ['TO', (log.distribution_details?.email_delivery?.smtp_to || log.recipients || []).join('\n')],
+        ['CC', (log.distribution_details?.email_delivery?.smtp_cc || []).join('\n') || '—'],
+        ['BCC', (log.distribution_details?.email_delivery?.smtp_bcc || []).join('\n') || '—'],
+        ['Количество адресатов', String(log.distribution_details?.email_delivery?.recipient_count ?? (log.recipients || []).length)],
+        ['Тема письма', log.subject],
+        ['Статус', log.status_text],
+        ['SMTP-код', log.smtp_code || '—'],
+        ['Diagnostic Code', log.diagnostic_code || '—'],
+        ['Расшифровка', log.error_reason || '—'],
+        ['Полный ответ SMTP', log.smtp_response || '—'],
+        ['Заголовки письма', log.message_headers || '—'],
+        ['Текстовая версия письма', log.message_body || '—'],
+        ['ID сообщения', log.message_id || '—'],
+        ['Время выполнения отправки', log.duration_ms == null ? '—' : `${log.duration_ms} мс`],
+        ['Причина распределения', (log.distribution_details?.distribution || []).map((item) =>
+            `Партия ${item.batch_id}, артикул ${item.article}: ${item.distribution_reason}\nМенеджер: ${item.manager_value || '—'}; получатель: ${item.matched_recipient || '—'}; тип: ${item.distribution_type}`
+        ).join('\n\n') || '—'],
+    ];
+    qs('#emailNotificationLogDetails').innerHTML = details.map(([label, value]) =>
+        `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || '—')}</dd>`
+    ).join('');
+    qs('#retryEmailNotificationButton').classList.toggle('hidden', log.status !== 'ERROR');
+    qs('#emailNotificationLogDetailsDialog').showModal();
+}
+
+function closeEmailNotificationLogDetails() {
+    qs('#emailNotificationLogDetailsDialog').close();
+    state.selectedEmailNotificationLogId = null;
+}
+
+async function retryEmailNotification() {
+    if (!state.selectedEmailNotificationLogId) return;
+    const button = qs('#retryEmailNotificationButton');
+    button.disabled = true;
+    try {
+        await api('email_notification_retry', { settings_password: state.settingsPassword, id: state.selectedEmailNotificationLogId });
+        closeEmailNotificationLogDetails();
+        await showNotificationLogs();
+        showToast('Письмо поставлено в очередь повторной отправки.');
+    } catch (error) {
+        showToast(error.message, true);
+        await showNotificationLogs();
+    } finally {
+        button.disabled = false;
+    }
 }
 
 function showMissingFilterLogs() {
@@ -1810,7 +2431,6 @@ function downloadTemplateXlsx() {
             Артикул: '12345',
             Код: 'K-001',
             Наименование: 'Товар',
-            Количество: 10,
             'Срок годности до': '31.12.2026',
         },
     ]);
@@ -1847,16 +2467,16 @@ function readXlsx(file) {
             const decodedRows = rawRows.map(normalizeSpreadsheetRowEncoding);
             const detectedHeaders = decodedRows[0] ? Object.keys(decodedRows[0]).join(', ') : 'не найдены';
             const normalizedRows = decodedRows.map((row) => ({ ...normalizeBatch(row), createdSource: 'Импорт xls' }));
-            state.importRows = normalizedRows.filter((row) => row.article && row.hasQuantity && row.expiryDate);
+            state.importRows = normalizedRows.filter((row) => row.article && row.expiryDate);
             const skipped = normalizedRows.length - state.importRows.length;
-            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.code || 'без кода'} — ${row.name || 'без наименования'} — ${row.quantity} — ${row.expiryInvalid ? `${row.expiryRaw} (некорректная дата)` : formatExpiryMonthRu(row.expiryDate, row.expiryFullDate)}`).join('\n');
+            const exampleRows = state.importRows.slice(0, 3).map((row) => `${row.article} — ${row.code || 'без кода'} — ${row.name || 'без наименования'} — ${row.expiryInvalid ? `${row.expiryRaw} (некорректная дата)` : formatExpiryMonthRu(row.expiryDate, row.expiryFullDate)}`).join('\n');
             qs('#importPreview').textContent = [
                 `Файл: ${file.name}`,
                 `Найдено строк: ${rawRows.length}`,
                 `Готово к загрузке: ${state.importRows.length}`,
-                skipped > 0 ? `Пропущено строк без артикула, количества или срока годности: ${skipped}` : '',
+                skipped > 0 ? `Пропущено строк без артикула или срока годности: ${skipped}` : '',
                 `Распознанные заголовки: ${detectedHeaders}`,
-                exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте, что первая строка — это заголовки: Артикул, Количество, Срок годности до.',
+                exampleRows ? `Пример:\n${exampleRows}` : 'Проверьте, что первая строка — это заголовки: Артикул, Срок годности до.',
             ].filter(Boolean).join('\n');
             qs('#importButton').disabled = state.importRows.length === 0;
         } catch (error) {
@@ -1929,6 +2549,9 @@ async function importRowsInChunks(rows, chunkSize = 100) {
 }
 
 function bindEvents() {
+    qs('#markAllStockEventsReadButton')?.addEventListener('click', markAllStockEventsViewed);
+    bindPurchaseRecipientEvents();
+
     qsa('.tab').forEach((button) => button.addEventListener('click', async () => {
         const targetTab = button.dataset.tab;
         const currentTab = document.body.dataset.activeTab;
@@ -1957,7 +2580,7 @@ function bindEvents() {
     qsa('.settings-subtab').forEach((button) => button.addEventListener('click', () => switchSettingsTab(button.dataset.settingsTab)));
     qsa('.help-subtab').forEach((button) => button.addEventListener('click', () => switchHelpTab(button.dataset.helpTab)));
 
-    qs('#openTestStockFillButton').addEventListener('click', openTestStockFillDialog);
+    qs('#openTestStockFillButton')?.addEventListener('click', openTestStockFillDialog);
     qs('#testStockFillForm').addEventListener('submit', submitTestStockFillForm);
     qs('#closeTestStockFillDialogButton').addEventListener('click', closeTestStockFillDialog);
     qs('#cancelTestStockFillButton').addEventListener('click', closeTestStockFillDialog);
@@ -1983,6 +2606,12 @@ function bindEvents() {
     qs('#leaveSettingsButton').addEventListener('click', leaveSettingsWithoutSaving);
     qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
     qs('#bulkDeleteButton').addEventListener('click', deleteSelectedBatches);
+    qs('#sendRecountButton').addEventListener('click', openRecountWarehousesDialog);
+    qs('#recountWarehousesForm').addEventListener('submit', sendSelectedBatchesToRecount);
+    qs('#selectAllRecountWarehouses').addEventListener('change', (event) => setAllRecountWarehouses(event.target.checked));
+    qs('#clearRecountWarehousesButton').addEventListener('click', () => setAllRecountWarehouses(false));
+    qs('#cancelRecountWarehousesButton').addEventListener('click', closeRecountWarehousesDialog);
+    qs('#closeRecountWarehousesDialogButton').addEventListener('click', closeRecountWarehousesDialog);
     qs('#selectAllBatches').addEventListener('change', toggleSelectAllBatches);
     qs('#writeOffPasswordForm').addEventListener('submit', submitWriteOffPassword);
     qs('#cancelWriteOffPasswordButton').addEventListener('click', closeWriteOffPasswordDialog);
@@ -2052,19 +2681,43 @@ function bindEvents() {
 
     qs('#showMissingFilterLogsButton').addEventListener('click', showMissingFilterLogs);
     qs('#testMissingFilterButton').addEventListener('click', sendTestMissingFilterNotification);
+    qs('#testPurchaseNotificationButton').addEventListener('click', openTestPurchaseNotificationDialog);
+    qs('#showPurchaseNotificationLogsButton').addEventListener('click', showPurchaseNotificationLogs);
+    qs('#testPurchaseNotificationForm').addEventListener('submit', submitTestPurchaseNotification);
+    qs('#closeTestPurchaseNotificationDialogButton').addEventListener('click', closeTestPurchaseNotificationDialog);
+    qs('#cancelTestPurchaseNotificationButton').addEventListener('click', closeTestPurchaseNotificationDialog);
+    qs('#closePurchaseNotificationLogsDialogButton').addEventListener('click', closePurchaseNotificationLogs);
+    qs('#confirmPurchaseNotificationLogsDialogButton').addEventListener('click', closePurchaseNotificationLogs);
     qs('#closeMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
     qs('#confirmMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
+    qs('#runNotificationsNowButton').addEventListener('click', runNotificationsNow);
+    qs('#testEmailDeliveryButton').addEventListener('click', testEmailDelivery);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
+    qs('#openCatalogSyncTestButton').addEventListener('click', openCatalogSyncTestDialog);
+    qs('#catalogSyncTestForm').addEventListener('submit', submitCatalogSyncTest);
+    qs('#closeCatalogSyncTestDialogButton').addEventListener('click', closeCatalogSyncTestDialog);
+    qs('#cancelCatalogSyncTestButton').addEventListener('click', closeCatalogSyncTestDialog);
+    qs('#closeCatalogSyncResultDialogButton').addEventListener('click', closeCatalogSyncResultDialog);
+    qs('#confirmCatalogSyncResultDialogButton').addEventListener('click', closeCatalogSyncResultDialog);
+    qs('#openEmailNotificationLogButton')?.addEventListener('click', showNotificationLogs);
     qs('#closeNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
     qs('#confirmNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
+    qs('#closeEmailNotificationLogDetailsButton').addEventListener('click', closeEmailNotificationLogDetails);
+    qs('#confirmEmailNotificationLogDetailsButton').addEventListener('click', closeEmailNotificationLogDetails);
+    qs('#retryEmailNotificationButton').addEventListener('click', retryEmailNotification);
+    ['#emailLogStatusFilter', '#emailLogDirection'].forEach((selector) => qs(selector).addEventListener('change', showNotificationLogs));
+    ['#emailLogSearch', '#emailLogTypeFilter', '#emailLogRecipientFilter'].forEach((selector) => qs(selector).addEventListener('input', () => {
+        clearTimeout(state.emailLogFilterTimer);
+        state.emailLogFilterTimer = setTimeout(showNotificationLogs, 300);
+    }));
     qs('#testAutoImportButton').addEventListener('click', runTestAutoImport);
     qs('#showAutoImportLogsButton').addEventListener('click', showAutoImportLogs);
     qs('#closeAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
     qs('#confirmAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
     qs('#copyDeployCommandButton').addEventListener('click', copyDeployCommand);
-    qsa('#settingsForm input, #settingsForm textarea').forEach((field) => {
+    qsa('#settingsForm input, #settingsForm textarea, #notificationSettingsForm input, #notificationSettingsForm textarea').forEach((field) => {
         if (field.id !== 'deployCommandInput') {
             field.addEventListener('input', markSettingsDirty);
             field.addEventListener('change', markSettingsDirty);
@@ -2072,6 +2725,14 @@ function bindEvents() {
     });
 
     qs('#settingsForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+            await persistSettings();
+        } catch (error) {
+            showToast(error.message, true);
+        }
+    });
+    qs('#notificationSettingsForm').addEventListener('submit', async (event) => {
         event.preventDefault();
         try {
             await persistSettings();
@@ -2147,6 +2808,8 @@ function startSchedulerHeartbeat() {
 async function bootstrap() {
     try {
         await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
+        const batchId = new URLSearchParams(window.location.search).get('batch_id');
+        if (batchId) openBatchStockDialog(batchId, { showWriteOff: true });
         showToast('Данные обновлены.');
     } catch (error) {
         showToast(error.message, true);

@@ -33,8 +33,9 @@ declare(strict_types=1);
         <section class="panel active" id="tab-registry">
             <div class="registry-actions registry-top-actions">
                 <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
-                <button class="ghost-button" id="openWriteOffButton" type="button">Списать / Удалить</button>
+                <button class="ghost-button" id="openWriteOffButton" type="button">Режим супервайзера</button>
                 <button class="small-button danger hidden" id="bulkDeleteButton" type="button">Удалить</button>
+                <button class="small-button hidden" id="sendRecountButton" type="button">Отправить на пересчет</button>
             </div>
             <div class="card registry-filter-card">
                 <div class="registry-search-row">
@@ -50,8 +51,8 @@ declare(strict_types=1);
                     <select id="filterStatus">
                         <option value="">Все</option>
                         <option>В наличии</option>
-                        <option>Реализована</option>
-                        <option>Списана</option>
+                        <option>Перемещено на СБ</option>
+                        <option>Нет в наличии</option>
                     </select>
                 </label>
                 <label>Остаток дней до
@@ -106,6 +107,11 @@ declare(strict_types=1);
                 <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="past"> Прошедшие</label>
                 <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="future" checked> Будущие</label>
             </div>
+            <div class="card event-periods" aria-label="Фильтр событий по периоду">
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="past"> Прошедшие</label>
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="today" checked> Сегодня</label>
+                <label class="checkbox-row"><input class="event-period-filter" type="checkbox" value="future" checked> Будущие</label>
+            </div>
             <div class="table-wrap card">
                 <table>
                     <thead><tr><th>Тип события</th><th>Дата события</th><th>Количество партий в событии</th></tr></thead>
@@ -116,8 +122,11 @@ declare(strict_types=1);
 
         <section class="panel" id="tab-notifications">
             <div class="section-heading">
-                <h2>Уведомления</h2>
-                <p>Партии, по которым склады внесли остатки.</p>
+                <div>
+                    <h2>Уведомления</h2>
+                    <p>События по срокам годности и прогресс заполнения остатков складами.</p>
+                </div>
+                <button class="ghost-button" id="markAllStockEventsReadButton" type="button">Пометить все как прочитанное</button>
             </div>
             <div class="table-wrap card">
                 <table>
@@ -130,8 +139,8 @@ declare(strict_types=1);
         <section class="panel" id="tab-settings">
             <div class="settings-subtabs" aria-label="Разделы настроек">
                 <button class="settings-subtab active" data-settings-tab="main" type="button">Основные</button>
+                <button class="settings-subtab" data-settings-tab="notifications" type="button">Уведомления</button>
                 <button class="settings-subtab" data-settings-tab="warehouses" type="button">Склады</button>
-                <button class="settings-subtab" data-settings-tab="stock-fill" type="button">Заполнение остатков</button>
             </div>
             <div class="settings-subpanel" data-settings-panel="warehouses" hidden>
                 <div class="card form settings-warehouses-card">
@@ -196,7 +205,7 @@ declare(strict_types=1);
                         <button class="ghost-button" id="showAutoImportLogsButton" formnovalidate type="button">Логи автозагрузки</button>
                     </div>
                     <p class="subtitle" id="testAutoImportStatus" role="status" aria-live="polite"></p>
-                    <p class="subtitle">Cron должен запускать <code>scripts/auto_import.php</code>. Если письмо не найдено, скрипт повторяет поиск каждый час в течение 10 часов.</p>
+                    <p class="subtitle">Cron должен запускать <code>scripts/auto_import.php</code> в 23:50. Если письмо не найдено, скрипт повторяет поиск каждые 30 минут, максимум 20 попыток.</p>
                     <dl class="system-info">
                         <dt>Последняя автозагрузка:</dt><dd id="autoImportLastDate">Не выполнялось</dd>
                         <dt>Количество загруженных партий:</dt><dd id="autoImportLoaded">0</dd>
@@ -215,6 +224,18 @@ declare(strict_types=1);
                     </dl>
                 </div>
 
+
+                <div class="card form settings-catalog-sync-card">
+                    <h3>Синхронизация с catalogvr</h3>
+                    <dl class="system-info">
+                        <dt>Статус:</dt><dd id="catalogSyncStatus">Не проверялось</dd>
+                        <dt>HTTP:</dt><dd id="catalogSyncHttp">—</dd>
+                        <dt>Авторизация:</dt><dd id="catalogSyncAuth">—</dd>
+                        <dt>Последняя проверка:</dt><dd id="catalogSyncCheckedAt">—</dd>
+                        <dt>Ошибка:</dt><dd id="catalogSyncError">—</dd>
+                    </dl>
+                    <button class="ghost-button" id="openCatalogSyncTestButton" formnovalidate type="button">Тест синхронизации</button>
+                </div>
                 <div class="card form settings-delete-articles-card">
                     <h3>Удаление артикулов</h3>
                     <p class="subtitle">Удаляет из реестра все партии с точным совпадением в колонке «Артикул».</p>
@@ -238,23 +259,59 @@ declare(strict_types=1);
                 </div>
             </form>
 
-            <div class="settings-subpanel" data-settings-panel="stock-fill" hidden>
-                <div class="card form settings-stock-fill-card">
-                    <div class="section-heading registry-heading">
-                        <div>
-                            <h3>Заполнение остатков</h3>
-                            <p>Отслеживайте формы, отправленные складам для заполнения остатков партий.</p>
-                        </div>
-                        <button class="primary" id="openTestStockFillButton" type="button">Тест</button>
+            <form class="settings-grid settings-subpanel" data-settings-panel="notifications" id="notificationSettingsForm" hidden>
+                <div class="card form">
+                    <h3>Уведомления</h3>
+                    <label class="checkbox-row"><input id="notify0" name="notify_0_days" type="checkbox"> В день просрочки</label>
+                    <label class="checkbox-row"><input id="notify180" name="notify_180_days" type="checkbox"> За 180 дней</label>
+                    <label class="checkbox-row"><input id="notify90" name="notify_90_days" type="checkbox"> За 90 дней</label>
+                    <label class="checkbox-row"><input id="notify60" name="notify_60_days" type="checkbox"> За 60 дней</label>
+                    <label class="checkbox-row"><input id="notify30" name="notify_30_days" type="checkbox"> За 30 дней</label>
+                    <label class="checkbox-row"><input id="notify15" name="notify_15_days" type="checkbox"> За 15 дней</label>
+                    <label class="checkbox-row"><input id="notify7" name="notify_7_days" type="checkbox"> За 7 дней</label>
+                    <label class="checkbox-row"><input id="notify1" name="notify_1_day" type="checkbox"> За 1 день</label>
+                    <label>Время отправки уведомлений
+                        <input id="notificationTime" name="notification_time" type="time" value="09:00">
+                    </label>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                        <button class="ghost-button" id="runNotificationsNowButton" formnovalidate type="button">Запустить отправку</button>
+                        <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">История уведомлений</button>
                     </div>
-                    <div class="table-wrap">
-                        <table>
-                            <thead><tr><th>Склад</th><th>Партий</th><th>Заполнено</th><th>Статус</th><th>Последнее изменение</th><th>Действия</th></tr></thead>
-                            <tbody id="stockNotificationsBody"></tbody>
-                        </table>
-                    </div>
+                    <label>Email для проверки доставки
+                        <input id="deliveryTestEmail" type="email" autocomplete="email" placeholder="user@example.ru">
+                    </label>
+                    <button class="ghost-button" id="testEmailDeliveryButton" formnovalidate type="button">Проверить доставку</button>
+                    <pre class="smtp-test-output" id="emailDeliveryTestOutput" aria-live="polite"></pre>
+                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
                 </div>
-            </div>
+
+                <div class="card form purchase-recipients-card">
+                    <h3>Настройка уведомлений Отделу закупок</h3>
+                    <div class="notification-history-list" id="purchaseRecipientsList" aria-live="polite">Получатели пока не добавлены.</div>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="openPurchaseRecipientButton" formnovalidate type="button">Добавить получателя</button>
+                        <button class="ghost-button" id="testPurchaseNotificationButton" formnovalidate type="button">Тест</button>
+                        <button class="ghost-button" id="showPurchaseNotificationLogsButton" formnovalidate type="button">Логи</button>
+                    </div>
+                    <p class="subtitle" id="testPurchaseNotificationStatus" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="card form missing-filter-card">
+                    <h3>Уведомления «Товар без фильтров»</h3>
+                    <label>Получатели<textarea id="missingFilterEmails" rows="5" placeholder="ivan@mail.ru&#10;petrov@mail.ru"></textarea></label>
+                    <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
+                    <div class="settings-actions">
+                        <button class="ghost-button" id="testMissingFilterButton" formnovalidate type="button">Тест</button>
+                        <button class="ghost-button" id="showMissingFilterLogsButton" formnovalidate type="button">Логи</button>
+                    </div>
+                    <p class="subtitle" id="testMissingFilterStatus" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="settings-save-bar">
+                    <button class="primary" type="submit">Сохранить настройки</button>
+                </div>
+            </form>
 
         </section>
 
@@ -405,7 +462,6 @@ declare(strict_types=1);
                 <p>Обязательные колонки файла:</p>
                 <ul>
                     <li><code>Артикул</code>;</li>
-                    <li><code>Количество</code> или <code>Количество в партии</code>;</li>
                     <li><code>Срок годности до</code>, <code>Срок годности</code> или похожий заголовок.</li>
                 </ul>
                 <p>Необязательные колонки:</p>
@@ -471,13 +527,15 @@ declare(strict_types=1);
             </div>
         </section>
 
+        <!-- Вкладка истории должна быть самостоятельной панелью, а не частью скрытой инструкции. -->
         <section class="panel" id="tab-history">
             <div class="card filters history-filters">
                 <label>Дата
                     <select id="historyDatePreset">
+                        <option selected value="all">Всё время</option>
                         <option value="today">Сегодня</option>
                         <option value="yesterday">Вчера</option>
-                        <option selected value="week">Неделя</option>
+                        <option value="week">Неделя</option>
                         <option value="month">Месяц</option>
                         <option value="year">Год</option>
                         <option value="custom">Произвольная дата</option>
@@ -493,6 +551,11 @@ declare(strict_types=1);
                         <option value="update">Изменение партий</option>
                         <option value="delete">Удаление партий</option>
                         <option value="auto_import_completed">Автозагрузка</option>
+                        <option value="auto_import_failed">Ошибка автозагрузки</option>
+                        <option value="auto_import_not_found">Автозагрузка без файлов</option>
+                        <option value="delete_by_articles">Удаление артикулов</option>
+                        <option value="expiry_notifications_sent">Отправка уведомлений</option>
+                        <option value="expiry_notifications_failed">Ошибка уведомлений</option>
                     </select>
                 </label>
             </div>
@@ -597,15 +660,15 @@ declare(strict_types=1);
     <dialog class="modal" id="writeOffPasswordDialog">
         <form class="card form modal-card" id="writeOffPasswordForm" method="dialog">
             <div class="modal-heading">
-                <h2>Списать / Удалить</h2>
+                <h2>Режим супервайзера</h2>
                 <button class="icon-button" id="closeWriteOffPasswordDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
-            <p class="subtitle">Введите пароль, чтобы разрешить изменение статусов в колонке «Статус».</p>
+            <p class="subtitle">Введите пароль, чтобы разрешить изменение статусов, удаление партий и отправку товаров на пересчет.</p>
             <label>Пароль<input id="writeOffPasswordInput" required autocomplete="current-password" type="password"></label>
             <p class="field-error" id="writeOffPasswordError" role="alert"></p>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelWriteOffPasswordButton" type="button">Отмена</button>
-                <button class="primary" type="submit">Разрешить изменение статусов</button>
+                <button class="primary" type="submit">Войти в режим супервайзера</button>
             </div>
         </form>
     </dialog>
@@ -620,13 +683,12 @@ declare(strict_types=1);
             <label>Артикул<input id="editArticle" name="article" required autocomplete="off"></label>
             <label>Код<input id="editCode" name="code" autocomplete="off"></label>
             <label>Наименование<input id="editName" name="name" autocomplete="off"></label>
-            <label>Количество в партии<input id="editQuantity" name="quantity" required min="0" step="1" type="number"></label>
             <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10"></label>
             <label>Статус
                 <select id="editStatus" name="status" required>
                     <option>В наличии</option>
-                    <option>Реализована</option>
-                    <option>Списана</option>
+                    <option>Перемещено на СБ</option>
+                    <option>Нет в наличии</option>
                 </select>
             </label>
             <label>Дата внесения<input id="editCreatedAt" name="createdAt" required type="date"></label>
@@ -664,7 +726,19 @@ declare(strict_types=1);
                 <button class="primary" id="saveWriteOffStockBatchStatusButton" type="button">Сохранить</button>
             </div>
             <div class="modal-actions">
-                <button class="ghost-button danger hidden" id="writeOffStockBatchButton" type="button">Списать</button>
+                <button class="ghost-button" id="downloadBatchStockXlsxButton" type="button">Скачать XLS</button>
+                <button class="ghost-button" id="writeOffStockBatchButton" type="button">Сменить статус</button>
+                <div class="stock-status-actions" id="stockStatusActions" hidden>
+                    <label>Новый статус
+                        <select id="batchStockStatusSelect">
+                            <option>В наличии</option>
+                            <option>Перемещено на СБ</option>
+                            <option>Нет в наличии</option>
+                        </select>
+                    </label>
+                    <button class="ghost-button" id="cancelBatchStockStatusButton" type="button">Отмена</button>
+                    <button class="primary" id="saveBatchStockStatusButton" type="button">Сохранить</button>
+                </div>
                 <button class="primary" id="confirmBatchStockDialogButton" type="button">Закрыть</button>
             </div>
         </div>
@@ -683,6 +757,24 @@ declare(strict_types=1);
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelWarehouseButton" type="button">Отмена</button>
                 <button class="primary" type="submit">Сохранить</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal" id="recountWarehousesDialog">
+        <form class="card form modal-card" id="recountWarehousesForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Выберите склады для пересчета</h2>
+                <button class="icon-button" id="closeRecountWarehousesDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Персональные формы будут созданы и отправлены только отмеченным складам.</p>
+            <label class="checkbox-row recount-select-all-row"><input id="selectAllRecountWarehouses" type="checkbox"> Выбрать все</label>
+            <div class="recount-warehouse-list" id="recountWarehousesList"></div>
+            <p class="field-error" id="recountWarehousesError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="clearRecountWarehousesButton" type="button">Снять все</button>
+                <button class="ghost-button" id="cancelRecountWarehousesButton" type="button">Отмена</button>
+                <button class="primary" id="confirmRecountWarehousesButton" type="submit">Отправить на пересчет</button>
             </div>
         </form>
     </dialog>
@@ -718,6 +810,90 @@ declare(strict_types=1);
         </div>
     </dialog>
 
+
+    <dialog class="modal" id="purchaseRecipientDialog">
+        <form class="card form modal-card" id="purchaseRecipientForm" method="dialog">
+            <div class="modal-heading">
+                <h2 id="purchaseRecipientDialogTitle">Получатель отдела закупок</h2>
+                <button class="icon-button" id="closePurchaseRecipientDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <label>ФИО<input id="purchaseRecipientName" required autocomplete="name"></label>
+            <label>Email<input id="purchaseRecipientEmail" required autocomplete="email" type="email"></label>
+            <label class="checkbox-row"><input id="purchaseRecipientSupervisor" type="checkbox"> Супервайзер</label>
+            <p class="field-error" id="purchaseRecipientError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelPurchaseRecipientButton" type="button">Отмена</button>
+                <button class="primary" type="submit">ОК</button>
+            </div>
+        </form>
+    </dialog>
+
+
+    <dialog class="modal" id="catalogSyncTestDialog">
+        <form class="card form modal-card" id="catalogSyncTestForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Тест синхронизации с catalogvr</h2>
+                <button class="icon-button" id="closeCatalogSyncTestDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <label>Артикул<input id="catalogSyncArticle" required autocomplete="off" placeholder="Введите артикул"></label>
+            <p class="field-error" id="catalogSyncTestError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelCatalogSyncTestButton" type="button">Отмена</button>
+                <button class="primary" id="runCatalogSyncTestButton" type="submit">Запустить тест</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal notification-history-dialog" id="catalogSyncResultDialog">
+        <div class="card form modal-card wide-modal-card">
+            <div class="modal-heading">
+                <h2>Результат синхронизации с catalogvr</h2>
+                <button class="icon-button" id="closeCatalogSyncResultDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle" id="catalogSyncResultInfo"></p>
+            <div class="table-wrap notification-dialog-body">
+                <table>
+                    <thead><tr id="catalogSyncResultHead"></tr></thead>
+                    <tbody id="catalogSyncResultBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-actions"><button class="primary" id="confirmCatalogSyncResultDialogButton" type="button">Закрыть</button></div>
+        </div>
+    </dialog>
+    <dialog class="modal" id="testPurchaseNotificationDialog">
+        <form class="card form modal-card" id="testPurchaseNotificationForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Тест уведомления отдела закупок</h2>
+                <button class="icon-button" id="closeTestPurchaseNotificationDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Уведомление будет сформировано по последнему событию, в котором все партии заполнены всеми активными складами.</p>
+            <label>Email<input id="testPurchaseNotificationEmail" required autocomplete="email" type="email" placeholder="manager@example.ru"></label>
+            <p class="field-error" id="testPurchaseNotificationError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelTestPurchaseNotificationButton" type="button">Отмена</button>
+                <button class="primary" id="confirmTestPurchaseNotificationButton" type="submit">ОК</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal purchase-notification-logs-dialog" id="purchaseNotificationLogsDialog">
+        <div class="card form modal-card notification-modal-card">
+            <div class="modal-heading">
+                <h2>Логи уведомлений отдела закупок</h2>
+                <button class="icon-button" id="closePurchaseNotificationLogsDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="table-wrap notification-dialog-body">
+                <table>
+                    <thead><tr><th>Дата и время</th><th>Событие</th><th>Адресаты</th><th>Статус</th></tr></thead>
+                    <tbody id="purchaseNotificationLogsBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-actions">
+                <button class="primary" id="confirmPurchaseNotificationLogsDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
     <dialog class="modal" id="deleteArticlesDialog">
         <form class="card form modal-card" id="deleteArticlesForm" method="dialog">
             <div class="modal-heading">
@@ -734,15 +910,38 @@ declare(strict_types=1);
         </form>
     </dialog>
 
-    <dialog class="modal" id="notificationLogsDialog">
+    <dialog class="modal notification-history-dialog" id="notificationLogsDialog">
         <div class="card form modal-card notification-modal-card">
             <div class="modal-heading">
-                <h2>Логи уведомлений</h2>
+                <h2>История отправки уведомлений</h2>
                 <button class="icon-button" id="closeNotificationLogsDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
-            <div class="notification-dialog-body" id="notificationLogsBody"></div>
+            <div class="email-log-filters">
+                <input id="emailLogSearch" type="search" placeholder="Поиск по теме, типу или получателю">
+                <select id="emailLogStatusFilter"><option value="">Все статусы</option><option value="SUCCESS">Отправлено</option><option value="ERROR">Не отправлено</option></select>
+                <input id="emailLogTypeFilter" type="text" placeholder="Тип уведомления">
+                <input id="emailLogRecipientFilter" type="email" placeholder="Получатель">
+                <select id="emailLogDirection"><option value="DESC">Сначала новые</option><option value="ASC">Сначала старые</option></select>
+            </div>
+            <div class="table-wrap notification-dialog-body">
+                <table>
+                    <thead><tr><th>Дата и время</th><th>Тип уведомления</th><th>Получатели</th><th>Статус</th></tr></thead>
+                    <tbody id="notificationLogsBody"></tbody>
+                </table>
+            </div>
             <div class="modal-actions">
                 <button class="primary" id="confirmNotificationLogsDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal" id="emailNotificationLogDetailsDialog">
+        <div class="card form modal-card notification-modal-card">
+            <div class="modal-heading"><h2>Детали отправки</h2><button class="icon-button" id="closeEmailNotificationLogDetailsButton" type="button" aria-label="Закрыть">×</button></div>
+            <dl class="email-log-details" id="emailNotificationLogDetails"></dl>
+            <div class="modal-actions">
+                <button class="ghost-button hidden" id="retryEmailNotificationButton" type="button">Повторить отправку</button>
+                <button class="primary" id="confirmEmailNotificationLogDetailsButton" type="button">Закрыть</button>
             </div>
         </div>
     </dialog>

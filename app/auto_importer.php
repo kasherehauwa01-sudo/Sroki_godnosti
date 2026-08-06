@@ -101,10 +101,10 @@ function shouldRunAutoImportNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTi
         return false;
     }
 
-    // Если письмо ещё не пришло или была временная ошибка, повторяем не чаще одного раза в час.
+    // Если письмо ещё не пришло или была временная ошибка, повторяем каждые 30 минут.
     $lastRunAt = new DateTimeImmutable((string)$lastRun['created_at'], new DateTimeZone(AUTO_IMPORT_TIMEZONE));
 
-    return $lastRunAt <= $now->modify('-1 hour');
+    return $lastRunAt <= $now->modify('-' . AUTO_IMPORT_RETRY_INTERVAL_SECONDS . ' seconds');
 }
 
 function acquireAutoImportLock(PDO $pdo): bool
@@ -152,7 +152,7 @@ function runAutoImport(PDO $pdo, bool $once = false): array
         }
 
         if ($attempt < $attempts) {
-            sleep(3600);
+            sleep(AUTO_IMPORT_RETRY_INTERVAL_SECONDS);
         }
     }
 
@@ -616,7 +616,14 @@ function notifyMissingExpiryFilterProducts(PDO $pdo, array $codes): array
         . implode("\n", $codes);
 
     try {
-        sendNotificationEmail($pdo, $recipients, 'Товары без фильтра "Срок годности"', $body, $settings);
+        enqueueNotificationEmails(
+            $pdo,
+            $recipients,
+            'Товары без фильтра "Срок годности"',
+            $body,
+            [missingExpiryFilterCodesXlsAttachment($codes)],
+            ['recipient_name' => 'Все получатели']
+        );
         writeMissingFilterLog($pdo, $codes, $recipients, 'SUCCESS', '');
 
         return ['status' => 'sent', 'count' => count($codes), 'recipients' => $recipients];
@@ -625,6 +632,19 @@ function notifyMissingExpiryFilterProducts(PDO $pdo, array $codes): array
 
         return ['status' => 'error', 'count' => count($codes), 'message' => $error->getMessage()];
     }
+}
+
+function missingExpiryFilterCodesXlsAttachment(array $codes): array
+{
+    $rows = array_map(static function (string $code): string {
+        return '<tr><td>' . htmlspecialchars($code, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</td></tr>';
+    }, array_values($codes));
+
+    return [
+        'filename' => 'xls для 1с.xls',
+        'content_type' => 'application/vnd.ms-excel; charset=UTF-8',
+        'content' => "<html><head><meta charset=\"UTF-8\"></head><body><table><tr><td></td></tr>" . implode('', $rows) . "</table></body></html>",
+    ];
 }
 
 function writeMissingFilterLog(PDO $pdo, array $codes, array $recipients, string $status, string $error): void
@@ -649,19 +669,18 @@ function rowsToBatchPayloads(array $rows): array
 
     $headerInfo = findAutoImportHeaderRow($rows);
     if (!$headerInfo) {
-        throw new RuntimeException('Во вложении не найдены обязательные колонки: Артикул, Количество, Срок годности.');
+        throw new RuntimeException('Во вложении не найдены обязательные колонки: Артикул, Срок годности.');
     }
 
-    ['row' => $headerRow, 'article' => $articleIndex, 'quantity' => $quantityIndex, 'expiry' => $expiryIndex, 'code' => $codeIndex, 'name' => $nameIndex] = $headerInfo;
+    ['row' => $headerRow, 'article' => $articleIndex, 'expiry' => $expiryIndex, 'code' => $codeIndex, 'name' => $nameIndex] = $headerInfo;
 
     $payloads = [];
     foreach (array_slice($rows, $headerRow + 1) as $row) {
         $article = trim((string)($row[$articleIndex] ?? ''));
-        $quantity = trim((string)($row[$quantityIndex] ?? ''));
         $expiry = trim((string)($row[$expiryIndex] ?? ''));
         $code = $codeIndex !== null ? trim((string)($row[$codeIndex] ?? '')) : '';
         $name = $nameIndex !== null ? trim((string)($row[$nameIndex] ?? '')) : '';
-        if ($article === '' || $quantity === '' || $expiry === '') {
+        if ($article === '' || $expiry === '') {
             continue;
         }
         $payloads[] = [
@@ -669,7 +688,6 @@ function rowsToBatchPayloads(array $rows): array
             'code' => $code,
             'name' => $name,
             'createdSource' => 'Автозагрузка',
-            'quantity' => preg_replace('/\D+/', '', $quantity) ?: 0,
             'expiry_date' => $expiry,
             'expiry_raw' => $expiry,
         ];
@@ -683,16 +701,14 @@ function findAutoImportHeaderRow(array $rows): ?array
     foreach (array_slice($rows, 0, 30, true) as $rowIndex => $row) {
         $headers = array_map('normalizeAutoImportHeader', $row);
         $articleIndex = findAutoImportColumn($headers, ['артикул', 'кодтовара', 'номенклатураартикул']);
-        $quantityIndex = findAutoImportColumn($headers, ['количество', 'количествовпартии', 'остаток', 'колво']);
         $codeIndex = findAutoImportColumn($headers, ['код', 'кодтовара']);
         $nameIndex = findAutoImportColumn($headers, ['наименование', 'название', 'товар']);
         $expiryIndex = findAutoImportColumn($headers, ['срокгодностидо', 'срокгодности', 'годендо', 'срок']);
 
-        if ($articleIndex !== null && $quantityIndex !== null && $expiryIndex !== null) {
+        if ($articleIndex !== null && $expiryIndex !== null) {
             return [
                 'row' => (int)$rowIndex,
                 'article' => $articleIndex,
-                'quantity' => $quantityIndex,
                 'expiry' => $expiryIndex,
                 'code' => $codeIndex,
                 'name' => $nameIndex,

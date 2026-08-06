@@ -25,7 +25,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
             <form class="form hidden" id="stockFillForm">
                 <div class="table-wrap">
                     <table>
-                        <thead><tr><th>Артикул</th><th>Наименование</th><th>Остаток на складе</th></tr></thead>
+                        <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Количество единиц с этим сроком годности</th></tr></thead>
                         <tbody id="stockFormBody"></tbody>
                     </table>
                 </div>
@@ -60,6 +60,28 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
         if (Number.isNaN(date.getTime())) return value || '';
         return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
     }
+    function formatDateRu(value) {
+        const [year, month, day] = String(value || '').split('-');
+        return year && month && day ? `${day}.${month}.${year}` : value || '';
+    }
+    function stockFormEventDays(notification, items) {
+        const eventKey = String(notification?.event_key || '');
+        const keyMatch = eventKey.match(/(\d+)$/);
+        if (keyMatch) return Number(keyMatch[1]);
+        const expiryDate = new Date(`${items?.[0]?.expiry_date || ''}T00:00:00`);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (Number.isNaN(expiryDate.getTime())) return 0;
+        return Math.round((expiryDate - today) / 86400000);
+    }
+    function stockFormHeaderText(result) {
+        const items = result.items || [];
+        const expiryDate = items[0]?.expiry_date || '';
+        const expiryText = formatDateRu(expiryDate);
+        const days = stockFormEventDays(result.notification, items);
+        const warehouse = result.notification?.warehouse || '';
+        return `Срок годности партии истекает ${expiryText} (через ${days} дней).\nСклад ${warehouse}. Внимание! Не нужно указывать общее количество товара на складе. Внесите только количество единиц, на упаковке которых указан срок годности до ${expiryText} включительно и нажмите «Сохранить».`;
+    }
     async function loadStockForm() {
         const error = document.querySelector('#stockFormError');
         const form = document.querySelector('#stockFillForm');
@@ -70,12 +92,13 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
                 document.querySelector('#stockFormInfo').textContent = '';
                 return;
             }
-            document.querySelector('#stockFormInfo').textContent = `Склад: ${result.notification.warehouse}. Заполните остатки и нажмите «Сохранить».`;
+            document.querySelector('#stockFormInfo').textContent = stockFormHeaderText(result);
             document.querySelector('#stockFormBody').innerHTML = result.items.map((item) => `
                 <tr>
                     <td>${escapeHtml(item.article)}</td>
-                    <td>${escapeHtml(item.name || item.code || '')}</td>
-                    <td><input name="quantity_${item.id}" data-item-id="${item.id}" min="0" step="1" type="number" value="${Number(item.quantity || 0)}" required></td>
+                    <td>${escapeHtml(item.code)}</td>
+                    <td>${escapeHtml(item.name)}</td>
+                    <td><input name="quantity_${item.id}" data-item-id="${item.id}" min="0" step="1" type="number" value="${item.quantity === null || item.quantity === undefined ? '' : Number(item.quantity)}" required></td>
                 </tr>
             `).join('');
             form.classList.remove('hidden');
@@ -87,8 +110,9 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
         event.preventDefault();
         const quantities = {};
         for (const input of document.querySelectorAll('[data-item-id]')) {
-            if (!/^\d+$/.test(input.value) || Number(input.value) < 0) {
-                document.querySelector('#stockFormError').textContent = 'Остаток должен быть целым числом больше или равным 0.';
+            if (input.value.trim() === '' || !/^\d+$/.test(input.value) || Number(input.value) < 0) {
+                document.querySelector('#stockFormError').textContent = 'Заполните остатки по всем партиям. Если остатка нет, укажите 0.';
+                input.focus();
                 return;
             }
             quantities[input.dataset.itemId] = Number(input.value);
