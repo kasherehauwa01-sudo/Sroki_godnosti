@@ -148,7 +148,7 @@ function handleApiRequest(): void
             };
         }
 
-        $json = json_encode($result, JSON_UNESCAPED_UNICODE);
+        $json = encodeApiResponse($result);
         while (ob_get_level() > $outputBufferLevel) {
             ob_end_clean();
         }
@@ -850,7 +850,7 @@ function writeOffBaseCodeBatchesForReplacement(PDO $pdo, array $batch): array
          FROM batches
          WHERE code = :code
            AND expiry_date = :expiry_date
-           AND status <> 'Списана'
+           AND status <> 'Перемещено на СБ'
          ORDER BY id ASC"
     );
     $statement->execute([
@@ -863,12 +863,12 @@ function writeOffBaseCodeBatchesForReplacement(PDO $pdo, array $batch): array
     }
 
     $writtenOff = [];
-    $update = $pdo->prepare("UPDATE batches SET status = 'Списана' WHERE id = :id");
+    $update = $pdo->prepare("UPDATE batches SET status = 'Перемещено на СБ' WHERE id = :id");
     foreach ($ids as $id) {
         $before = findBatchForHistory($pdo, $id);
         $update->execute([':id' => $id]);
         $after = $before;
-        $after['status'] = 'Списана';
+        $after['status'] = 'Перемещено на СБ';
         $writtenOff[] = ['before' => $before, 'after' => $after, 'replacement_code' => $code];
     }
 
