@@ -257,113 +257,20 @@ CREATE TABLE IF NOT EXISTS stock_batch_notification_views (
     CONSTRAINT fk_stock_batch_views_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS purchase_notification_recipients (
+CREATE TABLE IF NOT EXISTS stock_manager_notifications (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    full_name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL,
-    is_active TINYINT(1) NOT NULL DEFAULT 1,
-    is_supervisor TINYINT(1) NOT NULL DEFAULT 0,
+    event_key VARCHAR(128) NOT NULL,
+    event_date DATE NOT NULL,
+    manager_name VARCHAR(255) NOT NULL,
+    manager_email VARCHAR(255) NOT NULL,
+    item_count INT UNSIGNED NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL DEFAULT 'SENT',
+    error_message TEXT NULL,
+    sent_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uniq_purchase_recipient_email (email),
-    INDEX idx_purchase_recipient_active (is_active)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS purchase_notification_log (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    batch_id BIGINT UNSIGNED NOT NULL,
-    event_days INT NOT NULL,
-    sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    recipients JSON NULL,
-    status ENUM('SUCCESS', 'ERROR') NOT NULL,
-    error_message TEXT NULL,
-    PRIMARY KEY (id),
-    UNIQUE KEY uniq_purchase_batch_event (batch_id, event_days),
-    INDEX idx_purchase_log_status (status),
-    CONSTRAINT fk_purchase_log_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS purchase_event_notification_log (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    event_key VARCHAR(128) NOT NULL,
-    event_date DATE NOT NULL,
-    event_days INT NOT NULL,
-    expiry_date DATE NOT NULL,
-    access_token_hash CHAR(64) NOT NULL,
-    recipients JSON NULL,
-    status ENUM('PENDING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
-    error_message TEXT NULL,
-    sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    UNIQUE KEY uniq_purchase_event (event_key, event_date),
-    UNIQUE KEY uniq_purchase_event_token (access_token_hash),
-    INDEX idx_purchase_event_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS purchase_event_summary_links (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    event_key VARCHAR(128) NOT NULL,
-    event_date DATE NOT NULL,
-    event_days INT NOT NULL,
-    expiry_date DATE NOT NULL,
-    recipient_id BIGINT UNSIGNED NULL,
-    access_token VARCHAR(64) NULL,
-    access_token_hash CHAR(64) NOT NULL,
-    assigned_batch_ids JSON NULL,
-    unassigned_batch_ids JSON NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    UNIQUE KEY uniq_purchase_summary_token (access_token_hash),
-    INDEX idx_purchase_summary_event (event_key, event_date)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS purchase_event_distribution_log (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    event_key VARCHAR(128) NOT NULL,
-    event_date DATE NOT NULL,
-    batch_id BIGINT UNSIGNED NOT NULL,
-    article VARCHAR(128) NOT NULL,
-    manager_value VARCHAR(255) NULL,
-    matched_recipient_id BIGINT UNSIGNED NULL,
-    distribution_type ENUM('PERSONAL', 'UNASSIGNED') NOT NULL,
-    distribution_reason VARCHAR(255) NOT NULL,
-    actual_recipients JSON NOT NULL,
-    send_status ENUM('PENDING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
-    smtp_error TEXT NULL,
-    PRIMARY KEY (id),
-    UNIQUE KEY uniq_purchase_distribution (event_key, event_date, batch_id),
-    INDEX idx_purchase_distribution_created (created_at),
-    INDEX idx_purchase_distribution_batch (batch_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS purchase_event_recipient_log (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    event_key VARCHAR(128) NOT NULL,
-    event_date DATE NOT NULL,
-    recipient_id BIGINT UNSIGNED NOT NULL,
-    email VARCHAR(255) NOT NULL,
-    status ENUM('PENDING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
-    error_message TEXT NULL,
-    sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    UNIQUE KEY uniq_purchase_event_recipient (event_key, event_date, recipient_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS stock_notification_reminder_log (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    event_key VARCHAR(128) NOT NULL,
-    event_date DATE NOT NULL,
-    warehouse_id BIGINT UNSIGNED NOT NULL,
-    notification_id BIGINT UNSIGNED NOT NULL,
-    reminder_number INT UNSIGNED NOT NULL,
-    status ENUM('PENDING', 'SUCCESS', 'ERROR') NOT NULL DEFAULT 'PENDING',
-    error_message TEXT NULL,
-    sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    UNIQUE KEY uniq_stock_event_reminder (event_key, event_date, warehouse_id, reminder_number),
-    INDEX idx_stock_reminder_due (event_key, event_date, warehouse_id, sent_at),
-    CONSTRAINT fk_stock_reminder_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_stock_reminder_notification FOREIGN KEY (notification_id) REFERENCES stock_notifications(id) ON DELETE CASCADE
+    UNIQUE KEY uniq_manager_event_email (event_key, event_date, manager_email),
+    INDEX idx_manager_notifications_status (status),
+    INDEX idx_manager_notifications_sent_at (sent_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

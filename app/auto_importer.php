@@ -19,8 +19,6 @@ const AUTO_IMPORT_MAIL_HOST = 'imap.yandex.ru';
 const AUTO_IMPORT_MAIL_PORT = 993;
 const AUTO_IMPORT_TIMEZONE = 'Europe/Moscow';
 const AUTO_IMPORT_DEFAULT_TIME = '23:50';
-const AUTO_IMPORT_MAX_ATTEMPTS = 20;
-const AUTO_IMPORT_RETRY_INTERVAL_SECONDS = 1800;
 
 date_default_timezone_set(AUTO_IMPORT_TIMEZONE);
 
@@ -80,7 +78,7 @@ function shouldRunAutoImportNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTi
            AND created_at >= :start"
     );
     $attemptsStatement->execute([':start' => $start]);
-    if ((int)$attemptsStatement->fetchColumn() >= AUTO_IMPORT_MAX_ATTEMPTS) {
+    if ((int)$attemptsStatement->fetchColumn() >= 10) {
         return false;
     }
 
@@ -135,7 +133,7 @@ function runAutoImport(PDO $pdo, bool $once = false): array
     ensureSettingsSchema($pdo);
     $settings = getRawSettings($pdo);
     $time = AUTO_IMPORT_DEFAULT_TIME;
-    $attempts = $once ? 1 : AUTO_IMPORT_MAX_ATTEMPTS;
+    $attempts = $once ? 1 : 10;
     $lastError = '';
 
     for ($attempt = 1; $attempt <= $attempts; $attempt++) {
@@ -781,18 +779,7 @@ final class SimpleImapClient
         $this->command('SELECT "' . addcslashes($folder, "\\\"") . '"');
     }
 
-    public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
-    {
-        // Ищем только непрочитанные письма за конкретный календарный день.
-        // Верхняя граница BEFORE нужна, чтобы IMAP-сервер не вернул письма
-        // следующего дня при повторном запуске автоимпорта.
-        $since = $targetDate->format('d-M-Y');
-        $before = $targetDate->modify('+1 day')->format('d-M-Y');
-        $response = $this->command('SEARCH UNSEEN SINCE ' . $since . ' BEFORE ' . $before);
-        preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
 
-        return array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
-    }
 
     public function fetchMessage(string $id): string
     {
@@ -815,7 +802,6 @@ final class SimpleImapClient
     public function logout(): void
     {
         if (!is_resource($this->socket)) {
-            $this->socket = null;
             return;
         }
 
@@ -832,6 +818,18 @@ final class SimpleImapClient
     public function __destruct()
     {
         $this->logout();
+    }
+
+    public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
+    {
+        // Ищем без IMAP-фильтра FROM: у разных серверов он может не совпадать
+        // с отображаемым адресом отправителя. Фильтр отправителя выполняется в PHP.
+        $date = $targetDate->setTimezone(new DateTimeZone(AUTO_IMPORT_TIMEZONE))->format('d-M-Y');
+        $nextDate = $targetDate->setTimezone(new DateTimeZone(AUTO_IMPORT_TIMEZONE))->modify('+1 day')->format('d-M-Y');
+        $response = $this->command('SEARCH UNSEEN SINCE ' . $date . ' BEFORE ' . $nextDate);
+        preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
+        $ids = array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
+        return $ids;
     }
 
     private function command(string $command): string
