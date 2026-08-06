@@ -33,6 +33,9 @@ if (basename((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === 'api.php') {
 
 function handleApiRequest(): void
 {
+    $outputBufferLevel = ob_get_level();
+    ob_start();
+
     try {
         $pdo = getDatabaseConnection();
         ensureBatchesSchema($pdo);
@@ -91,8 +94,15 @@ function handleApiRequest(): void
             };
         }
 
-        echo json_encode($result, JSON_UNESCAPED_UNICODE);
+        $json = json_encode($result, JSON_UNESCAPED_UNICODE);
+        while (ob_get_level() > $outputBufferLevel) {
+            ob_end_clean();
+        }
+        echo $json;
     } catch (Throwable $error) {
+        while (ob_get_level() > $outputBufferLevel) {
+            ob_end_clean();
+        }
         http_response_code(500);
         echo json_encode(['ok' => false, 'error' => $error->getMessage()], JSON_UNESCAPED_UNICODE);
     }
@@ -144,7 +154,7 @@ function ensureSettingsSchema(PDO $pdo): void
         'smtp_from_email' => "ALTER TABLE settings ADD COLUMN smtp_from_email VARCHAR(255) NULL AFTER smtp_password",
         'smtp_from_name' => "ALTER TABLE settings ADD COLUMN smtp_from_name VARCHAR(255) NULL AFTER smtp_from_email",
         'notification_time' => "ALTER TABLE settings ADD COLUMN notification_time CHAR(5) NOT NULL DEFAULT '09:00' AFTER smtp_from_name",
-        'auto_import_time' => "ALTER TABLE settings ADD COLUMN auto_import_time CHAR(5) NOT NULL DEFAULT '10:00' AFTER notification_time",
+        'auto_import_time' => "ALTER TABLE settings ADD COLUMN auto_import_time CHAR(5) NOT NULL DEFAULT '23:50' AFTER notification_time",
         'missing_filter_email' => "ALTER TABLE settings ADD COLUMN missing_filter_email TEXT NULL AFTER auto_import_time",
     ];
 
@@ -287,13 +297,14 @@ function createBatch(PDO $pdo, array $payload, bool $writeHistory = true): array
         return ['ok' => true, 'duplicate' => true, 'message' => DUPLICATE_BATCH_MESSAGE, 'duplicate_batch' => duplicateBatchInfo($batch)];
     }
 
+    $writtenOffBatches = writeOffBaseCodeBatchesForReplacement($pdo, $batch);
     $id = insertBatch($pdo, $batch);
     $batchInfo = historyBatchInfo($batch, $id);
     if ($writeHistory) {
-        writeLog($pdo, 'create', ['batch' => $batchInfo]);
+        writeLog($pdo, 'create', ['batch' => $batchInfo, 'written_off_batches' => $writtenOffBatches]);
     }
 
-    return ['ok' => true, 'id' => $id, 'duplicate' => false, 'batch' => $batchInfo];
+    return ['ok' => true, 'id' => $id, 'duplicate' => false, 'batch' => $batchInfo, 'written_off_batches' => $writtenOffBatches];
 }
 
 function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true): array
@@ -304,6 +315,7 @@ function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true):
         $skippedDuplicates = 0;
         $duplicates = [];
         $createdBatches = [];
+        $writtenOffBatches = [];
         foreach ($batches as $batch) {
             if (!is_array($batch)) {
                 continue;
@@ -318,6 +330,7 @@ function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true):
 
             $added++;
             $createdBatches[] = $result['batch'];
+            $writtenOffBatches = array_merge($writtenOffBatches, $result['written_off_batches'] ?? []);
         }
         $pdo->commit();
         if ($writeHistory) {
@@ -325,6 +338,7 @@ function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true):
                 'batches' => $createdBatches,
                 'duplicates' => $duplicates,
                 'skipped_duplicates' => $skippedDuplicates,
+                'written_off_batches' => $writtenOffBatches,
             ]);
         }
         return [
@@ -333,6 +347,7 @@ function bulkCreateBatches(PDO $pdo, array $batches, bool $writeHistory = true):
             'skipped_duplicates' => $skippedDuplicates,
             'batches' => $createdBatches,
             'duplicates' => $duplicates,
+            'written_off_batches' => $writtenOffBatches,
             'message' => $skippedDuplicates > 0 ? DUPLICATE_BATCH_MESSAGE : '',
         ];
     } catch (Throwable $error) {
@@ -380,6 +395,49 @@ function updateBatch(PDO $pdo, array $payload): array
     ]);
 
     return ['ok' => true];
+}
+
+
+function writeOffBaseCodeBatchesForReplacement(PDO $pdo, array $batch): array
+{
+    $code = trim((string)($batch['code'] ?? ''));
+    if (substr($code, -2) !== '-1') {
+        return [];
+    }
+
+    $baseCode = substr($code, 0, -2);
+    if ($baseCode === '') {
+        return [];
+    }
+
+    $statement = $pdo->prepare(
+        "SELECT id
+         FROM batches
+         WHERE code = :code
+           AND expiry_date = :expiry_date
+           AND status <> 'Списана'
+         ORDER BY id ASC"
+    );
+    $statement->execute([
+        ':code' => $baseCode,
+        ':expiry_date' => (string)($batch['expiry_date'] ?? ''),
+    ]);
+    $ids = array_map('intval', $statement->fetchAll(PDO::FETCH_COLUMN));
+    if (!$ids) {
+        return [];
+    }
+
+    $writtenOff = [];
+    $update = $pdo->prepare("UPDATE batches SET status = 'Списана' WHERE id = :id");
+    foreach ($ids as $id) {
+        $before = findBatchForHistory($pdo, $id);
+        $update->execute([':id' => $id]);
+        $after = $before;
+        $after['status'] = 'Списана';
+        $writtenOff[] = ['before' => $before, 'after' => $after, 'replacement_code' => $code];
+    }
+
+    return $writtenOff;
 }
 
 function buildCreateBatchParams(array $batch): array
@@ -1150,7 +1208,7 @@ function normalizeSettings(array $settings): array
         'smtp_from_email' => (string)($settings['smtp_from_email'] ?? SENDER_EMAIL),
         'smtp_from_name' => (string)($settings['smtp_from_name'] ?? 'Сроки годности'),
         'notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
-        'auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? '10:00'), '10:00'),
+        'auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? '23:50'), '23:50'),
         'auto_import' => getAutoImportInfo($GLOBALS['pdo_for_settings_info'] ?? null),
         'missing_filter_email' => (string)($settings['missing_filter_email'] ?? ''),
         'missing_filter_emails' => splitEmails((string)($settings['missing_filter_email'] ?? '')),
@@ -1204,7 +1262,7 @@ function saveSettings(PDO $pdo, array $settings): array
         ':smtp_from_email' => trim((string)($settings['smtp_from_email'] ?? $current['smtp_from_email'] ?? SENDER_EMAIL)),
         ':smtp_from_name' => trim((string)($settings['smtp_from_name'] ?? $current['smtp_from_name'] ?? 'Сроки годности')),
         ':notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? $current['notification_time'] ?? '09:00')),
-        ':auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? $current['auto_import_time'] ?? '10:00'), '10:00'),
+        ':auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? $current['auto_import_time'] ?? '23:50'), '23:50'),
         ':missing_filter_email' => implode(',', splitEmails((string)($settings['missing_filter_email'] ?? $current['missing_filter_email'] ?? ''))),
     ];
 
@@ -1352,7 +1410,7 @@ function autoImportLogText(string $action, array $payload): string
 {
     if ($action === 'auto_import_started') {
         return ($payload['mode'] ?? '') === 'daily_auto'
-            ? sprintf('Ежедневная автозагрузка запущена по расписанию %s МСК.', (string)($payload['time'] ?? '10:00'))
+            ? sprintf('Ежедневная автозагрузка запущена по расписанию %s МСК.', (string)($payload['time'] ?? '23:50'))
             : 'Ручной тест автозагрузки запущен.';
     }
     if ($action === 'auto_import_completed') {

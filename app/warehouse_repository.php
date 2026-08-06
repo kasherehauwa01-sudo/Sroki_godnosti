@@ -332,6 +332,7 @@ function ensureStockNotificationSchema(PDO $pdo): void
 
     ensureStockTokenColumn($pdo);
     ensureStockBatchNotificationViewsSchema($pdo);
+    ensureStockManagerNotificationSchema($pdo);
 }
 
 
@@ -343,6 +344,29 @@ function ensureStockBatchNotificationViewsSchema(PDO $pdo): void
             viewed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (batch_id),
             CONSTRAINT fk_stock_batch_views_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+}
+
+function ensureStockManagerNotificationSchema(PDO $pdo): void
+{
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS stock_manager_notifications (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            event_key VARCHAR(128) NOT NULL,
+            event_date DATE NOT NULL,
+            manager_name VARCHAR(255) NOT NULL,
+            manager_email VARCHAR(255) NOT NULL,
+            item_count INT UNSIGNED NOT NULL DEFAULT 0,
+            status VARCHAR(16) NOT NULL DEFAULT 'SENT',
+            error_message TEXT NULL,
+            sent_at DATETIME NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_manager_event_email (event_key, event_date, manager_email),
+            INDEX idx_manager_notifications_status (status),
+            INDEX idx_manager_notifications_sent_at (sent_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 }
@@ -490,11 +514,12 @@ function isStockNotificationActive(array $notification): bool
 function getStockNotificationItems(PDO $pdo, int $notificationId, int $warehouseId): array
 {
     $statement = $pdo->prepare(
-        'SELECT i.id, i.batch_id, i.article, i.code, i.name, i.expiry_date, i.expiry_full_date, COALESCE(bs.quantity, 0) AS quantity
+        "SELECT i.id, i.batch_id, i.article, i.code, i.name, i.expiry_date, i.expiry_full_date, COALESCE(bs.quantity, 0) AS quantity
          FROM stock_notification_items i
+         INNER JOIN batches b ON b.id = i.batch_id AND b.status <> 'Списана'
          LEFT JOIN batch_stock bs ON bs.batch_id = i.batch_id AND bs.warehouse_id = :warehouse_id
          WHERE i.notification_id = :notification_id
-         ORDER BY i.sort_order ASC, i.id ASC'
+         ORDER BY i.sort_order ASC, i.id ASC"
     );
     $statement->execute([':warehouse_id' => $warehouseId, ':notification_id' => $notificationId]);
 
@@ -571,17 +596,20 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
         throw $error;
     }
 
+    sendCompletedEventManagerNotifications($pdo, (int)$notification['id']);
+
     return ['ok' => true] + loadStockFormByToken($pdo, $token, false);
 }
 
 function updateStockNotificationProgress(PDO $pdo, int $notificationId): void
 {
     $statement = $pdo->prepare(
-        'SELECT COUNT(*) AS total, SUM(CASE WHEN bs.id IS NULL THEN 0 ELSE 1 END) AS filled
+        "SELECT COUNT(*) AS total, SUM(CASE WHEN bs.id IS NULL THEN 0 ELSE 1 END) AS filled
          FROM stock_notification_items i
          INNER JOIN stock_notifications n ON n.id = i.notification_id
+         INNER JOIN batches b ON b.id = i.batch_id AND b.status <> 'Списана'
          LEFT JOIN batch_stock bs ON bs.batch_id = i.batch_id AND bs.warehouse_id = n.warehouse_id
-         WHERE i.notification_id = :notification_id'
+         WHERE i.notification_id = :notification_id"
     );
     $statement->execute([':notification_id' => $notificationId]);
     $row = $statement->fetch() ?: ['total' => 0, 'filled' => 0];
@@ -591,6 +619,447 @@ function updateStockNotificationProgress(PDO $pdo, int $notificationId): void
     $completedSql = $status === 'Заполнена' ? ', completed_at = COALESCE(completed_at, NOW())' : '';
     $pdo->prepare("UPDATE stock_notifications SET status = :status, last_changed_at = NOW()$completedSql WHERE id = :id")
         ->execute([':status' => $status, ':id' => $notificationId]);
+}
+
+function sendCompletedEventManagerNotifications(PDO $pdo, int $notificationId): void
+{
+    ensureStockManagerNotificationSchema($pdo);
+    $event = getStockNotificationEvent($pdo, $notificationId);
+    if (!$event || !str_starts_with((string)$event['event_key'], 'expiry_')) {
+        return;
+    }
+
+    if (!allActiveWarehousesCompletedEvent($pdo, (string)$event['event_key'], (string)$event['event_date'])) {
+        return;
+    }
+
+    $lockName = 'sroki_manager_' . hash('sha256', (string)$event['event_key'] . '|' . (string)$event['event_date']);
+    if (!acquireNamedDatabaseLock($pdo, $lockName)) {
+        return;
+    }
+
+    try {
+        if (!allActiveWarehousesCompletedEvent($pdo, (string)$event['event_key'], (string)$event['event_date'])) {
+            return;
+        }
+
+        $batches = getCompletedEventBatches($pdo, (string)$event['event_key'], (string)$event['event_date']);
+        $managerGroups = groupEventBatchesByManager($pdo, $batches);
+        if (!$managerGroups) {
+            writeLog($pdo, 'manager_stock_notifications_skipped', [
+                'event_key' => $event['event_key'],
+                'event_date' => $event['event_date'],
+                'reason' => 'В catalogvr не найдены менеджеры с email для товаров события.',
+                'codes' => array_values(array_unique(array_column($batches, 'code'))),
+            ]);
+            return;
+        }
+
+        $settings = getRawSettings($pdo);
+        foreach ($managerGroups as $group) {
+            sendManagerEventNotification($pdo, $event, $group, $settings);
+        }
+    } finally {
+        releaseNamedDatabaseLock($pdo, $lockName);
+    }
+}
+
+function getStockNotificationEvent(PDO $pdo, int $notificationId): ?array
+{
+    $statement = $pdo->prepare(
+        'SELECT event_key, DATE(created_at) AS event_date
+         FROM stock_notifications
+         WHERE id = :id'
+    );
+    $statement->execute([':id' => $notificationId]);
+    $event = $statement->fetch();
+
+    return $event ?: null;
+}
+
+function allActiveWarehousesCompletedEvent(PDO $pdo, string $eventKey, string $eventDate): bool
+{
+    $statement = $pdo->prepare(
+        "SELECT
+            (SELECT COUNT(*) FROM warehouses WHERE is_active = 1) AS active_count,
+            COUNT(DISTINCT CASE WHEN n.status = 'Заполнена' THEN n.warehouse_id END) AS completed_count
+         FROM stock_notifications n
+         INNER JOIN warehouses w ON w.id = n.warehouse_id AND w.is_active = 1
+         WHERE n.event_key = :event_key AND DATE(n.created_at) = :event_date"
+    );
+    $statement->execute([':event_key' => $eventKey, ':event_date' => $eventDate]);
+    $row = $statement->fetch() ?: ['active_count' => 0, 'completed_count' => 0];
+    $activeCount = (int)$row['active_count'];
+
+    return $activeCount > 0 && (int)$row['completed_count'] >= $activeCount;
+}
+
+function getCompletedEventBatches(PDO $pdo, string $eventKey, string $eventDate): array
+{
+    $statement = $pdo->prepare(
+        "SELECT DISTINCT b.id, b.article, b.code, b.name, b.expiry_date, b.expiry_full_date
+         FROM stock_notifications n
+         INNER JOIN stock_notification_items i ON i.notification_id = n.id
+         INNER JOIN batches b ON b.id = i.batch_id AND b.status <> 'Списана'
+         WHERE n.event_key = :event_key AND DATE(n.created_at) = :event_date
+         ORDER BY b.code ASC, b.article ASC"
+    );
+    $statement->execute([':event_key' => $eventKey, ':event_date' => $eventDate]);
+
+    return $statement->fetchAll();
+}
+
+function groupEventBatchesByManager(PDO $pdo, array $batches): array
+{
+    $codes = [];
+    foreach ($batches as $batch) {
+        $code = trim((string)($batch['code'] ?? ''));
+        if ($code === '') {
+            continue;
+        }
+        $codes[] = mb_strtoupper($code);
+        $codes[] = normalizeManagerProductCode($code);
+    }
+    $codes = array_values(array_unique(array_filter($codes)));
+    if (!$codes) {
+        return [];
+    }
+
+    return groupBatchesByManagerAssignments($batches, loadCatalogVrManagerAssignments($pdo, $codes));
+}
+
+function groupBatchesByManagerAssignments(array $batches, array $assignments): array
+{
+    $batchesByCode = [];
+    foreach ($batches as $batch) {
+        $batchesByCode[normalizeManagerProductCode((string)$batch['code'])][] = $batch;
+    }
+
+    $groups = [];
+    foreach ($assignments as $assignment) {
+        $managerName = normalizeManagerName((string)$assignment['manager_name']);
+        $managerKey = mb_strtolower($managerName);
+        $email = mb_strtolower(trim((string)($assignment['manager_email'] ?? '')));
+        $codeKey = normalizeManagerProductCode((string)$assignment['code']);
+        if ($managerKey === '' || empty($batchesByCode[$codeKey])) {
+            continue;
+        }
+        if (!isset($groups[$managerKey])) {
+            $groups[$managerKey] = [
+                'manager_name' => $managerName,
+                'manager_email' => $email,
+                'batches' => [],
+            ];
+        } elseif ($groups[$managerKey]['manager_email'] === '' && $email !== '') {
+            $groups[$managerKey]['manager_email'] = $email;
+        }
+        foreach ($batchesByCode[$codeKey] as $batch) {
+            $groups[$managerKey]['batches'][(int)$batch['id']] = $batch;
+        }
+    }
+
+    $groups = array_filter($groups, static fn (array $group): bool => filter_var($group['manager_email'], FILTER_VALIDATE_EMAIL) !== false);
+    return array_values(array_map(static function (array $group): array {
+        $group['batches'] = array_values($group['batches']);
+        return $group;
+    }, $groups));
+}
+
+function normalizeManagerProductCode(string $code): string
+{
+    $normalized = mb_strtoupper(trim($code));
+    return str_ends_with($normalized, '-1') ? substr($normalized, 0, -2) : $normalized;
+}
+
+function normalizeManagerName(string $managerName): string
+{
+    $normalized = trim(preg_replace('/\s+/u', ' ', $managerName) ?? $managerName);
+    return trim(preg_replace('/^(?:менеджер(?:\s+отдела\s+закупок)?)[\s:—-]*/ui', '', $normalized) ?? $normalized);
+}
+
+function loadCatalogVrManagerAssignments(PDO $pdo, array $codes): array
+{
+    $catalog = discoverCatalogVrManagerColumns($pdo);
+    if ($catalog === null) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($codes), '?'));
+    $emailSelect = $catalog['email'] !== null
+        ? quoteSqlIdentifier($catalog['email'])
+        : "''";
+    $sql = sprintf(
+        'SELECT %s AS product_code, %s AS manager_name, %s AS manager_email FROM %s WHERE UPPER(TRIM(%s)) IN (%s)',
+        quoteSqlIdentifier($catalog['code']),
+        quoteSqlIdentifier($catalog['manager']),
+        $emailSelect,
+        quoteSqlIdentifier($catalog['table']),
+        quoteSqlIdentifier($catalog['code']),
+        $placeholders
+    );
+    $statement = $pdo->prepare($sql);
+    $statement->execute($codes);
+    $rows = $statement->fetchAll();
+
+    $managerNames = array_values(array_unique(array_filter(array_map(
+        static fn (array $row): string => normalizeManagerName((string)($row['manager_name'] ?? '')),
+        $rows
+    ))));
+    $managerEmails = loadManagerDirectoryEmails($pdo, $managerNames, $catalog['table']);
+
+    $assignments = [];
+    foreach ($rows as $row) {
+        $managerName = trim((string)($row['manager_name'] ?? ''));
+        $managerEmail = trim((string)($row['manager_email'] ?? ''));
+        if ($managerEmail === '' && filter_var($managerName, FILTER_VALIDATE_EMAIL)) {
+            $managerEmail = $managerName;
+        }
+        if ($managerEmail === '' && preg_match('/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i', $managerName, $emailMatch)) {
+            $managerEmail = $emailMatch[0];
+            $managerName = trim(str_replace($emailMatch[0], '', $managerName), " \t\n\r\0\x0B<>()[]");
+        }
+        $managerName = normalizeManagerName($managerName);
+        if (!filter_var($managerEmail, FILTER_VALIDATE_EMAIL)) {
+            $managerEmail = (string)($managerEmails[mb_strtolower($managerName)] ?? '');
+        }
+        if ($managerName === '') {
+            continue;
+        }
+        $assignments[] = [
+            'code' => normalizeManagerProductCode((string)($row['product_code'] ?? '')),
+            'manager_name' => $managerName,
+            'manager_email' => $managerEmail,
+        ];
+    }
+
+    return $assignments;
+}
+
+function discoverCatalogVrManagerColumns(PDO $pdo): ?array
+{
+    $tableStatement = $pdo->query(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+         WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'catalogvr'
+         LIMIT 1"
+    );
+    $table = $tableStatement->fetchColumn();
+    if ($table === false) {
+        return null;
+    }
+
+    $columns = getTableColumnsByNormalizedName($pdo, (string)$table);
+    $code = firstMatchingColumn($columns, ['code', 'код', 'кодтовара', 'productcode', 'kod']);
+    $manager = firstMatchingColumn($columns, ['manager', 'managername', 'менеджер', 'менеджерзакупок', 'менеджеротделазакупок', 'менеджерпозакупкам', 'закупщик', 'фиоменеджера', 'ответственный']);
+    $email = firstMatchingColumn($columns, ['manageremail', 'emailmanager', 'emailменеджера', 'почтаменеджера', 'emailменеджераотделазакупок', 'почтаменеджераотделазакупок', 'электроннаяпочта', 'email', 'почта']);
+    if ($code === null || $manager === null) {
+        return null;
+    }
+
+    return ['table' => (string)$table, 'code' => $code, 'manager' => $manager, 'email' => $email];
+}
+
+function loadManagerDirectoryEmails(PDO $pdo, array $managerNames, string $catalogTable): array
+{
+    if (!$managerNames) {
+        return [];
+    }
+    $tables = $pdo->query(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND (LOWER(TABLE_NAME) LIKE '%manager%' OR LOWER(TABLE_NAME) LIKE '%менеджер%')"
+    )->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($tables as $table) {
+        if ((string)$table === $catalogTable) {
+            continue;
+        }
+        $columns = getTableColumnsByNormalizedName($pdo, (string)$table);
+        $nameColumn = firstMatchingColumn($columns, ['manager', 'managername', 'менеджер', 'фио', 'name', 'имя']);
+        $emailColumn = firstMatchingColumn($columns, ['manageremail', 'emailmanager', 'email', 'почта']);
+        if ($nameColumn === null || $emailColumn === null) {
+            continue;
+        }
+        $placeholders = implode(',', array_fill(0, count($managerNames), '?'));
+        $sql = sprintf(
+            'SELECT %s AS manager_name, %s AS manager_email FROM %s WHERE %s IN (%s)',
+            quoteSqlIdentifier($nameColumn),
+            quoteSqlIdentifier($emailColumn),
+            quoteSqlIdentifier((string)$table),
+            quoteSqlIdentifier($nameColumn),
+            $placeholders
+        );
+        $statement = $pdo->prepare($sql);
+        $statement->execute($managerNames);
+        $result = [];
+        foreach ($statement->fetchAll() as $row) {
+            $email = trim((string)($row['manager_email'] ?? ''));
+            if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $result[mb_strtolower(trim((string)$row['manager_name']))] = $email;
+            }
+        }
+        if ($result) {
+            return $result;
+        }
+    }
+
+    return [];
+}
+
+function getTableColumnsByNormalizedName(PDO $pdo, string $table): array
+{
+    $statement = $pdo->prepare(
+        'SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table'
+    );
+    $statement->execute([':table' => $table]);
+    $columns = [];
+    foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $column) {
+        $columns[normalizeDatabaseIdentifier((string)$column)] = (string)$column;
+    }
+    return $columns;
+}
+
+function normalizeDatabaseIdentifier(string $value): string
+{
+    return preg_replace('/[^a-zа-я0-9]+/u', '', mb_strtolower($value)) ?? '';
+}
+
+function firstMatchingColumn(array $columns, array $candidates): ?string
+{
+    foreach ($candidates as $candidate) {
+        $normalized = normalizeDatabaseIdentifier($candidate);
+        if (isset($columns[$normalized])) {
+            return $columns[$normalized];
+        }
+    }
+    return null;
+}
+
+function quoteSqlIdentifier(string $identifier): string
+{
+    return '`' . str_replace('`', '``', $identifier) . '`';
+}
+
+function sendManagerEventNotification(PDO $pdo, array $event, array $group, array $settings): void
+{
+    $existing = $pdo->prepare(
+        "SELECT status FROM stock_manager_notifications
+         WHERE event_key = :event_key AND event_date = :event_date AND manager_email = :manager_email"
+    );
+    $existing->execute([
+        ':event_key' => $event['event_key'],
+        ':event_date' => $event['event_date'],
+        ':manager_email' => $group['manager_email'],
+    ]);
+    if ($existing->fetchColumn() === 'SENT') {
+        return;
+    }
+
+    $subject = 'Остатки по событию сроков годности от ' . formatExpiryMonth((string)$event['event_date'], true);
+    $body = managerEventNotificationBody($pdo, (string)$group['manager_name'], $group['batches']);
+    try {
+        sendNotificationEmail($pdo, [(string)$group['manager_email']], $subject, $body, $settings);
+        saveManagerNotificationResult($pdo, $event, $group, 'SENT', null);
+        writeLog($pdo, 'manager_stock_notification_sent', [
+            'event_key' => $event['event_key'],
+            'event_date' => $event['event_date'],
+            'manager' => $group['manager_name'],
+            'email' => $group['manager_email'],
+            'codes' => array_values(array_column($group['batches'], 'code')),
+        ]);
+    } catch (Throwable $error) {
+        saveManagerNotificationResult($pdo, $event, $group, 'ERROR', $error->getMessage());
+        writeLog($pdo, 'manager_stock_notification_failed', [
+            'event_key' => $event['event_key'],
+            'event_date' => $event['event_date'],
+            'manager' => $group['manager_name'],
+            'email' => $group['manager_email'],
+            'error' => $error->getMessage(),
+        ]);
+    }
+}
+
+function managerEventNotificationBody(PDO $pdo, string $managerName, array $batches): string
+{
+    $lines = [
+        $managerName . ', все активные склады заполнили остатки по товарам вашего события.',
+        '',
+    ];
+    $stockStatement = $pdo->prepare(
+        'SELECT w.name, COALESCE(bs.quantity, 0) AS quantity
+         FROM warehouses w
+         LEFT JOIN batch_stock bs ON bs.warehouse_id = w.id AND bs.batch_id = :batch_id
+         WHERE w.is_active = 1
+         ORDER BY w.sort_order ASC, w.name ASC'
+    );
+    foreach ($batches as $batch) {
+        $lines[] = sprintf(
+            'Код: %s; Артикул: %s; Наименование: %s; Срок годности: %s',
+            (string)$batch['code'],
+            (string)$batch['article'],
+            (string)$batch['name'],
+            formatExpiryMonth((string)$batch['expiry_date'], (bool)$batch['expiry_full_date'])
+        );
+        $stockStatement->execute([':batch_id' => (int)$batch['id']]);
+        $total = 0.0;
+        foreach ($stockStatement->fetchAll() as $stock) {
+            $quantity = (float)$stock['quantity'];
+            $total += $quantity;
+            $lines[] = sprintf('  %s: %s', (string)$stock['name'], formatStockQuantity($quantity));
+        }
+        $lines[] = '  Итого: ' . formatStockQuantity($total);
+        $lines[] = '';
+    }
+    return implode("\n", $lines);
+}
+
+function formatStockQuantity(float $quantity): string
+{
+    return floor($quantity) === $quantity
+        ? (string)(int)$quantity
+        : rtrim(rtrim(number_format($quantity, 3, '.', ''), '0'), '.');
+}
+
+function saveManagerNotificationResult(PDO $pdo, array $event, array $group, string $status, ?string $error): void
+{
+    $statement = $pdo->prepare(
+        'INSERT INTO stock_manager_notifications
+            (event_key, event_date, manager_name, manager_email, item_count, status, error_message, sent_at)
+         VALUES
+            (:event_key, :event_date, :manager_name, :manager_email, :item_count, :status, :error_message, IF(:status_sent = 1, NOW(), NULL))
+         ON DUPLICATE KEY UPDATE
+            manager_name = VALUES(manager_name), item_count = VALUES(item_count), status = VALUES(status),
+            error_message = VALUES(error_message), sent_at = VALUES(sent_at)'
+    );
+    $statement->execute([
+        ':event_key' => $event['event_key'],
+        ':event_date' => $event['event_date'],
+        ':manager_name' => $group['manager_name'],
+        ':manager_email' => $group['manager_email'],
+        ':item_count' => count($group['batches']),
+        ':status' => $status,
+        ':error_message' => $error,
+        ':status_sent' => $status === 'SENT' ? 1 : 0,
+    ]);
+}
+
+function acquireNamedDatabaseLock(PDO $pdo, string $name): bool
+{
+    try {
+        $statement = $pdo->prepare('SELECT GET_LOCK(:name, 0)');
+        $statement->execute([':name' => substr($name, 0, 64)]);
+        return (int)$statement->fetchColumn() === 1;
+    } catch (Throwable) {
+        return true;
+    }
+}
+
+function releaseNamedDatabaseLock(PDO $pdo, string $name): void
+{
+    try {
+        $statement = $pdo->prepare('SELECT RELEASE_LOCK(:name)');
+        $statement->execute([':name' => substr($name, 0, 64)]);
+    } catch (Throwable) {
+        // Advisory lock is only duplicate-send protection.
+    }
 }
 
 function listStockNotifications(PDO $pdo): array
@@ -677,11 +1146,12 @@ function listStockBatchNotifications(PDO $pdo): array
                 COALESCE(active_warehouses.active_count, 0) AS active_warehouse_count,
                 COALESCE(stock_totals.filled_warehouse_count, 0) AS filled_warehouse_count
          FROM (
-             SELECT batch_id, SUM(quantity) AS total_stock, COUNT(DISTINCT warehouse_id) AS filled_warehouse_count, MAX(updated_at) AS last_stock_at
-             FROM batch_stock
-             GROUP BY batch_id
+             SELECT bs.batch_id, SUM(bs.quantity) AS total_stock, COUNT(DISTINCT bs.warehouse_id) AS filled_warehouse_count, MAX(bs.updated_at) AS last_stock_at
+             FROM batch_stock bs
+             INNER JOIN warehouses w ON w.id = bs.warehouse_id AND w.is_active = 1
+             GROUP BY bs.batch_id
          ) stock_totals
-         INNER JOIN batches b ON b.id = stock_totals.batch_id
+         INNER JOIN batches b ON b.id = stock_totals.batch_id AND b.status <> 'Списана'
          LEFT JOIN (
              SELECT batch_id, MAX(created_at) AS last_change_at
              FROM stock_change_logs
@@ -704,6 +1174,8 @@ function listStockBatchNotifications(PDO $pdo): array
             'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
             'status' => (string)$row['status'],
             'total_stock' => (int)($row['total_stock'] ?? 0),
+            'active_warehouse_count' => (int)($row['active_warehouse_count'] ?? 0),
+            'filled_warehouse_count' => (int)($row['filled_warehouse_count'] ?? 0),
             'last_stock_at' => $lastStockAt,
             'viewed_at' => $viewedAt,
             'unread' => $viewedAt === '' || ($lastStockAt !== '' && strtotime($lastStockAt) > strtotime($viewedAt)),
@@ -730,14 +1202,23 @@ function markStockBatchNotificationViewed(PDO $pdo, int $batchId): array
 function listExpiryEvents(PDO $pdo): array
 {
     $eventDays = [180, 90, 60, 30, 1];
-    $placeholders = implode(',', array_fill(0, count($eventDays), '?'));
-    $statement = $pdo->prepare(
-        "SELECT id, article, code, name, expiry_date, expiry_full_date, days_left
-         FROM batches
-         WHERE status = 'В наличии' AND expiry_invalid = 0 AND days_left IN ($placeholders)
-         ORDER BY days_left DESC, expiry_date ASC, article ASC"
+    $selects = [];
+    foreach ($eventDays as $eventDay) {
+        $selects[] = sprintf(
+            "SELECT id, article, code, name, expiry_date, expiry_full_date, %d AS event_type, DATE_SUB(expiry_date, INTERVAL %d DAY) AS event_date, DATEDIFF(DATE_SUB(expiry_date, INTERVAL %d DAY), CURDATE()) AS days_until_event FROM batches",
+            $eventDay,
+            $eventDay,
+            $eventDay
+        );
+    }
+
+    $statement = $pdo->query(
+        'SELECT * FROM (' . implode(' UNION ALL ', $selects) . ") event_batches
+         WHERE event_batches.id IN (
+             SELECT id FROM batches WHERE status = 'В наличии' AND expiry_invalid = 0
+         )
+         ORDER BY days_until_event ASC, event_type ASC, article ASC"
     );
-    $statement->execute($eventDays);
 
     return array_map(static fn (array $row): array => [
         'id' => (int)$row['id'],
@@ -746,6 +1227,8 @@ function listExpiryEvents(PDO $pdo): array
         'name' => (string)($row['name'] ?? ''),
         'expiry_date' => (string)$row['expiry_date'],
         'expiry_full_date' => (bool)($row['expiry_full_date'] ?? false),
-        'event_type' => (int)$row['days_left'],
+        'event_type' => (int)$row['event_type'],
+        'event_date' => (string)$row['event_date'],
+        'days_until_event' => (int)$row['days_until_event'],
     ], $statement->fetchAll());
 }
