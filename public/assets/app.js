@@ -34,6 +34,10 @@ const state = {
     selectedStockBatchId: null,
     events: [],
     eventPeriodFilters: new Set(['today', 'future']),
+    emailNotificationLogs: [],
+    selectedEmailNotificationLogId: null,
+    catalogSyncStatus: null,
+    editingPurchaseRecipientId: null,
 };
 
 const statusOptions = ['В наличии', 'Перемещено на СБ', 'Нет в наличии'];
@@ -804,8 +808,6 @@ async function openBatchStockDialog(id, options = {}) {
     state.selectedStockBatchId = String(id);
     resetBatchStockStatusControls(batch.status);
     qs('#writeOffStockBatchButton').classList.toggle('hidden', !options.showWriteOff);
-    qs('#writeOffStatusPanel').classList.add('hidden');
-    setValueIfPresent('#writeOffStockBatchStatus', batch.status || 'Списана');
     qs('#batchStockDialog').showModal();
 
     try {
@@ -1175,82 +1177,51 @@ async function loadEvents() {
     renderEvents();
 }
 
-function eventPeriod(days) {
-    const numericDays = Number(days);
-    if (numericDays < 0) return 'past';
-    if (numericDays === 0) return 'today';
-    return 'future';
+function eventPeriod(eventDate) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const date = new Date(`${eventDate}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return 'future';
+    if (date < today) return 'past';
+    if (date > today) return 'future';
+    return 'today';
 }
 
-function eventTypeLabel(days) {
-    const numericDays = Number(days);
-    return `${numericDays} ${numericDays === 1 ? 'день' : 'дней'}`;
-}
-
-function formatEventDate(value) {
-    return formatDateRu(value);
-}
-
-function eventGroupKey(event) {
-    return `${event.event_type}|${event.event_date}`;
-}
-
-function groupedEvents() {
-    const groups = new Map();
-    state.events
-        .filter((event) => state.eventPeriodFilters.has(eventPeriod(event.days_until_event)))
-        .forEach((event) => {
-            const key = eventGroupKey(event);
-            if (!groups.has(key)) {
-                groups.set(key, {
-                    key,
-                    eventType: Number(event.event_type),
-                    eventDate: event.event_date,
-                    daysUntilEvent: Number(event.days_until_event),
-                    batches: [],
-                });
-            }
-            groups.get(key).batches.push(event);
-        });
-
-    return [...groups.values()].sort((left, right) => {
-        if (left.daysUntilEvent !== right.daysUntilEvent) return left.daysUntilEvent - right.daysUntilEvent;
-        return left.eventType - right.eventType;
-    });
+function filteredEvents() {
+    return state.events.filter((event) => state.eventPeriodFilters.has(eventPeriod(event.event_date)));
 }
 
 function renderEvents() {
     const body = qs('#eventsBody');
     if (!body) return;
-    const groups = groupedEvents();
-    body.innerHTML = groups.map((group) => `
-        <tr data-event-group-key="${escapeHtml(group.key)}">
-            <td>${escapeHtml(eventTypeLabel(group.eventType))}</td>
-            <td>${escapeHtml(formatEventDate(group.eventDate))}</td>
-            <td>${group.batches.length}</td>
+    const events = filteredEvents();
+    body.innerHTML = events.map((event) => `
+        <tr data-event-id="${escapeHtml(event.id)}">
+            <td>${Number(event.event_type)} день</td>
+            <td>${escapeHtml(formatDateRu(event.event_date))}</td>
+            <td>${Number(event.batch_count || 0)}</td>
         </tr>
     `).join('') || '<tr><td colspan="3">Событий нет.</td></tr>';
-    qsa('[data-event-group-key]').forEach((row) => row.addEventListener('click', () => openEventGroupDetails(row.dataset.eventGroupKey)));
+    qsa('[data-event-id]').forEach((row) => row.addEventListener('click', () => openEventDetails(row.dataset.eventId)));
+}
+
+function openEventDetails(id) {
+    const event = state.events.find((item) => String(item.id) === String(id));
+    if (!event) return;
+    qs('#eventBatchesDialogTitle').textContent = `${Number(event.event_type)} день — ${formatDateRu(event.event_date)}`;
+    qs('#eventBatchesDialogMeta').textContent = `Партий в событии: ${Number(event.batch_count || 0)}`;
+    qs('#eventBatchesBody').innerHTML = (event.batches || []).map((batch) => `
+        <tr>
+            <td>${escapeHtml(batch.article || '')}</td>
+            <td>${escapeHtml(batch.code || '')}</td>
+            <td>${escapeHtml(batch.name || '')}</td>
+        </tr>
+    `).join('') || '<tr><td colspan="3">Партий нет.</td></tr>';
+    qs('#eventBatchesDialog').showModal();
 }
 
 function closeEventBatchesDialog() {
     qs('#eventBatchesDialog').close();
-}
-
-function openEventGroupDetails(groupKey) {
-    const group = groupedEvents().find((item) => item.key === groupKey);
-    if (!group) return;
-
-    qs('#eventBatchesDialogTitle').textContent = `Событие: ${eventTypeLabel(group.eventType)}`;
-    qs('#eventBatchesDialogMeta').textContent = `Дата события: ${formatEventDate(group.eventDate)}. Партий: ${group.batches.length}.`;
-    qs('#eventBatchesBody').innerHTML = group.batches.map((event) => `
-        <tr>
-            <td>${escapeHtml(event.article)}</td>
-            <td>${escapeHtml(event.code || '')}</td>
-            <td>${escapeHtml(event.name || '')}</td>
-        </tr>
-    `).join('') || '<tr><td colspan="3">Партий нет.</td></tr>';
-    qs('#eventBatchesDialog').showModal();
 }
 
 async function loadStockBatchNotifications() {
@@ -1301,26 +1272,32 @@ function renderStockBatchNotifications() {
     const markAllButton = qs('#markAllStockEventsReadButton');
     if (markAllButton) markAllButton.disabled = !hasUnreadChanges;
     body.innerHTML = state.stockBatchNotifications.map((notification) => `
-        <tr class="${[notification.unread ? 'unread-stock-notification' : '', notification.all_warehouses_reported ? 'complete-stock-notification' : ''].filter(Boolean).join(' ')}" data-stock-batch-id="${notification.id}">
-            <td>${escapeHtml(notification.article)}</td>
-            <td>${escapeHtml(notification.code || '')}</td>
-            <td>${escapeHtml(notification.name || '')}</td>
-            <td>${formatQuantity(notification.total_stock || 0)}</td>
-            <td>${Number(notification.filled_warehouse_count || 0)} из ${Number(notification.active_warehouse_count || 0)}</td>
+        <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification ' : ''}${stockEventHasUnreadChanges(notification) ? 'stock-event-unread' : ''}" data-stock-event-key="${escapeHtml(stockEventViewKey(notification))}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
+            <td>${notification.event_key === 'overdue_stock_check' ? 'Проверка наличия товара' : (String(notification.event_key || '').startsWith('recount_') ? 'Пересчет' : `${Number(notification.event_days || 0)} дней`)}</td>
+            <td>${escapeHtml(formatDateRu(notification.event_date))}</td>
+            <td>${escapeHtml(formatDateRu(notification.expiry_date))}</td>
+            <td>${Number(notification.batch_count || 0)}</td>
+            <td>${Number(notification.expected_count || 0) > 0 ? Math.round(Number(notification.filled_count || 0) / Number(notification.expected_count) * 100) : 0}%</td>
             <td>${escapeHtml(notification.status || '')}</td>
         </tr>
-    `).join('') || '<tr><td colspan="7">Остатков по партиям пока нет.</td></tr>';
-    qsa('[data-stock-batch-id]').forEach((row) => row.addEventListener('click', () => openBatchStockDialog(row.dataset.stockBatchId, { markViewed: true, showWriteOff: true })));
-}
-
-function writeOffSelectedStockBatch() {
-    const batch = state.batches.find((item) => String(item.id) === String(state.selectedStockBatchId));
-    if (!batch) {
-        showToast('Партия не найдена в реестре.', true);
-        return;
-    }
-    setValueIfPresent('#writeOffStockBatchStatus', batch.status || 'Списана');
-    qs('#writeOffStatusPanel').classList.remove('hidden');
+    `).join('') || '<tr><td colspan="6">Событий с остатками пока нет.</td></tr>';
+    qsa('[data-stock-event-url]').forEach((row) => {
+        const notification = state.stockBatchNotifications.find((item) => stockEventViewKey(item) === row.dataset.stockEventKey);
+        const openEvent = () => {
+            if (notification) markStockEventViewed(notification, row);
+            qs('#notificationsUnreadDot')?.classList.toggle('hidden', !state.stockBatchNotifications.some(stockEventHasUnreadChanges));
+            window.location.assign(row.dataset.stockEventUrl);
+        };
+        row.addEventListener('click', () => {
+            openEvent();
+        });
+        row.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openEvent();
+            }
+        });
+    });
 }
 
 async function saveSelectedStockBatchStatus() {
@@ -1334,7 +1311,7 @@ async function saveSelectedStockBatchStatus() {
         openWriteOffPasswordDialog();
         return;
     }
-    const status = qs('#writeOffStockBatchStatus').value;
+    const status = qs('#batchStockStatusSelect').value;
     if (!statusOptions.includes(status)) {
         showToast('Недопустимый статус партии.', true);
         return;
@@ -1459,17 +1436,6 @@ async function loadSettings() {
     renderStockNotifications();
 }
 
-
-function switchHelpTab(tabName) {
-    qsa('.help-subtab').forEach((button) => {
-        button.classList.toggle('active', button.dataset.helpTab === tabName);
-    });
-    qsa('[data-help-panel]').forEach((panel) => {
-        const isActive = panel.dataset.helpPanel === tabName;
-        panel.classList.toggle('active', isActive);
-        panel.hidden = !isActive;
-    });
-}
 
 function switchSettingsTab(tabName) {
     qsa('.settings-subtab').forEach((button) => {
@@ -2586,12 +2552,12 @@ function bindEvents() {
     qs('#cancelTestStockFillButton').addEventListener('click', closeTestStockFillDialog);
 
     qs('#closeNotificationDialogButton').addEventListener('click', closeNotificationDialog);
-    qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
-    qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
     qs('#closeBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
     qs('#confirmBatchStockDialogButton').addEventListener('click', closeBatchStockDialog);
-    qs('#writeOffStockBatchButton').addEventListener('click', writeOffSelectedStockBatch);
-    qs('#saveWriteOffStockBatchStatusButton').addEventListener('click', saveSelectedStockBatchStatus);
+    qs('#writeOffStockBatchButton').addEventListener('click', showBatchStockStatusControls);
+    qs('#cancelBatchStockStatusButton').addEventListener('click', () => resetBatchStockStatusControls());
+    qs('#saveBatchStockStatusButton').addEventListener('click', saveSelectedStockBatchStatus);
+    qs('#downloadBatchStockXlsxButton').addEventListener('click', downloadBatchStockXlsx);
     qs('#openWarehouseDialogButton').addEventListener('click', () => openWarehouseDialog());
     qs('#warehouseForm').addEventListener('submit', submitWarehouseForm);
     qs('#closeWarehouseDialogButton').addEventListener('click', closeWarehouseDialog);
@@ -2658,6 +2624,8 @@ function bindEvents() {
         state.eventPeriodFilters = new Set(qsa('.event-period-filter:checked').map((item) => item.value));
         renderEvents();
     }));
+    qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
+    qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
 
     qs('#filterSearch').addEventListener('input', renderRegistry);
     qs('#filterSearchColumn').addEventListener('change', renderRegistry);
