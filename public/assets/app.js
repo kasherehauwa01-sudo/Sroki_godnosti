@@ -693,15 +693,78 @@ function toggleRegistrySort(field) {
     renderRegistry();
 }
 
-async function sendSelectedBatchesToRecount() {
+async function openRecountWarehousesDialog() {
     if (state.selectedBatchIds.size === 0) {
         showToast('Отметьте хотя бы один товар для пересчета.', true);
         return;
     }
-    const button = qs('#sendRecountButton');
+
+    try {
+        // Список обновляется непосредственно перед показом окна, чтобы нельзя было
+        // выбрать отключенный или уже удаленный склад из устаревших данных страницы.
+        const result = await api('warehouses');
+        state.warehouses = result.warehouses || [];
+        const availableWarehouses = state.warehouses.filter((warehouse) => warehouse.is_active && String(warehouse.email || '').trim());
+        qs('#recountWarehousesList').innerHTML = availableWarehouses.map((warehouse) => `
+            <label class="checkbox-row">
+                <input class="recount-warehouse-checkbox" type="checkbox" value="${escapeHtml(warehouse.id)}">
+                ${escapeHtml(warehouse.name)}
+            </label>
+        `).join('') || '<p class="subtitle">Нет активных складов с указанным email.</p>';
+        qs('#selectAllRecountWarehouses').checked = false;
+        qs('#selectAllRecountWarehouses').indeterminate = false;
+        qs('#selectAllRecountWarehouses').disabled = availableWarehouses.length === 0;
+        // По умолчанию ни один склад не выбран, поэтому отправка недоступна
+        // до первого осознанного выбора пользователя.
+        qs('#confirmRecountWarehousesButton').disabled = true;
+        qs('#recountWarehousesError').textContent = '';
+        qsa('.recount-warehouse-checkbox').forEach((checkbox) => checkbox.addEventListener('change', updateRecountWarehouseSelection));
+        qs('#recountWarehousesDialog').showModal();
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+function updateRecountWarehouseSelection() {
+    const checkboxes = qsa('.recount-warehouse-checkbox');
+    const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+    const selectAll = qs('#selectAllRecountWarehouses');
+    selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+    selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+    qs('#confirmRecountWarehousesButton').disabled = selectedCount === 0;
+    qs('#recountWarehousesError').textContent = '';
+}
+
+function setAllRecountWarehouses(checked) {
+    qsa('.recount-warehouse-checkbox').forEach((checkbox) => {
+        checkbox.checked = checked;
+    });
+    updateRecountWarehouseSelection();
+}
+
+function closeRecountWarehousesDialog() {
+    qs('#recountWarehousesDialog').close();
+    qs('#recountWarehousesForm').reset();
+    qs('#recountWarehousesList').innerHTML = '';
+    qs('#recountWarehousesError').textContent = '';
+}
+
+async function sendSelectedBatchesToRecount(event) {
+    event.preventDefault();
+    const warehouseIds = qsa('.recount-warehouse-checkbox:checked').map((checkbox) => Number(checkbox.value));
+    if (warehouseIds.length === 0) {
+        qs('#recountWarehousesError').textContent = 'Отметьте хотя бы один склад.';
+        return;
+    }
+
+    const button = qs('#confirmRecountWarehousesButton');
     button.disabled = true;
     try {
-        const result = await api('registry_recount', { batch_ids: [...state.selectedBatchIds].map(Number) });
+        const result = await api('registry_recount', {
+            batch_ids: [...state.selectedBatchIds].map(Number),
+            warehouse_ids: warehouseIds,
+        });
+        closeRecountWarehousesDialog();
         showToast(result.message || 'Товары отправлены на пересчет.');
         state.selectedBatchIds.clear();
         renderRegistry();
@@ -709,7 +772,7 @@ async function sendSelectedBatchesToRecount() {
     } catch (error) {
         showToast(error.message, true);
     } finally {
-        button.disabled = false;
+        if (qs('#recountWarehousesDialog').open) button.disabled = false;
     }
 }
 
@@ -2509,7 +2572,12 @@ function bindEvents() {
     qs('#leaveSettingsButton').addEventListener('click', leaveSettingsWithoutSaving);
     qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
     qs('#bulkDeleteButton').addEventListener('click', deleteSelectedBatches);
-    qs('#sendRecountButton').addEventListener('click', sendSelectedBatchesToRecount);
+    qs('#sendRecountButton').addEventListener('click', openRecountWarehousesDialog);
+    qs('#recountWarehousesForm').addEventListener('submit', sendSelectedBatchesToRecount);
+    qs('#selectAllRecountWarehouses').addEventListener('change', (event) => setAllRecountWarehouses(event.target.checked));
+    qs('#clearRecountWarehousesButton').addEventListener('click', () => setAllRecountWarehouses(false));
+    qs('#cancelRecountWarehousesButton').addEventListener('click', closeRecountWarehousesDialog);
+    qs('#closeRecountWarehousesDialogButton').addEventListener('click', closeRecountWarehousesDialog);
     qs('#selectAllBatches').addEventListener('change', toggleSelectAllBatches);
     qs('#writeOffPasswordForm').addEventListener('submit', submitWriteOffPassword);
     qs('#cancelWriteOffPasswordButton').addEventListener('click', closeWriteOffPasswordDialog);

@@ -2054,8 +2054,21 @@ function loadRegistryRecountBatches(PDO $pdo, array $batchIds): array
 function sendRegistryRecountNotifications(PDO $pdo, array $payload): array
 {
     $batches = loadRegistryRecountBatches($pdo, (array)($payload['batch_ids'] ?? []));
-    $warehouses = getActiveWarehousesWithEmails($pdo);
-    if (!$warehouses) throw new InvalidArgumentException('Нет активных складов с email для отправки пересчета.');
+    $requestedWarehouseIds = array_values(array_unique(array_filter(
+        array_map('intval', (array)($payload['warehouse_ids'] ?? [])),
+        static fn (int $id): bool => $id > 0
+    )));
+    if (!$requestedWarehouseIds) throw new InvalidArgumentException('Отметьте хотя бы один склад для пересчета.');
+
+    $activeWarehouses = getActiveWarehousesWithEmails($pdo);
+    $requestedWarehouseMap = array_fill_keys($requestedWarehouseIds, true);
+    $warehouses = array_values(array_filter(
+        $activeWarehouses,
+        static fn (array $warehouse): bool => isset($requestedWarehouseMap[(int)$warehouse['id']])
+    ));
+    if (count($warehouses) !== count($requestedWarehouseIds)) {
+        throw new InvalidArgumentException('Один или несколько выбранных складов отключены, удалены или не имеют email. Обновите список складов и повторите отправку.');
+    }
     $eventKey = 'recount_' . (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->format('Ymd_His') . '_' . bin2hex(random_bytes(3));
     $expiryDate = max(array_map(static fn (array $batch): string => (string)$batch['expiry_date'], $batches));
     $batchIds = array_map(static fn (array $batch): int => (int)$batch['id'], $batches);

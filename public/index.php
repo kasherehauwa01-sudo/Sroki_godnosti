@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-15"></script>
+    <script defer src="assets/app.js?v=20260806-01"></script>
 </head>
 <body>
     <header class="topbar">
@@ -699,6 +699,24 @@ declare(strict_types=1);
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelWarehouseButton" type="button">Отмена</button>
                 <button class="primary" type="submit">Сохранить</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal" id="recountWarehousesDialog">
+        <form class="card form modal-card" id="recountWarehousesForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Выберите склады для пересчета</h2>
+                <button class="icon-button" id="closeRecountWarehousesDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Персональные формы будут созданы и отправлены только отмеченным складам.</p>
+            <label class="checkbox-row recount-select-all-row"><input id="selectAllRecountWarehouses" type="checkbox"> Выбрать все</label>
+            <div class="recount-warehouse-list" id="recountWarehousesList"></div>
+            <p class="field-error" id="recountWarehousesError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="clearRecountWarehousesButton" type="button">Снять все</button>
+                <button class="ghost-button" id="cancelRecountWarehousesButton" type="button">Отмена</button>
+                <button class="primary" id="confirmRecountWarehousesButton" type="submit">Отправить на пересчет</button>
             </div>
         </form>
     </dialog>
