@@ -455,6 +455,29 @@ function ensurePurchaseNotificationSchema(PDO $pdo): void
         $pdo->exec("ALTER TABLE stock_auto_zero_entries ADD COLUMN source VARCHAR(64) NOT NULL DEFAULT 'catalog_missing_legacy' AFTER warehouse_id");
     }
 
+    // batch_stock хранит только последнее значение пары партия+склад и не может
+    // доказать, что оно было введено именно в рамках текущего события.
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS purchase_event_stock_entries (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            event_key VARCHAR(128) NOT NULL,
+            event_date DATE NOT NULL,
+            batch_id BIGINT UNSIGNED NOT NULL,
+            warehouse_id BIGINT UNSIGNED NOT NULL,
+            quantity DECIMAL(14,3) NOT NULL,
+            source VARCHAR(32) NOT NULL DEFAULT 'user',
+            notification_id BIGINT UNSIGNED NULL,
+            filled_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uniq_purchase_event_stock (event_key, event_date, batch_id, warehouse_id),
+            INDEX idx_purchase_event_stock_event (event_key, event_date),
+            INDEX idx_purchase_event_stock_notification (notification_id),
+            CONSTRAINT fk_purchase_event_stock_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE,
+            CONSTRAINT fk_purchase_event_stock_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT,
+            CONSTRAINT fk_purchase_event_stock_notification FOREIGN KEY (notification_id) REFERENCES stock_notifications(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS stock_notification_reminder_log (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -2228,47 +2251,215 @@ function purchaseEventMissingWarehouseNames(array $event): array
 }
 
 
-function updateUnavailableStatusForZeroStockBatches(PDO $pdo, array $batchIds): void
+function recordPurchaseEventStockEntry(
+    PDO $pdo,
+    string $eventKey,
+    string $eventDate,
+    int $batchId,
+    int $warehouseId,
+    float $quantity,
+    string $source,
+    ?int $notificationId = null
+): void {
+    if ($eventKey === '' || !preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $eventDate) || $batchId <= 0 || $warehouseId <= 0) {
+        throw new InvalidArgumentException('Недостаточно данных для привязки остатка к событию.');
+    }
+    $statement = $pdo->prepare(
+        "INSERT INTO purchase_event_stock_entries
+            (event_key, event_date, batch_id, warehouse_id, quantity, source, notification_id, filled_at)
+         VALUES (:event_key, :event_date, :batch_id, :warehouse_id, :quantity, :source, :notification_id, NOW())
+         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), source = VALUES(source),
+             notification_id = VALUES(notification_id), filled_at = NOW()"
+    );
+    $statement->execute([
+        ':event_key' => $eventKey,
+        ':event_date' => $eventDate,
+        ':batch_id' => $batchId,
+        ':warehouse_id' => $warehouseId,
+        ':quantity' => $quantity,
+        ':source' => $source,
+        ':notification_id' => $notificationId,
+    ]);
+}
+
+function purchaseEventWarehouseIds(PDO $pdo, string $eventKey, string $eventDate): array
 {
+    $statement = $pdo->prepare(
+        'SELECT DISTINCT w.id
+         FROM warehouses w
+         WHERE w.is_active = 1 AND (
+             EXISTS (SELECT 1 FROM stock_notifications n WHERE n.warehouse_id = w.id AND n.event_key = :notification_event_key AND DATE(n.sent_at) = :notification_event_date)
+             OR EXISTS (SELECT 1 FROM stock_auto_zero_entries z WHERE z.warehouse_id = w.id AND z.event_key = :auto_event_key AND z.event_date = :auto_event_date AND z.source = :auto_source)
+         )
+         ORDER BY w.id'
+    );
+    $statement->execute([
+        ':notification_event_key' => $eventKey,
+        ':notification_event_date' => $eventDate,
+        ':auto_event_key' => $eventKey,
+        ':auto_event_date' => $eventDate,
+        ':auto_source' => 'catalog_explicit_zero',
+    ]);
+    return array_map('intval', $statement->fetchAll(PDO::FETCH_COLUMN));
+}
+
+/** Чистая проверка полноты данных используется и основной логикой, и тестами. */
+function evaluatePurchaseEventBatchStockCompletion(array $warehouses): array
+{
+    $filled = array_values(array_filter($warehouses, static fn (array $row): bool => !empty($row['filled'])));
+    $unfilled = array_values(array_filter($warehouses, static fn (array $row): bool => empty($row['filled'])));
+    $totalStock = array_sum(array_map(static fn (array $row): float => (float)($row['quantity'] ?? 0), $filled));
+    return [
+        'expected_warehouse_count' => count($warehouses),
+        'filled_warehouse_count' => count($filled),
+        'unfilled_warehouse_count' => count($unfilled),
+        'total_stock' => $totalStock,
+        'complete' => count($warehouses) > 0 && !$unfilled,
+        'should_mark_unavailable' => count($warehouses) > 0 && !$unfilled && $totalStock === 0.0,
+        'unfilled_warehouses' => array_map(static fn (array $row): string => (string)$row['warehouse_name'], $unfilled),
+    ];
+}
+
+function updateUnavailableStatusForZeroStockBatches(
+    PDO $pdo,
+    array $batchIds,
+    string $eventKey,
+    string $eventDate,
+    array $warehouseIds
+): void {
     $batchIds = array_values(array_unique(array_filter(array_map('intval', $batchIds), static fn (int $id): bool => $id > 0)));
-    if (!$batchIds) {
-        return;
+    $warehouseIds = array_values(array_unique(array_filter(array_map('intval', $warehouseIds), static fn (int $id): bool => $id > 0)));
+    if (!$batchIds || !$warehouseIds || $eventKey === '' || !preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $eventDate)) return;
+
+    $batchMarks = implode(',', array_fill(0, count($batchIds), '?'));
+    $warehouseMarks = implode(',', array_fill(0, count($warehouseIds), '?'));
+    $batchStatement = $pdo->prepare("SELECT id, article, code, name, expiry_date, expiry_full_date, expiry_invalid, expiry_raw, status FROM batches WHERE id IN ($batchMarks)");
+    $batchStatement->execute($batchIds);
+    $batches = [];
+    foreach ($batchStatement->fetchAll() as $batch) $batches[(int)$batch['id']] = $batch;
+
+    // Обязательными являются только пары партия+склад, реально включенные в форму
+    // текущего события, либо имеющие точный автоноль catalogvr этого события.
+    $expectedStatement = $pdo->prepare(
+        "SELECT i.batch_id, n.warehouse_id, n.id AS notification_id, n.status AS notification_status
+         FROM stock_notifications n
+         INNER JOIN stock_notification_items i ON i.notification_id = n.id
+         WHERE n.event_key = ? AND DATE(n.sent_at) = ?
+           AND i.batch_id IN ($batchMarks) AND n.warehouse_id IN ($warehouseMarks)
+         ORDER BY n.id DESC"
+    );
+    $expectedStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+    $expected = [];
+    $notificationStatuses = [];
+    foreach ($expectedStatement->fetchAll() as $row) {
+        $batchId = (int)$row['batch_id'];
+        $warehouseId = (int)$row['warehouse_id'];
+        $notificationStatuses[(int)$row['notification_id']] = (string)$row['notification_status'];
+        if (!isset($expected[$batchId][$warehouseId])) $expected[$batchId][$warehouseId] = $row;
     }
 
-    $placeholders = implode(',', array_fill(0, count($batchIds), '?'));
-    $statement = $pdo->prepare(
-        "SELECT b.id, b.article, b.code, b.name, b.expiry_date, b.expiry_full_date, b.expiry_invalid, b.expiry_raw, b.status,
-                COUNT(w.id) AS active_warehouse_count,
-                COUNT(bs.id) AS filled_warehouse_count,
-                COALESCE(SUM(CASE WHEN bs.id IS NULL THEN 0 ELSE bs.quantity END), 0) AS total_stock
-         FROM batches b
-         LEFT JOIN warehouses w ON w.is_active = 1
-         LEFT JOIN batch_stock bs ON bs.batch_id = b.id AND bs.warehouse_id = w.id
-         WHERE b.id IN ($placeholders)
-         GROUP BY b.id, b.article, b.code, b.name, b.expiry_date, b.expiry_full_date, b.expiry_invalid, b.expiry_raw, b.status"
+    $autoStatement = $pdo->prepare(
+        "SELECT batch_id, warehouse_id, created_at
+         FROM stock_auto_zero_entries
+         WHERE event_key = ? AND event_date = ? AND source = 'catalog_explicit_zero'
+           AND batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)"
     );
-    $statement->execute($batchIds);
+    $autoStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+    $autoZeros = [];
+    foreach ($autoStatement->fetchAll() as $row) {
+        $batchId = (int)$row['batch_id'];
+        $warehouseId = (int)$row['warehouse_id'];
+        $autoZeros[$batchId][$warehouseId] = $row;
+        $expected[$batchId][$warehouseId] ??= ['notification_id' => null, 'notification_status' => null];
+    }
+
+    $entryStatement = $pdo->prepare(
+        "SELECT batch_id, warehouse_id, quantity, source, notification_id, filled_at
+         FROM purchase_event_stock_entries
+         WHERE event_key = ? AND event_date = ?
+           AND batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)"
+    );
+    $entryStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+    $entries = [];
+    foreach ($entryStatement->fetchAll() as $row) $entries[(int)$row['batch_id']][(int)$row['warehouse_id']] = $row;
+
+    // Безопасно учитываем уже существующие подтверждения, сделанные до появления
+    // purchase_event_stock_entries. Журнал связан с notification_id, а через него
+    // — с точными event_key/event_date; общий batch_stock здесь не используется.
+    $legacyEntryStatement = $pdo->prepare(
+        "SELECT l.batch_id, l.warehouse_id, l.new_quantity AS quantity,
+                'warehouse_form' AS source, l.notification_id, l.created_at AS filled_at
+         FROM stock_change_logs l
+         INNER JOIN stock_notifications n ON n.id = l.notification_id
+         WHERE n.event_key = ? AND DATE(n.sent_at) = ?
+           AND l.batch_id IN ($batchMarks) AND l.warehouse_id IN ($warehouseMarks)
+         ORDER BY l.created_at DESC, l.id DESC"
+    );
+    $legacyEntryStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+    foreach ($legacyEntryStatement->fetchAll() as $row) {
+        $batchId = (int)$row['batch_id'];
+        $warehouseId = (int)$row['warehouse_id'];
+        $entries[$batchId][$warehouseId] ??= $row;
+    }
+
+    $warehouseStatement = $pdo->prepare("SELECT id, name FROM warehouses WHERE id IN ($warehouseMarks)");
+    $warehouseStatement->execute($warehouseIds);
+    $warehouseNames = [];
+    foreach ($warehouseStatement->fetchAll() as $warehouse) $warehouseNames[(int)$warehouse['id']] = (string)$warehouse['name'];
 
     $update = $pdo->prepare('UPDATE batches SET status = :status, updated_at = NOW() WHERE id = :id');
-    foreach ($statement->fetchAll() as $batch) {
-        $activeWarehouseCount = (int)$batch['active_warehouse_count'];
-        if ($activeWarehouseCount === 0
-            || (int)$batch['filled_warehouse_count'] !== $activeWarehouseCount
-            || (float)$batch['total_stock'] !== 0.0
-            || (string)$batch['status'] === UNAVAILABLE_STATUS
-            || (string)$batch['status'] === TRANSFERRED_TO_SECURITY_STATUS) {
+    foreach ($batches as $batchId => $batch) {
+        // Автоматика никогда не меняет терминальные статусы и не возвращает их назад.
+        if ((string)$batch['status'] !== ACTIVE_STATUS) continue;
+        $warehouseDetails = [];
+        foreach ($expected[$batchId] ?? [] as $warehouseId => $notification) {
+            $entry = $entries[$batchId][$warehouseId] ?? null;
+            $autoZero = $autoZeros[$batchId][$warehouseId] ?? null;
+            $notificationId = $entry['notification_id'] ?? $notification['notification_id'] ?? null;
+            $warehouseDetails[] = [
+                'warehouse_id' => $warehouseId,
+                'warehouse_name' => $warehouseNames[$warehouseId] ?? ('#' . $warehouseId),
+                'filled' => $entry !== null || $autoZero !== null,
+                'quantity' => $entry !== null ? (float)$entry['quantity'] : ($autoZero !== null ? 0.0 : null),
+                'source' => $entry !== null ? 'user' : ($autoZero !== null ? 'catalogvr_auto_zero' : null),
+                'notification_id' => $notificationId,
+                'notification_status' => $notificationId !== null
+                    ? ($notificationStatuses[(int)$notificationId] ?? $notification['notification_status'] ?? null)
+                    : null,
+                'filled_at' => $entry['filled_at'] ?? $autoZero['created_at'] ?? null,
+            ];
+        }
+
+        $evaluation = evaluatePurchaseEventBatchStockCompletion($warehouseDetails);
+        $logPayload = [
+            'source' => $evaluation['should_mark_unavailable'] ? 'zero_stock_auto_status' : 'zero_stock_auto_status_skipped',
+            'event_key' => $eventKey,
+            'event_date' => $eventDate,
+            'batch_id' => $batchId,
+            'article' => (string)$batch['article'],
+            'expected_warehouse_count' => $evaluation['expected_warehouse_count'],
+            'filled_warehouse_count' => $evaluation['filled_warehouse_count'],
+            'unfilled_warehouse_count' => $evaluation['unfilled_warehouse_count'],
+            'total_stock' => $evaluation['total_stock'],
+            'warehouses' => $warehouseDetails,
+            'unfilled_warehouses' => $evaluation['unfilled_warehouses'],
+        ];
+        if (!$evaluation['should_mark_unavailable']) {
+            $logPayload['reason'] = !$evaluation['complete']
+                ? 'Есть незаполненные склады текущего события'
+                : 'Сумма остатков текущего события больше 0';
+            writeLog($pdo, 'zero_stock_auto_status_skipped', $logPayload);
             continue;
         }
 
-        $before = historyBatchInfo($batch, (int)$batch['id']);
-        $update->execute([':status' => UNAVAILABLE_STATUS, ':id' => (int)$batch['id']]);
+        $before = historyBatchInfo($batch, $batchId);
+        $update->execute([':status' => UNAVAILABLE_STATUS, ':id' => $batchId]);
         $after = $before;
         $after['status'] = UNAVAILABLE_STATUS;
-        writeLog($pdo, 'update', [
+        writeLog($pdo, 'update', $logPayload + [
             'before' => $before,
             'after' => $after,
-            'source' => 'zero_stock_auto_status',
-            'reason' => 'Все активные склады заполнили остатки, сумма остатков равна 0',
+            'reason' => 'Все обязательные склады текущего события заполнили остатки, сумма остатков равна 0',
         ]);
     }
 }
@@ -2933,6 +3124,7 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
         );
         $delete = $pdo->prepare('DELETE FROM batch_stock WHERE batch_id = :batch_id AND warehouse_id = :warehouse_id');
         $deleteAutoZero = $pdo->prepare('DELETE FROM stock_auto_zero_entries WHERE event_key = :event_key AND event_date = :event_date AND batch_id = :batch_id AND warehouse_id = :warehouse_id');
+        $deleteEventStock = $pdo->prepare('DELETE FROM purchase_event_stock_entries WHERE event_key = :event_key AND event_date = :event_date AND batch_id = :batch_id AND warehouse_id = :warehouse_id');
         foreach ($stocks as $batchId => $warehouseValues) {
             $batchId = (int)$batchId;
             if (!in_array($batchId, $batchIds, true)) {
@@ -2947,6 +3139,7 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
                 if ($quantityText === '') {
                     $delete->execute([':batch_id' => $batchId, ':warehouse_id' => $warehouseId]);
                     $deleteAutoZero->execute([':event_key' => (string)$eventInfo['event_key'], ':event_date' => (string)$eventInfo['event_date'], ':batch_id' => $batchId, ':warehouse_id' => $warehouseId]);
+                    $deleteEventStock->execute([':event_key' => (string)$eventInfo['event_key'], ':event_date' => (string)$eventInfo['event_date'], ':batch_id' => $batchId, ':warehouse_id' => $warehouseId]);
                     continue;
                 }
                 if (!ctype_digit($quantityText)) {
@@ -2954,6 +3147,7 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
                 }
                 $upsert->execute([':batch_id' => $batchId, ':warehouse_id' => $warehouseId, ':quantity' => (int)$quantityText]);
                 $deleteAutoZero->execute([':event_key' => (string)$eventInfo['event_key'], ':event_date' => (string)$eventInfo['event_date'], ':batch_id' => $batchId, ':warehouse_id' => $warehouseId]);
+                recordPurchaseEventStockEntry($pdo, (string)$eventInfo['event_key'], (string)$eventInfo['event_date'], $batchId, $warehouseId, (float)(int)$quantityText, 'summary');
             }
         }
         $pdo->commit();
@@ -2964,7 +3158,13 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
         throw $error;
     }
 
-    updateUnavailableStatusForZeroStockBatches($pdo, $batchIds);
+    updateUnavailableStatusForZeroStockBatches(
+        $pdo,
+        $batchIds,
+        (string)$eventInfo['event_key'],
+        (string)$eventInfo['event_date'],
+        $warehouseIds
+    );
     writeLog($pdo, 'purchase_event_stocks_update', [
         'event_key' => (string)$eventInfo['event_key'],
         'event_date' => (string)$eventInfo['event_date'],
