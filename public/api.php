@@ -1441,6 +1441,7 @@ function runCatalogSyncTest(PDO $pdo, array $payload): array
         $rows[] = [
             'article' => vrCatalogProductArticle($product) ?: $article,
             'manager' => $manager['exists'] ? (string)$manager['value'] : '',
+            'section' => vrCatalogProductSection($product),
             'found' => vrCatalogProductFound($product),
             'stocks' => $stocks,
             'detected_stock_rows' => count($detectedStocks),
@@ -1448,7 +1449,7 @@ function runCatalogSyncTest(PDO $pdo, array $payload): array
         ];
     }
     if (!$rows) {
-        $rows[] = ['article' => $article, 'manager' => '', 'found' => false, 'stocks' => array_fill_keys(array_map(static fn (array $warehouse): string => (string)$warehouse['id'], $warehouses), 0)];
+        $rows[] = ['article' => $article, 'manager' => '', 'section' => '', 'found' => false, 'stocks' => array_fill_keys(array_map(static fn (array $warehouse): string => (string)$warehouse['id'], $warehouses), 0)];
     }
     return ['ok' => true, 'warehouses' => array_map(static fn (array $warehouse): array => ['id' => (int)$warehouse['id'], 'name' => (string)$warehouse['name']], $warehouses), 'rows' => $rows, 'diagnostics' => $response['diagnostics'], 'message' => explainCatalogDiagnostics($response['diagnostics'])];
 }

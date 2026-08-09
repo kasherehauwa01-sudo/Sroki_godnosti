@@ -1901,15 +1901,16 @@ function renderCatalogSyncResult(result) {
     const detectedRows = (result.rows || []).reduce((sum, row) => sum + Number(row.detected_stock_rows || 0), 0);
     const detectedNames = [...new Set((result.rows || []).flatMap((row) => row.detected_stock_names || []))];
     qs('#catalogSyncResultInfo').textContent = `${result.message || 'Тест выполнен.'} Найдено строк остатков в ответе API: ${detectedRows}.${detectedNames.length ? ` Склады из ответа: ${detectedNames.join(', ')}.` : ' Если в catalogvr UI остатки есть, а здесь 0 строк — внутренний API catalogvr не отдаёт блок остатков.'}`;
-    qs('#catalogSyncResultHead').innerHTML = ['Артикул', 'Менеджер', ...warehouses.map((warehouse) => warehouse.name)]
+    qs('#catalogSyncResultHead').innerHTML = ['Артикул', 'Менеджер', 'Раздел', ...warehouses.map((warehouse) => warehouse.name)]
         .map((title) => `<th>${escapeHtml(title)}</th>`).join('');
     qs('#catalogSyncResultBody').innerHTML = (result.rows || []).map((row) => `
         <tr>
             <td>${escapeHtml(row.article || '')}${row.found === false ? '<br><small>не найден</small>' : ''}</td>
             <td>${escapeHtml(row.manager || '—')}</td>
+            <td>${escapeHtml(row.section || '—')}</td>
             ${warehouses.map((warehouse) => `<td class="numeric-cell">${formatQuantity(row.stocks?.[warehouse.id] || 0)}</td>`).join('')}
         </tr>
-    `).join('') || `<tr><td colspan="${2 + warehouses.length}">catalogvr не вернул строки по артикулу.</td></tr>`;
+    `).join('') || `<tr><td colspan="${3 + warehouses.length}">catalogvr не вернул строки по артикулу.</td></tr>`;
     qs('#catalogSyncResultDialog').showModal();
 }
 
