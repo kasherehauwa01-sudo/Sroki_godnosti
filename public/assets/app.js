@@ -35,6 +35,7 @@ const state = {
     eventPeriodFilters: new Set(['today', 'future']),
     emailNotificationLogs: [],
     selectedEmailNotificationLogId: null,
+    catalogSyncStatus: null,
     editingPurchaseRecipientId: null,
 };
 
@@ -120,8 +121,8 @@ async function copyDeployCommand() {
 }
 
 function getApiMethod(action, data = {}) {
-    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients', 'email_notification_logs']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry']);
+    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients', 'email_notification_logs', 'catalog_health']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'run_notifications_now', 'catalog_sync_test']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -536,14 +537,17 @@ function updateSelectionControls() {
     const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
     const selectAll = qs('#selectAllBatches');
 
-    qs('#selectionHeader').classList.toggle('hidden', !state.writeOffAccessGranted);
+    const selectionVisible = state.writeOffAccessGranted;
+    qs('#selectionHeader').classList.toggle('hidden', !selectionVisible);
     qs('#bulkDeleteButton').classList.toggle('hidden', !state.writeOffAccessGranted || state.selectedBatchIds.size === 0);
     qs('#bulkDeleteButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
+    qs('#sendRecountButton')?.classList.toggle('hidden', !state.writeOffAccessGranted);
+    qs('#sendRecountButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
 
     if (selectAll) {
         selectAll.checked = allVisibleSelected;
         selectAll.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
-        selectAll.disabled = !state.writeOffAccessGranted || visibleIds.length === 0;
+        selectAll.disabled = !selectionVisible || visibleIds.length === 0;
     }
 }
 
@@ -581,7 +585,8 @@ function renderRegistry() {
     qs('#registryBody').innerHTML = state.filteredBatches.map((batch) => {
         const days = batch.expiryInvalid ? null : (batch.daysLeft ?? daysLeft(batch.expiryDate));
         const options = statusOptions.map((option) => `<option ${option === batch.status ? 'selected' : ''}>${option}</option>`).join('');
-        const selectionCell = state.writeOffAccessGranted
+        const selectionVisible = state.writeOffAccessGranted;
+        const selectionCell = selectionVisible
             ? `<td class="selection-column"><input class="batch-select-checkbox" data-id="${escapeHtml(batch.id)}" type="checkbox" ${state.selectedBatchIds.has(String(batch.id)) ? 'checked' : ''}></td>`
             : '';
         const invalidDateActions = batch.expiryInvalid
@@ -687,6 +692,89 @@ function toggleRegistrySort(field) {
     renderRegistry();
 }
 
+async function openRecountWarehousesDialog() {
+    if (state.selectedBatchIds.size === 0) {
+        showToast('Отметьте хотя бы один товар для пересчета.', true);
+        return;
+    }
+
+    try {
+        // Список обновляется непосредственно перед показом окна, чтобы нельзя было
+        // выбрать отключенный или уже удаленный склад из устаревших данных страницы.
+        const result = await api('warehouses');
+        state.warehouses = result.warehouses || [];
+        const availableWarehouses = state.warehouses.filter((warehouse) => warehouse.is_active && String(warehouse.email || '').trim());
+        qs('#recountWarehousesList').innerHTML = availableWarehouses.map((warehouse) => `
+            <label class="checkbox-row">
+                <input class="recount-warehouse-checkbox" type="checkbox" value="${escapeHtml(warehouse.id)}">
+                ${escapeHtml(warehouse.name)}
+            </label>
+        `).join('') || '<p class="subtitle">Нет активных складов с указанным email.</p>';
+        qs('#selectAllRecountWarehouses').checked = false;
+        qs('#selectAllRecountWarehouses').indeterminate = false;
+        qs('#selectAllRecountWarehouses').disabled = availableWarehouses.length === 0;
+        // По умолчанию ни один склад не выбран, поэтому отправка недоступна
+        // до первого осознанного выбора пользователя.
+        qs('#confirmRecountWarehousesButton').disabled = true;
+        qs('#recountWarehousesError').textContent = '';
+        qsa('.recount-warehouse-checkbox').forEach((checkbox) => checkbox.addEventListener('change', updateRecountWarehouseSelection));
+        qs('#recountWarehousesDialog').showModal();
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+function updateRecountWarehouseSelection() {
+    const checkboxes = qsa('.recount-warehouse-checkbox');
+    const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+    const selectAll = qs('#selectAllRecountWarehouses');
+    selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+    selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+    qs('#confirmRecountWarehousesButton').disabled = selectedCount === 0;
+    qs('#recountWarehousesError').textContent = '';
+}
+
+function setAllRecountWarehouses(checked) {
+    qsa('.recount-warehouse-checkbox').forEach((checkbox) => {
+        checkbox.checked = checked;
+    });
+    updateRecountWarehouseSelection();
+}
+
+function closeRecountWarehousesDialog() {
+    qs('#recountWarehousesDialog').close();
+    qs('#recountWarehousesForm').reset();
+    qs('#recountWarehousesList').innerHTML = '';
+    qs('#recountWarehousesError').textContent = '';
+}
+
+async function sendSelectedBatchesToRecount(event) {
+    event.preventDefault();
+    const warehouseIds = qsa('.recount-warehouse-checkbox:checked').map((checkbox) => Number(checkbox.value));
+    if (warehouseIds.length === 0) {
+        qs('#recountWarehousesError').textContent = 'Отметьте хотя бы один склад.';
+        return;
+    }
+
+    const button = qs('#confirmRecountWarehousesButton');
+    button.disabled = true;
+    try {
+        const result = await api('registry_recount', {
+            batch_ids: [...state.selectedBatchIds].map(Number),
+            warehouse_ids: warehouseIds,
+        });
+        closeRecountWarehousesDialog();
+        showToast(result.message || 'Товары отправлены на пересчет.');
+        state.selectedBatchIds.clear();
+        renderRegistry();
+        await loadStockBatchNotifications();
+    } catch (error) {
+        showToast(error.message, true);
+    } finally {
+        if (qs('#recountWarehousesDialog').open) button.disabled = false;
+    }
+}
+
 async function onStatusChange(event) {
     const id = event.target.dataset.id;
     const status = event.target.value;
@@ -756,7 +844,7 @@ function showBatchStockStatusControls() {
         return;
     }
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         openWriteOffPasswordDialog();
         return;
     }
@@ -913,7 +1001,7 @@ async function deleteBatch(id) {
     const batch = state.batches.find((item) => item.id === id);
     if (!batch) return;
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         return;
     }
     if (!confirm('Уверены, что хотите удалить партию безвозвратно?')) return;
@@ -931,7 +1019,7 @@ async function deleteSelectedBatches() {
     const ids = [...state.selectedBatchIds];
     if (!ids.length) return;
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         return;
     }
     if (!confirm(`Удалить выбранные партии (${ids.length}) безвозвратно?`)) return;
@@ -1175,6 +1263,38 @@ function markAllStockEventsViewed() {
     renderStockBatchNotifications();
 }
 
+function stockNotificationEventType(notification) {
+    const eventKey = String(notification.event_key || '');
+    if (eventKey === 'overdue_stock_check') return 'overdue';
+    if (eventKey.startsWith('recount_')) return 'recount';
+    return 'expiry';
+}
+
+function stockNotificationEventLabel(notification) {
+    const serverLabel = String(notification.event_label || '').trim();
+    if (serverLabel !== '') return serverLabel;
+    const eventType = stockNotificationEventType(notification);
+    if (eventType === 'overdue') return 'Проверка наличия товара';
+    if (eventType === 'recount') return 'Пересчет';
+    return `${Number(notification.event_days || 0)} дней`;
+}
+
+function updateNotificationEventTypeFilters() {
+    renderStockBatchNotifications();
+}
+
+function selectedNotificationEventTypes() {
+    const filters = qsa('.notification-type-filter');
+    // Защита от рассинхронизации кеша HTML и JS: если новая панель фильтров
+    // еще не загрузилась, показываем все уведомления, а не пустую таблицу.
+    if (filters.length === 0) return new Set(['expiry', 'overdue', 'recount']);
+    return new Set(filters.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value));
+}
+
+function allNotificationEventTypesSelected(selectedEventTypes) {
+    return ['expiry', 'overdue', 'recount'].every((eventType) => selectedEventTypes.has(eventType));
+}
+
 function renderStockBatchNotifications() {
     const body = qs('#stockBatchNotificationsBody');
     if (!body) return;
@@ -1182,16 +1302,24 @@ function renderStockBatchNotifications() {
     qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnreadChanges);
     const markAllButton = qs('#markAllStockEventsReadButton');
     if (markAllButton) markAllButton.disabled = !hasUnreadChanges;
-    body.innerHTML = state.stockBatchNotifications.map((notification) => `
+    const selectedEventTypes = selectedNotificationEventTypes();
+    // Когда включены все теги, возвращаем исходный список без классификации.
+    // Это гарантирует отображение всех событий, включая старые/нестандартные ключи.
+    const filteredNotifications = allNotificationEventTypesSelected(selectedEventTypes)
+        ? state.stockBatchNotifications
+        : state.stockBatchNotifications.filter((notification) =>
+            selectedEventTypes.has(stockNotificationEventType(notification))
+        );
+    body.innerHTML = filteredNotifications.map((notification) => `
         <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification ' : ''}${stockEventHasUnreadChanges(notification) ? 'stock-event-unread' : ''}" data-stock-event-key="${escapeHtml(stockEventViewKey(notification))}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
-            <td>${notification.event_key === 'overdue_stock_check' ? 'Проверка наличия товара' : `${Number(notification.event_days || 0)} дней`}</td>
+            <td>${escapeHtml(stockNotificationEventLabel(notification))}</td>
             <td>${escapeHtml(formatDateRu(notification.event_date))}</td>
             <td>${escapeHtml(formatDateRu(notification.expiry_date))}</td>
             <td>${Number(notification.batch_count || 0)}</td>
             <td>${Number(notification.expected_count || 0) > 0 ? Math.round(Number(notification.filled_count || 0) / Number(notification.expected_count) * 100) : 0}%</td>
             <td>${escapeHtml(notification.status || '')}</td>
         </tr>
-    `).join('') || '<tr><td colspan="6">Событий с остатками пока нет.</td></tr>';
+    `).join('') || `<tr><td colspan="6">${state.stockBatchNotifications.length > 0 ? 'Нет событий выбранных типов.' : 'Событий с остатками пока нет.'}</td></tr>`;
     qsa('[data-stock-event-url]').forEach((row) => {
         const notification = state.stockBatchNotifications.find((item) => stockEventViewKey(item) === row.dataset.stockEventKey);
         const openEvent = () => {
@@ -1218,7 +1346,7 @@ async function saveSelectedStockBatchStatus() {
         return;
     }
     if (!state.writeOffAccessGranted) {
-        showToast('Сначала нажмите «Изменить статус / Удалить» и введите пароль.', true);
+        showToast('Сначала нажмите «Режим супервайзера» и введите пароль.', true);
         openWriteOffPasswordDialog();
         return;
     }
@@ -1243,7 +1371,7 @@ async function loadStockNotifications() {
     renderStockNotifications();
 }
 
-function stockNotificationEventType(notification) {
+function stockNotificationGroupEventLabel(notification) {
     const match = String(notification.event_key || '').match(/expiry_(\d+)/);
     if (match) return `${match[1]} день`;
     return notification.subject || 'Событие не указано';
@@ -1266,7 +1394,7 @@ function groupedStockNotifications() {
             groups.set(key, {
                 key,
                 sentAt: stockNotificationSentAt(notification),
-                eventType: stockNotificationEventType(notification),
+                eventType: stockNotificationGroupEventLabel(notification),
                 notifications: [],
             });
         }
@@ -1332,14 +1460,16 @@ async function openStockNotificationDetails(id) {
 }
 
 async function loadSettings() {
-    const [settingsResult, warehousesResult, stockNotificationsResult] = await Promise.all([
+    const [settingsResult, warehousesResult, stockNotificationsResult, catalogHealthResult] = await Promise.all([
         api('settings', { settings_password: state.settingsPassword }),
         api('warehouses'),
         api('stock_notifications'),
+        api('catalog_health'),
     ]);
     state.settings = settingsResult.settings || { emails: [], rules: [] };
     state.warehouses = warehousesResult.warehouses || [];
     state.stockNotifications = stockNotificationsResult.notifications || [];
+    state.catalogSyncStatus = catalogHealthResult || null;
     renderSettings();
     renderWarehouses();
     renderStockNotifications();
@@ -1414,7 +1544,7 @@ async function leaveSettingsWithoutSaving() {
 
 function openWriteOffPasswordDialog() {
     if (state.writeOffAccessGranted) {
-        showToast('Изменение статусов уже разрешено.');
+        showToast('Режим супервайзера уже включен.');
         return;
     }
 
@@ -1439,7 +1569,7 @@ async function submitWriteOffPassword(event) {
         state.writeOffAccessGranted = true;
         closeWriteOffPasswordDialog();
         renderRegistry();
-        showToast('Теперь можно выделять, изменять статусы и удалять партии в реестре.');
+        showToast('Режим супервайзера включен: можно выделять, менять статусы, удалять партии и отправлять товары на пересчет.');
     } catch (verifyError) {
         state.writeOffPassword = '';
         error.textContent = verifyError.message;
@@ -1582,11 +1712,30 @@ function formatHistoryDetails(action, payload) {
     }
 
     if (action === 'expiry_notifications_sent') {
-        return `Уведомления отправлены. Получатели: ${(parsed.recipients || []).join(', ') || 'не указаны'}. Партий: ${Number(parsed.count || parsed.batches?.length || 0)}.`;
+        const events = Array.isArray(parsed.events) ? parsed.events : [];
+        if (events.length > 0) {
+            const sentEvents = events.filter((event) => event.notification_id);
+            const recipients = [...new Set(sentEvents.map((event) => event.warehouse).filter(Boolean))];
+            const batchCount = sentEvents.reduce((sum, event) => sum + Number(event.count || 0), 0);
+            const sentDetails = sentEvents.map((event) => `${event.warehouse}: ${(event.batches || []).join(', ') || `${Number(event.count || 0)} партий`}`);
+            const skipped = events.filter((event) => event.skipped).map((event) => `${event.warehouse}: ${event.skipped}${event.batches?.length ? ` (${event.batches.join(', ')})` : ''}`);
+            return `Уведомления поставлены в очередь. Склады: ${recipients.join(', ') || 'не указаны'}. Партий в формах: ${batchCount}.${sentDetails.length ? ` Партии: ${sentDetails.join('; ')}.` : ''}${skipped.length ? ` Не отправлено: ${skipped.join('; ')}.` : ''}`;
+        }
+        return `Уведомления отправлены. Получатели: ${(parsed.recipients || parsed.emails || []).join(', ') || 'не указаны'}. Партий: ${Number(parsed.count || parsed.batches?.length || 0)}.`;
     }
 
     if (action === 'expiry_notifications_failed') {
         return `Ошибка отправки уведомлений. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
+
+    if (action === 'expiry_check_no_matches') {
+        const events = Array.isArray(parsed.events) ? parsed.events : [];
+        const skipped = events.filter((event) => event.skipped).map((event) => `${event.warehouse}: ${event.skipped}${event.batches?.length ? ` (${event.batches.join(', ')})` : ''}`);
+        return `${parsed.reason || 'Сегодня нет партий под выбранные правила уведомлений.'}${skipped.length ? ` ${skipped.join('; ')}.` : ''}`;
+    }
+
+    if (action === 'expiry_check_skipped') {
+        return parsed.reason || 'Проверка сроков пропущена.';
     }
 
     if (parsed.text) return parsed.text;
@@ -1689,9 +1838,78 @@ function renderSettings() {
     setTextIfPresent('#systemLastCheck', system.last_check || 'Не выполнялось');
     setTextIfPresent('#systemLastSent', system.last_sent || 'Не выполнялось');
     setTextIfPresent('#systemSmtpStatus', system.smtp_status || 'Не выполнялось');
+    renderCatalogSyncStatus();
     state.settingsDirty = false;
 }
 
+
+
+function formatCatalogSyncDate(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('ru-RU');
+}
+
+function renderCatalogSyncStatus() {
+    const status = state.catalogSyncStatus || {};
+    const available = Boolean(status.available);
+    setTextIfPresent('#catalogSyncStatus', available ? 'Доступна' : (status.enabled === false ? 'Отключена' : 'Ошибка'));
+    setTextIfPresent('#catalogSyncHttp', status.http_code ? String(status.http_code) : '—');
+    setTextIfPresent('#catalogSyncAuth', status.authentication_ok === true ? 'Успешно' : (status.authentication_ok === false ? 'Ошибка' : '—'));
+    setTextIfPresent('#catalogSyncCheckedAt', formatCatalogSyncDate(status.checked_at));
+    setTextIfPresent('#catalogSyncError', status.message || status.error || '—');
+}
+
+function openCatalogSyncTestDialog() {
+    setValueIfPresent('#catalogSyncArticle', '');
+    setTextIfPresent('#catalogSyncTestError', '');
+    qs('#catalogSyncTestDialog').showModal();
+    focusIfPresent('#catalogSyncArticle');
+}
+
+function closeCatalogSyncTestDialog() {
+    qs('#catalogSyncTestDialog').close();
+}
+
+function closeCatalogSyncResultDialog() {
+    qs('#catalogSyncResultDialog').close();
+}
+
+function renderCatalogSyncResult(result) {
+    const warehouses = result.warehouses || [];
+    const detectedRows = (result.rows || []).reduce((sum, row) => sum + Number(row.detected_stock_rows || 0), 0);
+    const detectedNames = [...new Set((result.rows || []).flatMap((row) => row.detected_stock_names || []))];
+    qs('#catalogSyncResultInfo').textContent = `${result.message || 'Тест выполнен.'} Найдено строк остатков в ответе API: ${detectedRows}.${detectedNames.length ? ` Склады из ответа: ${detectedNames.join(', ')}.` : ' Если в catalogvr UI остатки есть, а здесь 0 строк — внутренний API catalogvr не отдаёт блок остатков.'}`;
+    qs('#catalogSyncResultHead').innerHTML = ['Артикул', 'Менеджер', ...warehouses.map((warehouse) => warehouse.name)]
+        .map((title) => `<th>${escapeHtml(title)}</th>`).join('');
+    qs('#catalogSyncResultBody').innerHTML = (result.rows || []).map((row) => `
+        <tr>
+            <td>${escapeHtml(row.article || '')}${row.found === false ? '<br><small>не найден</small>' : ''}</td>
+            <td>${escapeHtml(row.manager || '—')}</td>
+            ${warehouses.map((warehouse) => `<td class="numeric-cell">${formatQuantity(row.stocks?.[warehouse.id] || 0)}</td>`).join('')}
+        </tr>
+    `).join('') || `<tr><td colspan="${2 + warehouses.length}">catalogvr не вернул строки по артикулу.</td></tr>`;
+    qs('#catalogSyncResultDialog').showModal();
+}
+
+async function submitCatalogSyncTest(event) {
+    event.preventDefault();
+    const button = qs('#runCatalogSyncTestButton');
+    const article = qs('#catalogSyncArticle').value.trim();
+    button.disabled = true;
+    setTextIfPresent('#catalogSyncTestError', '');
+    try {
+        const result = await api('catalog_sync_test', { settings_password: state.settingsPassword, article });
+        state.catalogSyncStatus = result.diagnostics ? { ok: true, available: true, ...result.diagnostics, message: result.message } : state.catalogSyncStatus;
+        renderCatalogSyncStatus();
+        closeCatalogSyncTestDialog();
+        renderCatalogSyncResult(result);
+    } catch (error) {
+        setTextIfPresent('#catalogSyncTestError', error.message);
+    } finally {
+        button.disabled = false;
+    }
+}
 
 function renderPurchaseRecipients() {
     const container = qs('#purchaseRecipientsList');
@@ -1891,6 +2109,28 @@ function toggleSmtpPasswordVisibility() {
     const button = qs('#toggleSmtpPasswordButton');
     input.type = input.type === 'password' ? 'text' : 'password';
     button.textContent = input.type === 'password' ? 'Показать' : 'Скрыть';
+}
+
+
+async function runNotificationsNow() {
+    const button = qs('#runNotificationsNowButton');
+    const status = qs('#testNotificationStatus');
+    button.disabled = true;
+    status.textContent = 'Сохраняю настройки и ищу сегодняшние события...';
+    showToast('Запускаю отправку уведомлений складам...');
+
+    try {
+        await persistSettings();
+        const result = await api('run_notifications_now', { settings_password: state.settingsPassword });
+        await loadSettings();
+        status.textContent = result.message || `Уведомления поставлены в очередь: ${Number(result.sent || 0)}.`;
+        showToast(status.textContent);
+    } catch (error) {
+        status.textContent = error.message;
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+    }
 }
 
 async function sendTestNotification() {
@@ -2315,6 +2555,7 @@ async function importRowsInChunks(rows, chunkSize = 100) {
 
 function bindEvents() {
     qs('#markAllStockEventsReadButton')?.addEventListener('click', markAllStockEventsViewed);
+    qsa('.notification-type-filter').forEach((checkbox) => checkbox.addEventListener('change', updateNotificationEventTypeFilters));
     bindPurchaseRecipientEvents();
 
     qsa('.tab').forEach((button) => button.addEventListener('click', async () => {
@@ -2371,6 +2612,12 @@ function bindEvents() {
     qs('#leaveSettingsButton').addEventListener('click', leaveSettingsWithoutSaving);
     qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
     qs('#bulkDeleteButton').addEventListener('click', deleteSelectedBatches);
+    qs('#sendRecountButton').addEventListener('click', openRecountWarehousesDialog);
+    qs('#recountWarehousesForm').addEventListener('submit', sendSelectedBatchesToRecount);
+    qs('#selectAllRecountWarehouses').addEventListener('change', (event) => setAllRecountWarehouses(event.target.checked));
+    qs('#clearRecountWarehousesButton').addEventListener('click', () => setAllRecountWarehouses(false));
+    qs('#cancelRecountWarehousesButton').addEventListener('click', closeRecountWarehousesDialog);
+    qs('#closeRecountWarehousesDialogButton').addEventListener('click', closeRecountWarehousesDialog);
     qs('#selectAllBatches').addEventListener('change', toggleSelectAllBatches);
     qs('#writeOffPasswordForm').addEventListener('submit', submitWriteOffPassword);
     qs('#cancelWriteOffPasswordButton').addEventListener('click', closeWriteOffPasswordDialog);
@@ -2453,8 +2700,15 @@ function bindEvents() {
     qs('#confirmMissingFilterLogsDialogButton').addEventListener('click', closeMissingFilterLogs);
 
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
+    qs('#runNotificationsNowButton').addEventListener('click', runNotificationsNow);
     qs('#testEmailDeliveryButton').addEventListener('click', testEmailDelivery);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
+    qs('#openCatalogSyncTestButton').addEventListener('click', openCatalogSyncTestDialog);
+    qs('#catalogSyncTestForm').addEventListener('submit', submitCatalogSyncTest);
+    qs('#closeCatalogSyncTestDialogButton').addEventListener('click', closeCatalogSyncTestDialog);
+    qs('#cancelCatalogSyncTestButton').addEventListener('click', closeCatalogSyncTestDialog);
+    qs('#closeCatalogSyncResultDialogButton').addEventListener('click', closeCatalogSyncResultDialog);
+    qs('#confirmCatalogSyncResultDialogButton').addEventListener('click', closeCatalogSyncResultDialog);
     qs('#openEmailNotificationLogButton')?.addEventListener('click', showNotificationLogs);
     qs('#closeNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
     qs('#confirmNotificationLogsDialogButton').addEventListener('click', closeNotificationLogs);
