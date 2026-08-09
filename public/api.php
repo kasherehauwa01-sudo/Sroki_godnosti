@@ -1568,17 +1568,6 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings, string $mode = 'd
         return ['sent' => 0, 'events' => $sentEvents, 'message' => 'Сегодняшние события найдены, но после фильтрации по складам отправлять нечего.'];
     }
 
-    $sentCount = count(array_filter($sentEvents, static fn (array $event): bool => !empty($event['notification_id'])));
-    if ($sentCount === 0) {
-        writeLog($pdo, 'expiry_check_no_matches', [
-            'mode' => $mode,
-            'criteria' => $notificationDays,
-            'events' => $sentEvents,
-            'reason' => 'После фильтрации по складам нет партий для отправки',
-        ]);
-        return ['sent' => 0, 'events' => $sentEvents, 'message' => 'Сегодняшние события найдены, но после фильтрации по складам отправлять нечего.'];
-    }
-
     writeLog($pdo, 'expiry_notifications_sent', [
         'mode' => $mode,
         'emails' => $emails,

@@ -30,6 +30,7 @@ const state = {
     stockNotifications: [],
     expandedStockNotificationGroups: new Set(),
     stockBatchNotifications: [],
+    notificationEventTypeFilters: new Set(['expiry', 'overdue', 'recount']),
     stockEventViews: storedStockEventViews,
     selectedStockBatchId: null,
     events: [],
@@ -1264,6 +1265,27 @@ function markAllStockEventsViewed() {
     renderStockBatchNotifications();
 }
 
+function stockNotificationEventType(notification) {
+    const eventKey = String(notification.event_key || '');
+    if (eventKey === 'overdue_stock_check') return 'overdue';
+    if (eventKey.startsWith('recount_')) return 'recount';
+    return 'expiry';
+}
+
+function stockNotificationEventLabel(notification) {
+    const eventType = stockNotificationEventType(notification);
+    if (eventType === 'overdue') return 'Проверка наличия товара';
+    if (eventType === 'recount') return 'Пересчет';
+    return `${Number(notification.event_days || 0)} дней`;
+}
+
+function updateNotificationEventTypeFilters() {
+    state.notificationEventTypeFilters = new Set(
+        qsa('.notification-type-filter:checked').map((checkbox) => checkbox.value)
+    );
+    renderStockBatchNotifications();
+}
+
 function renderStockBatchNotifications() {
     const body = qs('#stockBatchNotificationsBody');
     if (!body) return;
@@ -1271,9 +1293,12 @@ function renderStockBatchNotifications() {
     qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnreadChanges);
     const markAllButton = qs('#markAllStockEventsReadButton');
     if (markAllButton) markAllButton.disabled = !hasUnreadChanges;
-    body.innerHTML = state.stockBatchNotifications.map((notification) => `
+    const filteredNotifications = state.stockBatchNotifications.filter((notification) =>
+        state.notificationEventTypeFilters.has(stockNotificationEventType(notification))
+    );
+    body.innerHTML = filteredNotifications.map((notification) => `
         <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification ' : ''}${stockEventHasUnreadChanges(notification) ? 'stock-event-unread' : ''}" data-stock-event-key="${escapeHtml(stockEventViewKey(notification))}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
-            <td>${notification.event_key === 'overdue_stock_check' ? 'Проверка наличия товара' : (String(notification.event_key || '').startsWith('recount_') ? 'Пересчет' : `${Number(notification.event_days || 0)} дней`)}</td>
+            <td>${escapeHtml(stockNotificationEventLabel(notification))}</td>
             <td>${escapeHtml(formatDateRu(notification.event_date))}</td>
             <td>${escapeHtml(formatDateRu(notification.expiry_date))}</td>
             <td>${Number(notification.batch_count || 0)}</td>
@@ -2516,6 +2541,7 @@ async function importRowsInChunks(rows, chunkSize = 100) {
 
 function bindEvents() {
     qs('#markAllStockEventsReadButton')?.addEventListener('click', markAllStockEventsViewed);
+    qsa('.notification-type-filter').forEach((checkbox) => checkbox.addEventListener('change', updateNotificationEventTypeFilters));
     bindPurchaseRecipientEvents();
 
     qsa('.tab').forEach((button) => button.addEventListener('click', async () => {
