@@ -564,24 +564,38 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
             if ($newQuantity < 0) {
                 throw new InvalidArgumentException('Заполните остатки по всем партиям целыми числами больше или равными 0.');
             }
-            $oldQuantity = (int)$itemsById[$itemId]['quantity'];
+            $oldQuantity = $itemsById[$itemId]['quantity'] === null ? null : (int)$itemsById[$itemId]['quantity'];
             $batchId = (int)$itemsById[$itemId]['batch_id'];
             $upsert->execute([
                 ':batch_id' => $batchId,
                 ':warehouse_id' => (int)$notification['warehouse_id'],
                 ':quantity' => $newQuantity,
             ]);
+            clearStockAutoZeroEntryForManualStock($pdo, $notification, $batchId);
             $submittedBatchIds[] = $batchId;
-            if ($oldQuantity !== $newQuantity) {
-                $log->execute([
-                    ':notification_id' => (int)$notification['id'],
-                    ':warehouse_id' => (int)$notification['warehouse_id'],
-                    ':batch_id' => (int)$itemsById[$itemId]['batch_id'],
-                    ':old_quantity' => $oldQuantity,
-                    ':new_quantity' => $newQuantity,
-                    ':ip' => $ip,
-                    ':user_agent' => $userAgent,
-                ]);
+            // Записываем каждое подтвержденное значение, даже если оно совпало со
+            // старым batch_stock: совпадение не означает заполнение нового события.
+            $log->execute([
+                ':notification_id' => (int)$notification['id'],
+                ':warehouse_id' => (int)$notification['warehouse_id'],
+                ':batch_id' => $batchId,
+                ':old_quantity' => $oldQuantity,
+                ':new_quantity' => $newQuantity,
+                ':ip' => $ip,
+                ':user_agent' => $userAgent,
+            ]);
+            if (function_exists('recordPurchaseEventStockEntry')) {
+                $eventDate = substr((string)($notification['sent_at'] ?? $notification['created_at'] ?? ''), 0, 10);
+                recordPurchaseEventStockEntry(
+                    $pdo,
+                    (string)$notification['event_key'],
+                    $eventDate,
+                    $batchId,
+                    (int)$notification['warehouse_id'],
+                    (float)$newQuantity,
+                    'warehouse_form',
+                    (int)$notification['id']
+                );
             }
         }
         updateStockNotificationProgress($pdo, (int)$notification['id']);
@@ -595,7 +609,15 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
 
     if (function_exists('updateUnavailableStatusForZeroStockBatches')) {
         try {
-            updateUnavailableStatusForZeroStockBatches($pdo, $submittedBatchIds);
+            $eventKey = (string)($notification['event_key'] ?? '');
+            $eventDate = substr((string)($notification['sent_at'] ?? $notification['created_at'] ?? ''), 0, 10);
+            updateUnavailableStatusForZeroStockBatches(
+                $pdo,
+                $submittedBatchIds,
+                $eventKey,
+                $eventDate,
+                purchaseEventWarehouseIds($pdo, $eventKey, $eventDate)
+            );
         } catch (Throwable $error) {
             error_log('Не удалось обновить статус партии после сохранения нулевых остатков: ' . $error->getMessage());
         }
@@ -612,6 +634,30 @@ function saveStockForm(PDO $pdo, string $token, array $quantities, string $ip, s
     }
 
     return ['ok' => true] + loadStockFormByToken($pdo, $token, false);
+}
+
+function clearStockAutoZeroEntryForManualStock(PDO $pdo, array $notification, int $batchId): void
+{
+    $eventKey = (string)($notification['event_key'] ?? '');
+    $eventDate = substr((string)($notification['sent_at'] ?? $notification['created_at'] ?? ''), 0, 10);
+    $warehouseId = (int)($notification['warehouse_id'] ?? 0);
+    if ($eventKey === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $eventDate) || $batchId <= 0 || $warehouseId <= 0) return;
+
+    try {
+        // Ручной ввод склада важнее технического автонуля: если склад сохранил
+        // значение в форме, сводная должна показывать именно это значение.
+        $pdo->prepare(
+            'DELETE FROM stock_auto_zero_entries
+             WHERE event_key = :event_key AND event_date = :event_date AND batch_id = :batch_id AND warehouse_id = :warehouse_id'
+        )->execute([
+            ':event_key' => $eventKey,
+            ':event_date' => $eventDate,
+            ':batch_id' => $batchId,
+            ':warehouse_id' => $warehouseId,
+        ]);
+    } catch (Throwable $error) {
+        error_log('Не удалось удалить технический автоноль после ввода склада: ' . $error->getMessage());
+    }
 }
 
 function updateStockNotificationProgress(PDO $pdo, int $notificationId): void
