@@ -2668,6 +2668,13 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
     ];
 }
 
+function purchaseEventTypeLabel(string $eventKey, int $eventDays): string
+{
+    if ($eventKey === 'overdue_stock_check') return 'Проверка наличия товара';
+    if (str_starts_with($eventKey, 'recount_')) return 'Пересчет';
+    return $eventDays . ' дней';
+}
+
 function listPurchaseEventNotifications(PDO $pdo): array
 {
     ensurePurchaseNotificationSchema($pdo);
@@ -2712,9 +2719,11 @@ function listPurchaseEventNotifications(PDO $pdo): array
                 return count(array_intersect($expectedWarehouseIds, $filledWarehouseIds)) === count($expectedWarehouseIds);
             }));
             $token = getOrCreatePurchaseEventSummaryToken($pdo, $event);
+            $eventDays = parsePurchaseEventDays($eventKey);
             $events[] = [
                 'event_key' => $eventKey,
-                'event_days' => parsePurchaseEventDays($eventKey),
+                'event_days' => $eventDays,
+                'event_label' => purchaseEventTypeLabel($eventKey, $eventDays),
                 'event_date' => $eventDate,
                 'expiry_date' => $event['expiry_date'],
                 'batch_count' => count($event['batches']),

@@ -1273,6 +1273,8 @@ function stockNotificationEventType(notification) {
 }
 
 function stockNotificationEventLabel(notification) {
+    const serverLabel = String(notification.event_label || '').trim();
+    if (serverLabel !== '') return serverLabel;
     const eventType = stockNotificationEventType(notification);
     if (eventType === 'overdue') return 'Проверка наличия товара';
     if (eventType === 'recount') return 'Пересчет';
