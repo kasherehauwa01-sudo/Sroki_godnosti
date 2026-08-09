@@ -1544,6 +1544,28 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings, string $mode = 'd
                 'text' => $body,
             ];
         }
+
+        // Если по партии catalogvr вернул явный 0 сразу для всех складов,
+        // персональных форм не будет и saveStockForm никогда не вызовется.
+        // Поэтому проверяем автостатус сразу после формирования события.
+        updateUnavailableStatusForZeroStockBatches(
+            $pdo,
+            array_map(static fn (array $batch): int => (int)$batch['id'], $eventBatches),
+            $eventKey,
+            $eventDate,
+            array_map(static fn (array $warehouse): int => (int)$warehouse['id'], $warehouses)
+        );
+    }
+
+    $sentCount = count(array_filter($sentEvents, static fn (array $event): bool => !empty($event['notification_id'])));
+    if ($sentCount === 0) {
+        writeLog($pdo, 'expiry_check_no_matches', [
+            'mode' => $mode,
+            'criteria' => $notificationDays,
+            'events' => $sentEvents,
+            'reason' => 'После фильтрации по складам нет партий для отправки',
+        ]);
+        return ['sent' => 0, 'events' => $sentEvents, 'message' => 'Сегодняшние события найдены, но после фильтрации по складам отправлять нечего.'];
     }
 
     $sentCount = count(array_filter($sentEvents, static fn (array $event): bool => !empty($event['notification_id'])));

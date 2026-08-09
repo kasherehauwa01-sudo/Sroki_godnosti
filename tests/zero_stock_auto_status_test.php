@@ -59,4 +59,11 @@ if (str_contains($functionSource, 'FROM batch_stock') || str_contains($functionS
     throw new RuntimeException('Автостатус не должен определять заполненность по общей batch_stock.');
 }
 
+$expiryFunctionStart = strpos((string)$apiSource, 'function sendDueExpiryNotifications(');
+$expiryFunctionEnd = strpos((string)$apiSource, 'function sendManualExpiryNotifications(', (int)$expiryFunctionStart);
+$expiryFunctionSource = substr((string)$apiSource, (int)$expiryFunctionStart, (int)$expiryFunctionEnd - (int)$expiryFunctionStart);
+if (!str_contains($expiryFunctionSource, 'updateUnavailableStatusForZeroStockBatches(')) {
+    throw new RuntimeException('После создания события должна выполняться проверка партий, полностью состоящих из автонулей.');
+}
+
 echo "Проверки автоматического статуса по событию пройдены.\n";
