@@ -30,7 +30,7 @@ function runDueAutoImport(PDO $pdo): void
     ensureSettingsSchema($pdo);
 
     $settings = getRawSettings($pdo);
-    $time = AUTO_IMPORT_DEFAULT_TIME;
+    $time = autoImportTimeFromSettings($settings);
     $now = new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
     $scheduledAt = autoImportScheduledAt($now, $time);
 
@@ -70,9 +70,29 @@ function autoImportScheduledAt(DateTimeImmutable $now, string $time): DateTimeIm
     return $now < $scheduledAt ? $scheduledAt->modify('-1 day') : $scheduledAt;
 }
 
+function autoImportTimeFromSettings(array $settings): string
+{
+    $time = trim((string)($settings['auto_import_time'] ?? ''));
+
+    return preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time) ? $time : AUTO_IMPORT_DEFAULT_TIME;
+}
+
 function shouldRunAutoImportNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTimeImmutable $now): bool
 {
     $start = $scheduledAt->format('Y-m-d H:i:s');
+    $completedStatement = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM logs
+         WHERE action = 'auto_import_completed'
+           AND created_at >= :start"
+    );
+    $completedStatement->execute([':start' => $start]);
+    if ((int)$completedStatement->fetchColumn() > 0) {
+        // Успешная загрузка закрывает текущее окно расписания независимо от более поздних
+        // технических записей. Новые попытки разрешатся только в следующем окне.
+        return false;
+    }
+
     $attemptsStatement = $pdo->prepare(
         "SELECT COUNT(*)
          FROM logs
