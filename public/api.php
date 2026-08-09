@@ -4045,7 +4045,9 @@ function splitEmails(string $emails): array
 
 function getLogs(PDO $pdo): array
 {
-    $statement = $pdo->query('SELECT id, action, payload, created_at FROM logs ORDER BY id DESC LIMIT 300');
+    // Вкладка «История» имеет фильтр «Всё время», поэтому сервер не должен
+    // незаметно отбрасывать записи старше последних 300 строк.
+    $statement = $pdo->query('SELECT id, action, payload, created_at FROM logs ORDER BY id DESC');
     return array_map(static function (array $row): array {
         return [
             'id' => (int)$row['id'],

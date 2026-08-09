@@ -1748,9 +1748,28 @@ function formatHistoryDetails(action, payload) {
 
 async function loadHistory() {
     const result = await api('logs');
-    const registryActions = new Set(['create', 'bulk_create', 'update', 'delete', 'delete_by_articles', 'delete_by_articles_no_matches', 'auto_import_completed', 'auto_import_failed', 'auto_import_not_found', 'expiry_notifications_sent', 'expiry_notifications_failed', 'expiry_check_no_matches', 'expiry_check_skipped']);
-    state.allHistory = (result.logs || []).filter((log) => registryActions.has(log.event || log.action));
+    // История является общим аудитом сервиса: не ограничиваем её старым списком
+    // действий, иначе новые события пересчета, автонулей и очереди email теряются.
+    state.allHistory = result.logs || [];
+    renderHistoryActionOptions();
     renderHistory();
+}
+
+function renderHistoryActionOptions() {
+    const select = qs('#historyActionFilter');
+    if (!select) return;
+    const selectedValue = select.value;
+    const knownValues = new Set([...select.options].map((option) => option.value));
+    const actions = [...new Set(state.allHistory.map((log) => String(log.event || log.action || '')).filter(Boolean))]
+        .sort((left, right) => formatHistoryAction(left).localeCompare(formatHistoryAction(right), 'ru'));
+    actions.forEach((action) => {
+        if (knownValues.has(action)) return;
+        const option = document.createElement('option');
+        option.value = action;
+        option.textContent = formatHistoryAction(action);
+        select.append(option);
+    });
+    select.value = selectedValue;
 }
 
 function getDateRangeByPreset(preset) {
