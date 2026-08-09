@@ -25,7 +25,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
             <form class="form hidden" id="stockFillForm">
                 <div class="table-wrap">
                     <table>
-                        <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Количество единиц с этим сроком годности</th></tr></thead>
+                        <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Срок годности</th><th>Количество единиц</th></tr></thead>
                         <tbody id="stockFormBody"></tbody>
                     </table>
                 </div>
@@ -64,6 +64,11 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
         const [year, month, day] = String(value || '').split('-');
         return year && month && day ? `${day}.${month}.${year}` : value || '';
     }
+    function formatItemExpiryRu(item) {
+        const [year, month, day] = String(item?.expiry_date || '').split('-');
+        if (!year || !month) return '—';
+        return item?.expiry_full_date && day ? `${day}.${month}.${year}` : `${month}.${year}`;
+    }
     function stockFormEventDays(notification, items) {
         const eventKey = String(notification?.event_key || '');
         const keyMatch = eventKey.match(/(\d+)$/);
@@ -76,10 +81,16 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
     }
     function stockFormHeaderText(result) {
         const items = result.items || [];
+        const eventKey = String(result.notification?.event_key || '');
+        const warehouse = result.notification?.warehouse || '';
+        if (eventKey.startsWith('recount_')) {
+            // В пересчете у каждой партии свой срок, поэтому срок показывается
+            // непосредственно в строке товара, а не общим текстом над формой.
+            return `Пересчет остатков. Склад ${warehouse}. Внесите количество единиц по каждому товару и нажмите «Сохранить».`;
+        }
         const expiryDate = items[0]?.expiry_date || '';
         const expiryText = formatDateRu(expiryDate);
         const days = stockFormEventDays(result.notification, items);
-        const warehouse = result.notification?.warehouse || '';
         return `Срок годности партии истекает ${expiryText} (через ${days} дней).\nСклад ${warehouse}. Внимание! Не нужно указывать общее количество товара на складе. Внесите только количество единиц, на упаковке которых указан срок годности до ${expiryText} включительно и нажмите «Сохранить».`;
     }
     async function loadStockForm() {
@@ -98,6 +109,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
                     <td>${escapeHtml(item.article)}</td>
                     <td>${escapeHtml(item.code)}</td>
                     <td>${escapeHtml(item.name)}</td>
+                    <td>${escapeHtml(formatItemExpiryRu(item))}</td>
                     <td><input name="quantity_${item.id}" data-item-id="${item.id}" min="0" step="1" type="number" value="${item.quantity === null || item.quantity === undefined ? '' : Number(item.quantity)}" required></td>
                 </tr>
             `).join('');
