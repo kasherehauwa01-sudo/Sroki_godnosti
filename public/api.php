@@ -1992,9 +1992,8 @@ function countPurchaseEventExpectedStocks(array $event): int
 function refreshStockReminderForm(PDO $pdo, array $event, int $warehouseId): array
 {
     $statement = $pdo->prepare(
-        "SELECT n.id, w.email, t.id AS token_id
+        "SELECT n.id, w.email
          FROM stock_notifications n
-         INNER JOIN stock_notification_tokens t ON t.notification_id = n.id
          INNER JOIN warehouses w ON w.id = n.warehouse_id
          WHERE n.event_key = :event_key AND DATE(n.sent_at) = :event_date AND n.warehouse_id = :warehouse_id
          ORDER BY n.id DESC LIMIT 1"
@@ -2005,8 +2004,17 @@ function refreshStockReminderForm(PDO $pdo, array $event, int $warehouseId): arr
 
     $token = bin2hex(random_bytes(32));
     $expiresAt = (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->modify('+3 days')->setTime(18, 0)->format('Y-m-d H:i:s');
-    $pdo->prepare("UPDATE stock_notification_tokens SET token = :token, token_hash = :token_hash, expires_at = :expires_at, status = 'Активна' WHERE id = :id")
-        ->execute([':token' => $token, ':token_hash' => hash('sha256', $token), ':expires_at' => $expiresAt, ':id' => (int)$row['token_id']]);
+    // Напоминание получает новую ссылку, но предыдущую не инвалидируем:
+    // получатель может открыть исходное письмо позднее.
+    $pdo->prepare(
+        "INSERT INTO stock_notification_tokens (notification_id, token, token_hash, expires_at, status)
+         VALUES (:notification_id, :token, :token_hash, :expires_at, 'Активна')"
+    )->execute([
+        ':notification_id' => (int)$row['id'],
+        ':token' => $token,
+        ':token_hash' => hash('sha256', $token),
+        ':expires_at' => $expiresAt,
+    ]);
     $pdo->prepare("UPDATE stock_notifications SET status = IF(status = 'Просрочена', 'Не открыта', status) WHERE id = :id")
         ->execute([':id' => (int)$row['id']]);
 

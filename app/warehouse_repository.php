@@ -446,7 +446,7 @@ function loadStockFormByToken(PDO $pdo, string $token, bool $markOpened = true):
     ensureStockNotificationSchema($pdo);
     $hash = hash('sha256', trim($token));
     $statement = $pdo->prepare(
-        "SELECT n.*, w.name AS warehouse_name, t.token, t.expires_at, t.status AS token_status
+        "SELECT n.*, w.name AS warehouse_name, t.id AS token_id, t.token, t.expires_at, t.status AS token_status
          FROM stock_notification_tokens t
          INNER JOIN stock_notifications n ON n.id = t.notification_id
          INNER JOIN warehouses w ON w.id = n.warehouse_id
@@ -483,13 +483,34 @@ function loadStockFormByToken(PDO $pdo, string $token, bool $markOpened = true):
 function refreshStockNotificationExpiry(PDO $pdo, array &$notification): void
 {
     if ((string)$notification['token_status'] === 'Активна' && strtotime((string)$notification['expires_at']) < time()) {
-        $pdo->prepare("UPDATE stock_notification_tokens SET status = 'Истек срок действия' WHERE notification_id = :id")->execute([':id' => (int)$notification['id']]);
-        $pdo->prepare("UPDATE stock_notifications SET status = 'Просрочена' WHERE id = :id AND status <> 'Заполнена'")->execute([':id' => (int)$notification['id']]);
+        // Истекает только открытая ссылка. Другие ссылки этого же уведомления
+        // (например, из напоминания) должны продолжать работать.
+        $pdo->prepare("UPDATE stock_notification_tokens SET status = 'Истек срок действия' WHERE id = :token_id")
+            ->execute([':token_id' => (int)$notification['token_id']]);
+        $pdo->prepare(
+            "UPDATE stock_notifications n
+             SET n.status = 'Просрочена'
+             WHERE n.id = :id AND n.status <> 'Заполнена'
+               AND NOT EXISTS (
+                   SELECT 1 FROM stock_notification_tokens t
+                   WHERE t.notification_id = n.id AND t.status = 'Активна' AND t.expires_at >= NOW()
+               )"
+        )->execute([':id' => (int)$notification['id']]);
         $notification['token_status'] = 'Истек срок действия';
-        if ((string)$notification['status'] !== 'Заполнена') {
+        if ((string)$notification['status'] !== 'Заполнена' && !stockNotificationHasActiveToken($pdo, (int)$notification['id'])) {
             $notification['status'] = 'Просрочена';
         }
     }
+}
+
+function stockNotificationHasActiveToken(PDO $pdo, int $notificationId): bool
+{
+    $statement = $pdo->prepare(
+        "SELECT COUNT(*) FROM stock_notification_tokens
+         WHERE notification_id = :notification_id AND status = 'Активна' AND expires_at >= NOW()"
+    );
+    $statement->execute([':notification_id' => $notificationId]);
+    return (int)$statement->fetchColumn() > 0;
 }
 
 function isStockNotificationActive(array $notification): bool
