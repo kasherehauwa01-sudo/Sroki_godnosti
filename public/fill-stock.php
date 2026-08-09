@@ -60,27 +60,12 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
         if (Number.isNaN(date.getTime())) return value || '';
         return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
     }
-    function formatDateRu(value) {
-        const [year, month, day] = String(value || '').split('-');
-        return year && month && day ? `${day}.${month}.${year}` : value || '';
-    }
     function formatItemExpiryRu(item) {
         const [year, month, day] = String(item?.expiry_date || '').split('-');
         if (!year || !month) return '—';
         return item?.expiry_full_date && day ? `${day}.${month}.${year}` : `${month}.${year}`;
     }
-    function stockFormEventDays(notification, items) {
-        const eventKey = String(notification?.event_key || '');
-        const keyMatch = eventKey.match(/(\d+)$/);
-        if (keyMatch) return Number(keyMatch[1]);
-        const expiryDate = new Date(`${items?.[0]?.expiry_date || ''}T00:00:00`);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        if (Number.isNaN(expiryDate.getTime())) return 0;
-        return Math.round((expiryDate - today) / 86400000);
-    }
     function stockFormHeaderText(result) {
-        const items = result.items || [];
         const eventKey = String(result.notification?.event_key || '');
         const warehouse = result.notification?.warehouse || '';
         if (eventKey.startsWith('recount_')) {
@@ -88,10 +73,9 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
             // непосредственно в строке товара, а не общим текстом над формой.
             return `Пересчет остатков. Склад ${warehouse}. Внесите количество единиц по каждому товару и нажмите «Сохранить».`;
         }
-        const expiryDate = items[0]?.expiry_date || '';
-        const expiryText = formatDateRu(expiryDate);
-        const days = stockFormEventDays(result.notification, items);
-        return `Срок годности партии истекает ${expiryText} (через ${days} дней).\nСклад ${warehouse}. Внимание! Не нужно указывать общее количество товара на складе. Внесите только количество единиц, на упаковке которых указан срок годности до ${expiryText} включительно и нажмите «Сохранить».`;
+        // В одном уведомлении могут находиться товары с разными сроками.
+        // Индивидуальный срок показывается в строке товара, а не в шапке формы.
+        return `Заполнение остатков. Склад ${warehouse}. Внесите количество единиц по каждому товару и нажмите «Сохранить».`;
     }
     async function loadStockForm() {
         const error = document.querySelector('#stockFormError');
