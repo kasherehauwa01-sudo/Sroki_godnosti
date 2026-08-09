@@ -11,9 +11,9 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css">
+    <link rel="stylesheet" href="assets/styles.css?v=20260809-01">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260809-01"></script>
+    <script defer src="assets/app.js?v=20260809-02"></script>
 </head>
 <body>
     <header class="topbar">
@@ -122,12 +122,12 @@ declare(strict_types=1);
                 </div>
                 <button class="ghost-button" id="markAllStockEventsReadButton" type="button">Пометить все как прочитанное</button>
             </div>
-            <fieldset class="notification-type-tags card" aria-label="Фильтр уведомлений по типу события">
-                <legend>Тип события</legend>
+            <div class="notification-type-tags card" role="group" aria-label="Фильтр уведомлений по типу события">
+                <span class="notification-type-tags-title">Тип события</span>
                 <label class="notification-type-tag"><input class="notification-type-filter" type="checkbox" value="expiry" checked> Сроки годности</label>
                 <label class="notification-type-tag"><input class="notification-type-filter" type="checkbox" value="overdue" checked> Проверка наличия товара</label>
                 <label class="notification-type-tag"><input class="notification-type-filter" type="checkbox" value="recount" checked> Пересчет</label>
-            </fieldset>
+            </div>
             <div class="table-wrap card">
                 <table>
                     <thead><tr><th>Тип события</th><th>Дата события</th><th>Срок годности до</th><th>Партий</th><th>Заполнено остатков</th><th>Статус</th></tr></thead>

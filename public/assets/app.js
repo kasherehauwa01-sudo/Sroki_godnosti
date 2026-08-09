@@ -1280,10 +1280,15 @@ function stockNotificationEventLabel(notification) {
 }
 
 function updateNotificationEventTypeFilters() {
-    state.notificationEventTypeFilters = new Set(
-        qsa('.notification-type-filter:checked').map((checkbox) => checkbox.value)
-    );
     renderStockBatchNotifications();
+}
+
+function selectedNotificationEventTypes() {
+    const filters = qsa('.notification-type-filter');
+    // Защита от рассинхронизации кеша HTML и JS: если новая панель фильтров
+    // еще не загрузилась, показываем все уведомления, а не пустую таблицу.
+    if (filters.length === 0) return new Set(['expiry', 'overdue', 'recount']);
+    return new Set(filters.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value));
 }
 
 function renderStockBatchNotifications() {
@@ -1293,8 +1298,9 @@ function renderStockBatchNotifications() {
     qs('#notificationsUnreadDot')?.classList.toggle('hidden', !hasUnreadChanges);
     const markAllButton = qs('#markAllStockEventsReadButton');
     if (markAllButton) markAllButton.disabled = !hasUnreadChanges;
+    const selectedEventTypes = selectedNotificationEventTypes();
     const filteredNotifications = state.stockBatchNotifications.filter((notification) =>
-        state.notificationEventTypeFilters.has(stockNotificationEventType(notification))
+        selectedEventTypes.has(stockNotificationEventType(notification))
     );
     body.innerHTML = filteredNotifications.map((notification) => `
         <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification ' : ''}${stockEventHasUnreadChanges(notification) ? 'stock-event-unread' : ''}" data-stock-event-key="${escapeHtml(stockEventViewKey(notification))}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
@@ -1305,7 +1311,7 @@ function renderStockBatchNotifications() {
             <td>${Number(notification.expected_count || 0) > 0 ? Math.round(Number(notification.filled_count || 0) / Number(notification.expected_count) * 100) : 0}%</td>
             <td>${escapeHtml(notification.status || '')}</td>
         </tr>
-    `).join('') || '<tr><td colspan="6">Событий с остатками пока нет.</td></tr>';
+    `).join('') || `<tr><td colspan="6">${state.stockBatchNotifications.length > 0 ? 'Нет событий выбранных типов.' : 'Событий с остатками пока нет.'}</td></tr>`;
     qsa('[data-stock-event-url]').forEach((row) => {
         const notification = state.stockBatchNotifications.find((item) => stockEventViewKey(item) === row.dataset.stockEventKey);
         const openEvent = () => {
