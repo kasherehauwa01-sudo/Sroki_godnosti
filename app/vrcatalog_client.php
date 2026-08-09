@@ -90,7 +90,58 @@ function vrCatalogProductsRequestPayload(array $articles): array
         'include_zero_stock' => true,
         // Остатки нужны до создания индивидуальных складских форм.
         'include_warehouse_stocks' => true,
+        // Раздел нужен для отбора товаров события «180 дней».
+        'include_section' => true,
     ];
+}
+
+/** Возвращает значение параметра «Раздел» из официального или legacy-ответа catalogvr. */
+function vrCatalogProductSection(array $product): string
+{
+    foreach (['section', 'section_name', 'Раздел', 'раздел'] as $key) {
+        if (array_key_exists($key, $product) && !is_array($product[$key])) {
+            return trim((string)$product[$key]);
+        }
+    }
+
+    $characteristics = $product['characteristics'] ?? $product['attributes'] ?? [];
+    if (!is_array($characteristics)) return '';
+    foreach ($characteristics as $key => $characteristic) {
+        $name = is_array($characteristic)
+            ? trim((string)($characteristic['name'] ?? $characteristic['title'] ?? $key))
+            : trim((string)$key);
+        if (mb_strtolower($name, 'UTF-8') !== 'раздел') continue;
+        $value = is_array($characteristic)
+            ? ($characteristic['value'] ?? $characteristic['text'] ?? '')
+            : $characteristic;
+        return trim((string)$value);
+    }
+
+    return '';
+}
+
+function vrCatalogSectionLookupKey(string $section): string
+{
+    $section = str_replace("\u{00A0}", ' ', trim($section));
+    $section = preg_replace('/\s+/u', ' ', $section) ?? $section;
+    return mb_strtolower($section, 'UTF-8');
+}
+
+/** Оставляет партии, чей параметр «Раздел» входит в разрешённый список. */
+function filterBatchesByVrCatalogSections(array $batches, array $products, array $allowedSections): array
+{
+    $allowed = array_fill_keys(array_map('vrCatalogSectionLookupKey', $allowedSections), true);
+    $matchingArticles = [];
+    foreach ($products as $product) {
+        if (!is_array($product) || !vrCatalogProductFound($product)) continue;
+        if (!isset($allowed[vrCatalogSectionLookupKey(vrCatalogProductSection($product))])) continue;
+        $key = vrCatalogArticleLookupKey(vrCatalogProductArticle($product));
+        if ($key !== '') $matchingArticles[$key] = true;
+    }
+
+    return array_values(array_filter($batches, static function (array $batch) use ($matchingArticles): bool {
+        return isset($matchingArticles[vrCatalogArticleLookupKey((string)($batch['article'] ?? ''))]);
+    }));
 }
 
 /**

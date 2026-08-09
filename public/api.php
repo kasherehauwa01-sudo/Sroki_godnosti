@@ -53,6 +53,15 @@ const SENDER_EMAIL = 'vr-vk@yandex.ru';
 const SETTINGS_PASSWORD_HASH = 'ff10705eafbaa3ff925fb0429d4b3f10379a4dd9dc1725654bbe0a5c9ce1a10f';
 const WRITE_OFF_PASSWORD_HASH = '816e2845d395e7703abac2dcbf9d54e39236fd39133362bf7ad3fce70dd7d78e';
 const NOTIFICATION_EVENT_DAYS = [180, 90, 60, 30, 15, 1];
+const EXPIRY_180_CATALOG_SECTIONS = [
+    'Биоактиваторы для выгребных и компостных ям',
+    'Газ для зажигалок, горелок и плит',
+    'Земля для цветов, рассады',
+    'Защита от насекомых',
+    'Семена',
+    'Удобрения, лекарства для растений',
+    'Средства для бассейнов',
+];
 
 if (basename((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === 'api.php') {
     handleApiRequest();
@@ -1523,6 +1532,18 @@ function sendDueExpiryNotifications(PDO $pdo, array $settings, string $mode = 'd
         // Один запрос на всё событие: далее его результат используется для
         // формирования отдельного набора позиций каждого склада.
         $catalogProducts = fetchVrCatalogProductsByArticles(array_column($eventBatches, 'article'), $pdo);
+        if ((int)$daysLeft === 180) {
+            $unfilteredCount = count($eventBatches);
+            $eventBatches = filterBatchesByVrCatalogSections($eventBatches, $catalogProducts, EXPIRY_180_CATALOG_SECTIONS);
+            writeLog($pdo, 'expiry_180_section_filter', [
+                'mode' => $mode,
+                'received' => $unfilteredCount,
+                'included' => count($eventBatches),
+                'excluded' => $unfilteredCount - count($eventBatches),
+                'sections' => EXPIRY_180_CATALOG_SECTIONS,
+            ]);
+            if (!$eventBatches) continue;
+        }
         foreach ($warehouses as $warehouse) {
             $warehouseBatches = filterBatchesByVrCatalogWarehouseStock($eventBatches, $catalogProducts, $warehouse);
             $autoZeroBatches = filterBatchesByVrCatalogWarehouseZeroStock($eventBatches, $catalogProducts, $warehouse);

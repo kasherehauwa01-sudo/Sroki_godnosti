@@ -10,9 +10,31 @@ function assertSameValue(mixed $expected, mixed $actual, string $message): void
 }
 
 assertSameValue(
-    ['articles' => ['ОКА-27134'], 'include_zero_stock' => true, 'include_warehouse_stocks' => true],
+    ['articles' => ['ОКА-27134'], 'include_zero_stock' => true, 'include_warehouse_stocks' => true, 'include_section' => true],
     vrCatalogProductsRequestPayload(['ОКА-27134']),
     'Поиск в catalogvr должен включать товары с нулевым остатком'
+);
+
+$sectionProducts = [
+    ['article' => 'allowed-direct', 'found' => true, 'section' => ' Семена '],
+    ['article' => 'allowed-russian', 'found' => true, 'Раздел' => 'Средства для бассейнов'],
+    ['article' => 'allowed-attribute', 'found' => true, 'characteristics' => [['name' => 'Раздел', 'value' => 'Земля для цветов, рассады']]],
+    ['article' => 'denied', 'found' => true, 'section' => 'Посуда'],
+    ['article' => 'missing', 'found' => true],
+];
+$sectionBatches = array_map(
+    static fn (string $article, int $index): array => ['id' => $index + 1, 'article' => $article],
+    array_column($sectionProducts, 'article'),
+    array_keys($sectionProducts)
+);
+assertSameValue(
+    [1, 2, 3],
+    array_column(filterBatchesByVrCatalogSections($sectionBatches, $sectionProducts, [
+        'Семена',
+        'Средства для бассейнов',
+        'Земля для цветов, рассады',
+    ]), 'id'),
+    'Фильтр события 180 дней должен оставлять только товары разрешённых разделов'
 );
 
 $stockProducts = [
