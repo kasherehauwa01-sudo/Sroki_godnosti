@@ -2787,6 +2787,22 @@ function getOrCreatePurchaseEventSummaryToken(PDO $pdo, array $event, ?int $reci
     return $token;
 }
 
+function purchaseEventBatchTotal(array $event, int $batchId): float
+{
+    return array_sum(array_map(
+        static fn (mixed $quantity): float => $quantity === null ? 0.0 : (float)$quantity,
+        array_values((array)($event['stock'][$batchId] ?? []))
+    ));
+}
+
+function filterPurchaseEventItemsWithPositiveStock(array $event, array $items): array
+{
+    return array_values(array_filter(
+        $items,
+        static fn (array $item): bool => purchaseEventBatchTotal($event, (int)$item['id']) > 0.0
+    ));
+}
+
 function sendPurchaseNotificationForEvent(PDO $pdo, array $event, int $eventDays): void
 {
     // Успешная запись в журнале означает, что письмо закупкам уже поставлено в очередь.
@@ -2831,8 +2847,14 @@ function sendPurchaseNotificationForEvent(PDO $pdo, array $event, int $eventDays
     foreach ($recipients as $recipient) {
         $recipientId = (int)$recipient['id'];
         $isSupervisor = !empty($recipient['is_supervisor']);
-        $assigned = $isSupervisor ? $allAssigned : ($distribution['assigned'][$recipientId] ?? []);
-        $unassigned = $distribution['unassigned'];
+        // Супервайзер всегда получает полную сводную. Обычным менеджерам
+        // отправляем только товары с положительным общим остатком.
+        $assigned = $isSupervisor
+            ? $allAssigned
+            : filterPurchaseEventItemsWithPositiveStock($event, $distribution['assigned'][$recipientId] ?? []);
+        $unassigned = $isSupervisor
+            ? $distribution['unassigned']
+            : filterPurchaseEventItemsWithPositiveStock($event, $distribution['unassigned']);
         if (!$assigned && !$unassigned) continue;
         $recipientAttempt = $pdo->prepare(
             "INSERT INTO purchase_event_recipient_log (event_key, event_date, recipient_id, email, status)
@@ -3138,6 +3160,10 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
             $autoZeroQuantities[(string)$warehouseId] = !empty($autoZero[$batchId][$warehouseId]);
             if ($value !== null) $total += $value;
         }
+        // Персональные менеджерские ссылки не должны показывать нулевые товары,
+        // в том числе если ссылка была создана до введения нового правила.
+        // Общая ссылка супервайзера имеет recipient_id = NULL и сохраняет все строки.
+        if ($personal && $total <= 0) continue;
         $displayName = trim((string)($catalogNames[(int)$batch['id']] ?? $batch['name'] ?? ''));
         if ($displayName === '') $displayName = (string)$batch['article'];
         $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'total' => $total, 'status' => $batch['status'], 'quantities' => $quantities, 'auto_zero_quantities' => $autoZeroQuantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'manager_email' => $managerEmails[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
