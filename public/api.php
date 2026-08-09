@@ -1331,7 +1331,8 @@ function recordCatalogAutoZeroStocks(PDO $pdo, string $eventKey, string $eventDa
 
 function refreshPurchaseEventCatalogAutoZeros(PDO $pdo, string $eventKey, string $eventDate, array $batches, array $warehouses): void
 {
-    if (!$batches || !$warehouses || !preg_match('/^expiry_\d+$/', $eventKey)) return;
+    $supportsAutoZero = preg_match('/^expiry_\d+$/', $eventKey) || str_starts_with($eventKey, 'recount_');
+    if (!$batches || !$warehouses || !$supportsAutoZero) return;
     $today = (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->format('Y-m-d');
     if ($eventDate !== $today) return;
 
@@ -2074,6 +2075,15 @@ function loadRegistryRecountBatches(PDO $pdo, array $batchIds): array
     return $batches;
 }
 
+/** Формирует для склада части пересчета: форму для положительных остатков и автонули для явных нулей. */
+function registryRecountWarehousePlan(array $batches, array $catalogProducts, array $warehouse): array
+{
+    return [
+        'form_batches' => filterBatchesByVrCatalogWarehouseStock($batches, $catalogProducts, $warehouse),
+        'auto_zero_batches' => filterBatchesByVrCatalogWarehouseZeroStock($batches, $catalogProducts, $warehouse),
+    ];
+}
+
 function sendRegistryRecountNotifications(PDO $pdo, array $payload): array
 {
     $batches = loadRegistryRecountBatches($pdo, (array)($payload['batch_ids'] ?? []));
@@ -2093,21 +2103,40 @@ function sendRegistryRecountNotifications(PDO $pdo, array $payload): array
         throw new InvalidArgumentException('Один или несколько выбранных складов отключены, удалены или не имеют email. Обновите список складов и повторите отправку.');
     }
     $eventKey = 'recount_' . (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->format('Ymd_His') . '_' . bin2hex(random_bytes(3));
+    $eventDate = (new DateTimeImmutable('now', new DateTimeZone(APP_TIMEZONE)))->format('Y-m-d');
     $expiryDate = max(array_map(static fn (array $batch): string => (string)$batch['expiry_date'], $batches));
     $batchIds = array_map(static fn (array $batch): int => (int)$batch['id'], $batches);
     $warehouseIds = array_map(static fn (array $warehouse): int => (int)$warehouse['id'], $warehouses);
     $batchMarks = implode(',', array_fill(0, count($batchIds), '?'));
     $warehouseMarks = implode(',', array_fill(0, count($warehouseIds), '?'));
+    // Сначала получаем catalogvr: при ошибке интеграции пересчет не должен
+    // очищать существующие остатки и создавать частично сформированное событие.
+    $catalogProducts = fetchVrCatalogProductsByArticles(array_column($batches, 'article'), $pdo);
     // Старые остатки выбранных товаров очищаются, чтобы новое событие «Пересчет»
     // считалось заполненным только после отправки новых форм всеми складами.
     $clearStocks = $pdo->prepare("DELETE FROM batch_stock WHERE batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)");
     $clearStocks->execute(array_merge($batchIds, $warehouseIds));
     $sent = 0;
+    $autoZeroCount = 0;
+    $warehouseResults = [];
     $errors = [];
     foreach ($warehouses as $warehouse) {
         try {
+            $plan = registryRecountWarehousePlan($batches, $catalogProducts, $warehouse);
+            recordCatalogAutoZeroStocks($pdo, $eventKey, $eventDate, $warehouse, $plan['auto_zero_batches']);
+            $autoZeroCount += count($plan['auto_zero_batches']);
+            if (!$plan['form_batches']) {
+                $warehouseResults[] = [
+                    'warehouse_id' => (int)$warehouse['id'],
+                    'warehouse' => (string)$warehouse['name'],
+                    'form_batch_count' => 0,
+                    'auto_zero_count' => count($plan['auto_zero_batches']),
+                    'email_queued' => false,
+                ];
+                continue;
+            }
             $subject = registryRecountEmailSubject($warehouse);
-            $form = createStockNotification($pdo, $warehouse, $batches, $eventKey, $subject, publicBaseUrl());
+            $form = createStockNotification($pdo, $warehouse, $plan['form_batches'], $eventKey, $subject, publicBaseUrl());
             enqueueNotificationEmails($pdo, $form['emails'], $subject, registryRecountEmailBody($warehouse, $expiryDate, $form), [], [
                 'warehouse_name' => (string)$warehouse['name'],
                 'exact_subject' => true,
@@ -2116,6 +2145,13 @@ function sendRegistryRecountNotifications(PDO $pdo, array $payload): array
                 'warehouse_id' => (int)$warehouse['id'],
             ]);
             $sent++;
+            $warehouseResults[] = [
+                'warehouse_id' => (int)$warehouse['id'],
+                'warehouse' => (string)$warehouse['name'],
+                'form_batch_count' => count($plan['form_batches']),
+                'auto_zero_count' => count($plan['auto_zero_batches']),
+                'email_queued' => true,
+            ];
         } catch (Throwable $error) {
             $errors[] = (string)$warehouse['name'] . ': ' . $error->getMessage();
         }
@@ -2123,9 +2159,23 @@ function sendRegistryRecountNotifications(PDO $pdo, array $payload): array
     // После ручного запуска пересчета сразу пытаемся отправить первое письмо,
     // даже если отдельный cron очереди email еще не настроен или временно не сработал.
     processDueNotificationEmailQueueSafely($pdo);
-    writeLog($pdo, 'registry_recount_sent', ['event_key' => $eventKey, 'batch_ids' => array_map('intval', array_column($batches, 'id')), 'warehouse_count' => count($warehouses), 'sent' => $sent, 'errors' => $errors]);
+    // При частичной ошибке рассылки событие нельзя считать полностью созданным:
+    // автоматическую смену статуса выполняем только после успешной обработки всех складов.
+    if (!$errors) {
+        updateUnavailableStatusForZeroStockBatches($pdo, $batchIds, $eventKey, $eventDate, $warehouseIds);
+    }
+    writeLog($pdo, 'registry_recount_sent', [
+        'event_key' => $eventKey,
+        'event_date' => $eventDate,
+        'batch_ids' => array_map('intval', array_column($batches, 'id')),
+        'warehouse_count' => count($warehouses),
+        'sent' => $sent,
+        'auto_zero_count' => $autoZeroCount,
+        'warehouses' => $warehouseResults,
+        'errors' => $errors,
+    ]);
     if ($errors) throw new RuntimeException('Часть уведомлений не поставлена в очередь: ' . implode('; ', $errors));
-    return ['ok' => true, 'message' => 'Пересчет отправлен складам: ' . $sent . '.', 'event_key' => $eventKey, 'sent' => $sent];
+    return ['ok' => true, 'message' => 'Пересчет отправлен складам: ' . $sent . '. Автонулей: ' . $autoZeroCount . '.', 'event_key' => $eventKey, 'sent' => $sent, 'auto_zero_count' => $autoZeroCount];
 }
 
 function remindPurchaseEventWarehouses(PDO $pdo, array $payload): array
@@ -2611,10 +2661,17 @@ function listPurchaseEventNotifications(PDO $pdo): array
 {
     ensurePurchaseNotificationSchema($pdo);
     $statement = $pdo->query(
-        "SELECT event_key, DATE(sent_at) AS event_date, MAX(sent_at) AS sent_at
-         FROM stock_notifications
-         WHERE event_key REGEXP '^expiry_[0-9]+$' OR event_key = 'overdue_stock_check' OR event_key LIKE 'recount_%'
-         GROUP BY event_key, DATE(sent_at)
+        "SELECT event_key, event_date, MAX(event_at) AS sent_at
+         FROM (
+             SELECT event_key, DATE(sent_at) AS event_date, sent_at AS event_at
+             FROM stock_notifications
+             WHERE event_key REGEXP '^expiry_[0-9]+$' OR event_key = 'overdue_stock_check' OR event_key LIKE 'recount_%'
+             UNION ALL
+             SELECT event_key, event_date, created_at AS event_at
+             FROM stock_auto_zero_entries
+             WHERE source = 'catalog_explicit_zero' AND (event_key REGEXP '^expiry_[0-9]+$' OR event_key LIKE 'recount_%')
+         ) event_sources
+         GROUP BY event_key, event_date
          ORDER BY sent_at DESC"
     );
     $events = [];
