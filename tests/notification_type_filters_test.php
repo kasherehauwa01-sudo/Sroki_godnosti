@@ -3,8 +3,19 @@ declare(strict_types=1);
 
 $html = file_get_contents(__DIR__ . '/../public/index.php');
 $javascript = file_get_contents(__DIR__ . '/../public/assets/app.js');
-if (!is_string($html) || !is_string($javascript)) {
+$api = file_get_contents(__DIR__ . '/../public/api.php');
+if (!is_string($html) || !is_string($javascript) || !is_string($api)) {
     throw new RuntimeException('Не удалось прочитать файлы вкладки уведомлений.');
+}
+
+$listFunctionStart = strpos($api, 'function listPurchaseEventNotifications(');
+$listFunctionEnd = strpos($api, 'function getOrCreatePurchaseEventSummaryToken(', (int)$listFunctionStart);
+$listFunction = substr($api, (int)$listFunctionStart, (int)$listFunctionEnd - (int)$listFunctionStart);
+if (str_contains($listFunction, 'UNION ALL')) {
+    throw new RuntimeException('Основные уведомления и события из автонулей должны загружаться независимыми запросами.');
+}
+if (!str_contains($listFunction, "writeLog(\$pdo, 'purchase_event_list_item_failed'")) {
+    throw new RuntimeException('Ошибка одного старого события не должна скрывать весь список уведомлений.');
 }
 
 foreach (['expiry', 'overdue', 'recount'] as $eventType) {

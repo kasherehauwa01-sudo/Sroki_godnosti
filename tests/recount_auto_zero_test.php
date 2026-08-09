@@ -41,7 +41,7 @@ $apiSource = file_get_contents(__DIR__ . '/../public/api.php');
 if (!is_string($apiSource) || !str_contains($apiSource, "str_starts_with(\$eventKey, 'recount_')")) {
     throw new RuntimeException('Обновление автонулей сводной должно поддерживать событие пересчета.');
 }
-if (!str_contains($apiSource, "FROM stock_auto_zero_entries\n             WHERE source = 'catalog_explicit_zero'")) {
+if (!str_contains($apiSource, 'FROM stock_auto_zero_entries') || !str_contains($apiSource, "source = 'catalog_explicit_zero'")) {
     throw new RuntimeException('Событие, состоящее только из автонулей, должно отображаться в списке уведомлений.');
 }
 

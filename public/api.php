@@ -2671,50 +2671,70 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
 function listPurchaseEventNotifications(PDO $pdo): array
 {
     ensurePurchaseNotificationSchema($pdo);
-    $statement = $pdo->query(
-        "SELECT event_key, event_date, MAX(event_at) AS sent_at
-         FROM (
-             SELECT event_key, DATE(sent_at) AS event_date, sent_at AS event_at
-             FROM stock_notifications
-             WHERE event_key REGEXP '^expiry_[0-9]+$' OR event_key = 'overdue_stock_check' OR event_key LIKE 'recount_%'
-             UNION ALL
-             SELECT event_key, event_date, created_at AS event_at
-             FROM stock_auto_zero_entries
-             WHERE source = 'catalog_explicit_zero' AND (event_key REGEXP '^expiry_[0-9]+$' OR event_key LIKE 'recount_%')
-         ) event_sources
-         GROUP BY event_key, event_date
-         ORDER BY sent_at DESC"
-    );
+    // Основной запрос оставляем простым и совместимым с production MariaDB.
+    // События только из автонулей добавляем отдельно, чтобы ошибка объединенного
+    // запроса не скрывала весь существующий список уведомлений.
+    $notificationRows = $pdo->query(
+        "SELECT event_key, DATE(sent_at) AS event_date, MAX(sent_at) AS sent_at
+         FROM stock_notifications
+         WHERE event_key REGEXP '^expiry_[0-9]+$' OR event_key = 'overdue_stock_check' OR event_key LIKE 'recount_%'
+         GROUP BY event_key, DATE(sent_at)"
+    )->fetchAll();
+    $autoZeroRows = $pdo->query(
+        "SELECT event_key, event_date, MAX(created_at) AS sent_at
+         FROM stock_auto_zero_entries
+         WHERE source = 'catalog_explicit_zero' AND (event_key REGEXP '^expiry_[0-9]+$' OR event_key LIKE 'recount_%')
+         GROUP BY event_key, event_date"
+    )->fetchAll();
+    $rowsByEvent = [];
+    foreach (array_merge($notificationRows, $autoZeroRows) as $row) {
+        $key = (string)$row['event_key'] . '|' . (string)$row['event_date'];
+        if (!isset($rowsByEvent[$key]) || (string)$row['sent_at'] > (string)$rowsByEvent[$key]['sent_at']) {
+            $rowsByEvent[$key] = $row;
+        }
+    }
+    $rows = array_values($rowsByEvent);
+    usort($rows, static fn (array $left, array $right): int => strcmp((string)$right['sent_at'], (string)$left['sent_at']));
+
     $events = [];
-    foreach ($statement->fetchAll() as $row) {
+    foreach ($rows as $row) {
         $eventKey = (string)$row['event_key'];
         $eventDate = (string)$row['event_date'];
-        $event = getPurchaseEventData($pdo, $eventKey, $eventDate, false);
-        if (!$event['batches'] || !$event['warehouses']) continue;
-        $expected = countPurchaseEventExpectedStocks($event);
-        $filledBatchCount = count(array_filter($event['batches'], static function (array $batch) use ($event): bool {
-            $batchId = (int)$batch['id'];
-            $expectedWarehouseIds = array_map('intval', array_keys($event['expected_stock'][$batchId] ?? []));
-            if (!$expectedWarehouseIds) return false;
-            $filledWarehouseIds = array_map('intval', array_keys($event['stock'][$batchId] ?? []));
-            return count(array_intersect($expectedWarehouseIds, $filledWarehouseIds)) === count($expectedWarehouseIds);
-        }));
-        $token = getOrCreatePurchaseEventSummaryToken($pdo, $event);
-        $events[] = [
-            'event_key' => $eventKey,
-            'event_days' => parsePurchaseEventDays($eventKey),
-            'event_date' => $eventDate,
-            'expiry_date' => $event['expiry_date'],
-            'batch_count' => count($event['batches']),
-            'warehouse_count' => count($event['warehouses']),
-            'filled_batch_count' => $filledBatchCount,
-            'filled_count' => (int)$event['filled_count'],
-            'expected_count' => $expected,
-            'status' => (int)$event['filled_count'] >= $expected ? 'Заполнено' : 'Ожидает заполнения',
-            'sent_at' => (string)$row['sent_at'],
-            'last_stock_at' => $event['last_stock_at'],
-            'url' => publicBaseUrl() . '/purchase-event.php?token=' . rawurlencode($token),
-        ];
+        try {
+            $event = getPurchaseEventData($pdo, $eventKey, $eventDate, false);
+            if (!$event['batches'] || !$event['warehouses']) continue;
+            $expected = countPurchaseEventExpectedStocks($event);
+            $filledBatchCount = count(array_filter($event['batches'], static function (array $batch) use ($event): bool {
+                $batchId = (int)$batch['id'];
+                $expectedWarehouseIds = array_map('intval', array_keys($event['expected_stock'][$batchId] ?? []));
+                if (!$expectedWarehouseIds) return false;
+                $filledWarehouseIds = array_map('intval', array_keys($event['stock'][$batchId] ?? []));
+                return count(array_intersect($expectedWarehouseIds, $filledWarehouseIds)) === count($expectedWarehouseIds);
+            }));
+            $token = getOrCreatePurchaseEventSummaryToken($pdo, $event);
+            $events[] = [
+                'event_key' => $eventKey,
+                'event_days' => parsePurchaseEventDays($eventKey),
+                'event_date' => $eventDate,
+                'expiry_date' => $event['expiry_date'],
+                'batch_count' => count($event['batches']),
+                'warehouse_count' => count($event['warehouses']),
+                'filled_batch_count' => $filledBatchCount,
+                'filled_count' => (int)$event['filled_count'],
+                'expected_count' => $expected,
+                'status' => (int)$event['filled_count'] >= $expected ? 'Заполнено' : 'Ожидает заполнения',
+                'sent_at' => (string)$row['sent_at'],
+                'last_stock_at' => $event['last_stock_at'],
+                'url' => publicBaseUrl() . '/purchase-event.php?token=' . rawurlencode($token),
+            ];
+        } catch (Throwable $error) {
+            // Одно поврежденное старое событие не должно скрывать все остальные.
+            writeLog($pdo, 'purchase_event_list_item_failed', [
+                'event_key' => $eventKey,
+                'event_date' => $eventDate,
+                'error' => $error->getMessage(),
+            ]);
+        }
     }
     return $events;
 }
