@@ -40,6 +40,40 @@ assertSameValue(
     'Форма склада 2 должна содержать только товары с положительным остатком'
 );
 
+$russianStockProduct = ['article' => '346051', 'found' => true, 'stocks' => [
+    ['Склад' => 'Бахтурова', 'Остаток' => 2],
+    ['Склад' => 'Авиаторов Зал+Склад', 'Остаток' => 13],
+]];
+assertSameValue(2.0, vrCatalogWarehouseStockQuantity($russianStockProduct, ['name' => 'Бахтурова']), 'Остаток должен читаться из русских ключей catalogvr');
+assertSameValue(13.0, vrCatalogWarehouseStockQuantity($russianStockProduct, ['name' => 'Авиаторов Зал']), 'Объединённый склад catalogvr должен сопоставляться с залом');
+assertSameValue(13.0, vrCatalogWarehouseStockQuantity($russianStockProduct, ['name' => 'Авиаторов Склад']), 'Объединённый склад catalogvr должен сопоставляться со складом');
+assertSameValue([21], array_column(filterBatchesByVrCatalogWarehouseStock([['id' => 21, 'article' => '346051']], [$russianStockProduct], ['name' => 'Авиаторов Зал']), 'id'), 'Положительный остаток объединённого склада должен попадать в форму зала');
+assertSameValue([21], array_column(filterBatchesByVrCatalogWarehouseStock([['id' => 21, 'article' => '346051']], [$russianStockProduct], ['name' => 'Авиаторов Склад']), 'id'), 'Положительный остаток объединённого склада должен попадать в форму склада');
+
+$nestedStockProduct = ['article' => '346051', 'found' => true, 'data' => ['remains' => [
+    ['Склад' => 'Козловская', 'Остаток' => '3 шт.'],
+    ['Название склада' => 'Стройград', 'Количество' => '7,5'],
+]]];
+assertSameValue(3.0, vrCatalogWarehouseStockQuantity($nestedStockProduct, ['name' => 'Козловская']), 'Остаток должен находиться рекурсивно и читаться из строки');
+assertSameValue(7.5, vrCatalogWarehouseStockQuantity($nestedStockProduct, ['name' => 'Стройград']), 'Дробный остаток с запятой должен читаться как число');
+
+$zeroProducts = [
+    ['article' => 'zero', 'found' => true, 'stocks' => [['Склад' => 'Бахтурова', 'Остаток' => 0]]],
+    ['article' => 'positive', 'found' => true, 'stocks' => [['Склад' => 'Бахтурова', 'Остаток' => 2]]],
+    ['article' => 'missing-stock-row', 'found' => true, 'stocks' => [['Склад' => 'Диамант', 'Остаток' => 0]]],
+];
+$zeroBatches = [
+    ['id' => 10, 'article' => 'zero'],
+    ['id' => 11, 'article' => 'positive'],
+    ['id' => 12, 'article' => 'missing-stock-row'],
+];
+assertSameValue([10], array_column(filterBatchesByVrCatalogWarehouseZeroStock($zeroBatches, $zeroProducts, ['name' => 'Бахтурова']), 'id'), 'Автоноль должен ставиться только при явном нуле catalogvr');
+assertSameValue(null, vrCatalogWarehouseStockQuantityOrNull($zeroProducts[2], ['name' => 'Бахтурова']), 'Отсутствующая строка склада не должна считаться нулём');
+
+$aviatorsZeroProduct = ['article' => 'aviators-zero', 'found' => true, 'stocks' => [['Склад' => 'Авиаторов Зал+Склад', 'Остаток' => 0]]];
+assertSameValue([22], array_column(filterBatchesByVrCatalogWarehouseZeroStock([['id' => 22, 'article' => 'aviators-zero']], [$aviatorsZeroProduct], ['name' => 'Авиаторов Зал']), 'id'), 'Ноль объединённого склада должен давать автоноль для зала');
+assertSameValue([22], array_column(filterBatchesByVrCatalogWarehouseZeroStock([['id' => 22, 'article' => 'aviators-zero']], [$aviatorsZeroProduct], ['name' => 'Авиаторов Склад']), 'id'), 'Ноль объединённого склада должен давать автоноль для склада');
+
 foreach ([
     'ЖС2344-1' => 'ЖС2344',
     'ЖС2344-1-25' => 'ЖС2344',

@@ -108,6 +108,9 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .settings-save-bar { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
 .checkbox-row { display: flex; grid-template-columns: none; align-items: center; gap: 10px; font-weight: 700; }
 .checkbox-row input { width: auto; }
+.recount-select-all-row { padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.recount-warehouse-list { display: grid; gap: 10px; max-height: min(46vh, 360px); overflow-y: auto; padding: 2px; }
+.recount-warehouse-list .checkbox-row { padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: #f8fafc; }
 .password-field { display: flex; gap: 8px; }
 .password-field input { flex: 1; }
 .copy-field { display: flex; gap: 8px; align-items: center; }
