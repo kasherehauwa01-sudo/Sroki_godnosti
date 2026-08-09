@@ -24,10 +24,13 @@ foreach (['expiry', 'overdue', 'recount'] as $eventType) {
     }
 }
 
-foreach (['stockNotificationEventType', 'stockNotificationEventLabel', 'updateNotificationEventTypeFilters', 'selectedNotificationEventTypes'] as $functionName) {
+foreach (['stockNotificationEventType', 'stockNotificationEventLabel', 'updateNotificationEventTypeFilters', 'selectedNotificationEventTypes', 'allNotificationEventTypesSelected'] as $functionName) {
     if (!str_contains($javascript, 'function ' . $functionName . '(')) {
         throw new RuntimeException("Не реализована функция {$functionName}.");
     }
+}
+if (!str_contains($javascript, '? state.stockBatchNotifications')) {
+    throw new RuntimeException('При выборе всех тегов должен отображаться исходный список уведомлений без фильтрации.');
 }
 
 if (!str_contains($javascript, 'selectedEventTypes.has(stockNotificationEventType(notification))')) {

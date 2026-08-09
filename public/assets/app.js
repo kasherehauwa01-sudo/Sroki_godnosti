@@ -1291,6 +1291,10 @@ function selectedNotificationEventTypes() {
     return new Set(filters.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value));
 }
 
+function allNotificationEventTypesSelected(selectedEventTypes) {
+    return ['expiry', 'overdue', 'recount'].every((eventType) => selectedEventTypes.has(eventType));
+}
+
 function renderStockBatchNotifications() {
     const body = qs('#stockBatchNotificationsBody');
     if (!body) return;
@@ -1299,9 +1303,13 @@ function renderStockBatchNotifications() {
     const markAllButton = qs('#markAllStockEventsReadButton');
     if (markAllButton) markAllButton.disabled = !hasUnreadChanges;
     const selectedEventTypes = selectedNotificationEventTypes();
-    const filteredNotifications = state.stockBatchNotifications.filter((notification) =>
-        selectedEventTypes.has(stockNotificationEventType(notification))
-    );
+    // Когда включены все теги, возвращаем исходный список без классификации.
+    // Это гарантирует отображение всех событий, включая старые/нестандартные ключи.
+    const filteredNotifications = allNotificationEventTypesSelected(selectedEventTypes)
+        ? state.stockBatchNotifications
+        : state.stockBatchNotifications.filter((notification) =>
+            selectedEventTypes.has(stockNotificationEventType(notification))
+        );
     body.innerHTML = filteredNotifications.map((notification) => `
         <tr class="${notification.status === 'Заполнено' ? 'complete-stock-notification ' : ''}${stockEventHasUnreadChanges(notification) ? 'stock-event-unread' : ''}" data-stock-event-key="${escapeHtml(stockEventViewKey(notification))}" data-stock-event-url="${escapeHtml(notification.url)}" role="link" tabindex="0">
             <td>${escapeHtml(stockNotificationEventLabel(notification))}</td>
