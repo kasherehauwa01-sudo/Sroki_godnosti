@@ -88,7 +88,7 @@ async function loadPurchaseEvent() {
         if (!response.ok || !result.ok) throw new Error(result.error || 'Не удалось загрузить сводную таблицу.');
         purchaseEventData = result;
         document.querySelector('#remindPurchaseEventButton').classList.toggle('hidden', !result.can_remind);
-        document.querySelector('#purchaseEventInfo').textContent = `Срок годности до ${formatDate(result.expiry_date)}. Событие: ${result.event_days} дней.`;
+        document.querySelector('#purchaseEventInfo').textContent = `Срок годности до ${formatDate(result.expiry_date)}. Событие: ${result.event_label || `${result.event_days} дней`}.`;
         renderPurchaseEventTable(result);
         document.querySelector('#purchaseEventTableWrap').classList.remove('hidden');
     } catch (error) {
