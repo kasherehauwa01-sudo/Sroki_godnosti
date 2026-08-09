@@ -24,10 +24,13 @@ foreach (['expiry', 'overdue', 'recount'] as $eventType) {
     }
 }
 
-foreach (['stockNotificationEventType', 'stockNotificationEventLabel', 'updateNotificationEventTypeFilters', 'selectedNotificationEventTypes', 'allNotificationEventTypesSelected'] as $functionName) {
+foreach (['stockNotificationEventType', 'stockNotificationEventLabel', 'stockNotificationGroupEventLabel', 'updateNotificationEventTypeFilters', 'selectedNotificationEventTypes', 'allNotificationEventTypesSelected'] as $functionName) {
     if (!str_contains($javascript, 'function ' . $functionName . '(')) {
         throw new RuntimeException("Не реализована функция {$functionName}.");
     }
+}
+if (substr_count($javascript, 'function stockNotificationEventType(') !== 1) {
+    throw new RuntimeException('Классификатор тегов не должен переопределяться функцией группировки складских уведомлений.');
 }
 if (!str_contains($javascript, '? state.stockBatchNotifications')) {
     throw new RuntimeException('При выборе всех тегов должен отображаться исходный список уведомлений без фильтрации.');

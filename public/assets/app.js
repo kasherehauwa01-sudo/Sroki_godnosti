@@ -1373,7 +1373,7 @@ async function loadStockNotifications() {
     renderStockNotifications();
 }
 
-function stockNotificationEventType(notification) {
+function stockNotificationGroupEventLabel(notification) {
     const match = String(notification.event_key || '').match(/expiry_(\d+)/);
     if (match) return `${match[1]} день`;
     return notification.subject || 'Событие не указано';
@@ -1396,7 +1396,7 @@ function groupedStockNotifications() {
             groups.set(key, {
                 key,
                 sentAt: stockNotificationSentAt(notification),
-                eventType: stockNotificationEventType(notification),
+                eventType: stockNotificationGroupEventLabel(notification),
                 notifications: [],
             });
         }
