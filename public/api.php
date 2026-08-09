@@ -205,10 +205,22 @@ function encodeApiResponse(array $result): string
 
 function publicBaseUrl(): string
 {
-    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-    $host = (string)($_SERVER['HTTP_HOST'] ?? 'localhost');
-    $path = rtrim(str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/'))), '/');
-    return $scheme . '://' . $host . ($path === '' ? '' : $path);
+    // Cron запускает API через scripts/check_expiry.php без HTTP_HOST и раньше
+    // формировал ссылки вида http://localhostscripts/.... Для писем всегда
+    // используем канонический APP_URL, общий для веб-сервера и cron.
+    $configuredUrl = trim((string)(getenv('APP_URL') ?: ''));
+    if ($configuredUrl === '') {
+        global $appConfig;
+        $configuredUrl = trim((string)($appConfig['app_url'] ?? ''));
+    }
+    if ($configuredUrl === '') {
+        $configuredUrl = 'https://kvasmix.ru/vr/sroki_godnosti/';
+    }
+    $parts = parse_url($configuredUrl);
+    if (!is_array($parts) || !in_array((string)($parts['scheme'] ?? ''), ['http', 'https'], true) || empty($parts['host'])) {
+        throw new RuntimeException('APP_URL должен содержать полный адрес с http:// или https://.');
+    }
+    return rtrim($configuredUrl, '/');
 }
 
 function clientIp(): string
