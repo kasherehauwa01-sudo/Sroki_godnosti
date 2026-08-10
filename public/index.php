@@ -11,9 +11,9 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260809-01">
+    <link rel="stylesheet" href="assets/styles.css?v=20260810-01">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260809-07"></script>
+    <script defer src="assets/app.js?v=20260810-01"></script>
 </head>
 <body>
     <header class="topbar">
@@ -513,21 +513,19 @@ declare(strict_types=1);
                 </label>
                 <label class="history-custom-date hidden">Дата от<input id="historyDateFrom" type="date"></label>
                 <label class="history-custom-date hidden">Дата до<input id="historyDateTo" type="date"></label>
-                <label>Действие
-                    <select id="historyActionFilter">
-                        <option value="">Все действия</option>
-                        <option value="bulk_create">Импорт партий</option>
-                        <option value="create">Добавление партий</option>
-                        <option value="update">Изменение партий</option>
-                        <option value="delete">Удаление партий</option>
-                        <option value="auto_import_completed">Автозагрузка</option>
-                        <option value="auto_import_failed">Ошибка автозагрузки</option>
-                        <option value="auto_import_not_found">Автозагрузка без файлов</option>
-                        <option value="delete_by_articles">Удаление артикулов</option>
-                        <option value="expiry_notifications_sent">Отправка уведомлений</option>
-                        <option value="expiry_notifications_failed">Ошибка уведомлений</option>
-                    </select>
-                </label>
+                <div class="history-action-filter">
+                    <span class="history-filter-label">Действие</span>
+                    <details id="historyActionFilter">
+                        <summary id="historyActionFilterSummary">Выбрано: 6</summary>
+                        <div class="history-action-dropdown">
+                            <div class="history-action-filter-actions">
+                                <button class="small-button" id="historyActionsSelectAll" type="button">Выбрать все</button>
+                                <button class="small-button" id="historyActionsClearAll" type="button">Снять все</button>
+                            </div>
+                            <div id="historyActionOptions"></div>
+                        </div>
+                    </details>
+                </div>
             </div>
             <div class="table-wrap card">
                 <table>
@@ -535,6 +533,11 @@ declare(strict_types=1);
                     <tbody id="historyBody"></tbody>
                 </table>
             </div>
+            <nav class="history-pagination" id="historyPagination" aria-label="Страницы истории">
+                <button class="ghost-button" id="historyPreviousPage" type="button">Назад</button>
+                <span id="historyPageInfo">Страница 1 из 1</span>
+                <button class="ghost-button" id="historyNextPage" type="button">Вперёд</button>
+            </nav>
         </section>
     </main>
 

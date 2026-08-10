@@ -1,4 +1,6 @@
 const STOCK_EVENT_VIEWS_KEY = 'stockEventViews';
+const DEFAULT_HISTORY_ACTIONS = new Set(['bulk_create', 'create', 'update', 'delete', 'auto_import_completed', 'expiry_notifications_sent']);
+const HISTORY_PAGE_SIZE = 50;
 const storedStockEventViews = (() => {
     try {
         const value = JSON.parse(window.localStorage.getItem(STOCK_EVENT_VIEWS_KEY) || '{}');
@@ -15,6 +17,8 @@ const state = {
     settings: { emails: [], rules: [], purchase_recipients: [] },
     history: [],
     allHistory: [],
+    selectedHistoryActions: new Set(DEFAULT_HISTORY_ACTIONS),
+    historyPage: 1,
     notificationDetails: '',
     registrySort: { field: 'expiryDate', direction: 'asc' },
     settingsAccessGranted: false,
@@ -1603,10 +1607,10 @@ async function submitSettingsPassword(event) {
 
 function formatHistoryAction(action) {
     const actions = {
-        create: 'Добавление партии',
+        create: 'Добавление партий',
         bulk_create: 'Импорт партий',
-        update: 'Изменение партии',
-        delete: 'Удаление партии',
+        update: 'Изменение партий',
+        delete: 'Удаление партий',
         settings: 'Изменение настроек',
         expiry_notifications_sent: 'Отправка уведомлений',
         expiry_notifications_failed: 'Ошибка уведомлений',
@@ -1615,9 +1619,37 @@ function formatHistoryAction(action) {
         auto_import_not_found: 'Автозагрузка',
         expiry_check_no_matches: 'Проверка сроков без совпадений',
         expiry_check_skipped: 'Проверка сроков пропущена',
+        auto_import_started: 'Запуск автозагрузки',
+        delete_by_articles: 'Удаление партий по артикулам',
+        delete_by_articles_no_matches: 'Удаление по артикулам без совпадений',
+        expiry_180_section_filter: 'Фильтрация события 180 дней по разделам',
+        overdue_stock_check_sent: 'Отправка проверки наличия товара',
+        overdue_stock_check_failed: 'Ошибка проверки наличия товара',
+        registry_recount_sent: 'Отправка на пересчёт',
+        catalog_auto_zero_refresh_failed: 'Ошибка обновления автонулей catalogvr',
+        zero_stock_auto_status_skipped: 'Автосмена статуса пропущена',
+        purchase_event_stocks_update: 'Изменение остатков события',
+        purchase_event_list_item_failed: 'Ошибка загрузки события',
+        purchase_test_notification_sent: 'Тестовое уведомление закупок отправлено',
+        purchase_test_notification_failed: 'Ошибка тестового уведомления закупок',
+        test_notification_sent: 'Тестовое уведомление отправлено',
+        test_notification_failed: 'Ошибка тестового уведомления',
+        test_stock_fill_notification_sent: 'Тест формы заполнения отправлен',
+        stock_reminder_failed: 'Ошибка напоминания складу',
+        vrcatalog_request: 'Запрос к catalogvr',
+        background_task_failed: 'Ошибка фоновой задачи',
+        email_queue_processing_failed: 'Ошибка обработки очереди email',
+        smtp_message_accepted: 'Email принят сервером',
+        smtp_connection_attempt: 'Подключение к почтовому серверу',
+        smtp_connection_failed: 'Ошибка подключения к почтовому серверу',
+        smtp_connection_success: 'Подключение к почтовому серверу выполнено',
+        smtp_starttls_failed: 'Ошибка защищённого соединения с почтой',
+        smtp_starttls_success: 'Защищённое соединение с почтой установлено',
+        smtp_auth_success: 'Авторизация на почтовом сервере выполнена',
+        smtp_auth_failed: 'Ошибка авторизации на почтовом сервере',
     };
 
-    return actions[action] || action || '';
+    return actions[action] || (action ? 'Служебное действие' : 'Без названия');
 }
 
 function parseHistoryPayload(payload) {
@@ -1756,20 +1788,35 @@ async function loadHistory() {
 }
 
 function renderHistoryActionOptions() {
-    const select = qs('#historyActionFilter');
-    if (!select) return;
-    const selectedValue = select.value;
-    const knownValues = new Set([...select.options].map((option) => option.value));
+    const container = qs('#historyActionOptions');
+    if (!container) return;
     const actions = [...new Set(state.allHistory.map((log) => String(log.event || log.action || '')).filter(Boolean))]
         .sort((left, right) => formatHistoryAction(left).localeCompare(formatHistoryAction(right), 'ru'));
-    actions.forEach((action) => {
-        if (knownValues.has(action)) return;
-        const option = document.createElement('option');
-        option.value = action;
-        option.textContent = formatHistoryAction(action);
-        select.append(option);
-    });
-    select.value = selectedValue;
+    container.innerHTML = actions.map((action) => `
+        <label class="checkbox-row history-action-option">
+            <input class="history-action-checkbox" type="checkbox" value="${escapeHtml(action)}"${state.selectedHistoryActions.has(action) ? ' checked' : ''}>
+            <span>${escapeHtml(formatHistoryAction(action))}</span>
+        </label>
+    `).join('') || '<p class="history-action-empty">Действия пока отсутствуют.</p>';
+    qsa('.history-action-checkbox').forEach((checkbox) => checkbox.addEventListener('change', applyHistoryActionFilters));
+    updateHistoryActionFilterSummary();
+}
+
+function updateHistoryActionFilterSummary() {
+    const count = state.selectedHistoryActions.size;
+    setTextIfPresent('#historyActionFilterSummary', count ? `Выбрано: ${count}` : 'Ничего не выбрано');
+}
+
+function applyHistoryActionFilters() {
+    state.selectedHistoryActions = new Set(qsa('.history-action-checkbox:checked').map((checkbox) => checkbox.value));
+    state.historyPage = 1;
+    updateHistoryActionFilterSummary();
+    renderHistory();
+}
+
+function setAllHistoryActions(checked) {
+    qsa('.history-action-checkbox').forEach((checkbox) => { checkbox.checked = checked; });
+    applyHistoryActionFilters();
 }
 
 function getDateRangeByPreset(preset) {
@@ -1813,23 +1860,29 @@ function getCustomHistoryDateRange() {
 
 function renderHistory() {
     const preset = qs('#historyDatePreset').value;
-    const actionFilter = qs('#historyActionFilter').value;
     qsa('.history-custom-date').forEach((field) => field.classList.toggle('hidden', preset !== 'custom'));
     const range = preset === 'custom' ? getCustomHistoryDateRange() : getDateRangeByPreset(preset);
 
     state.history = state.allHistory.filter((log) => {
         const action = log.event || log.action;
         const date = parseHistoryDate(log.createdAt);
-        return (!actionFilter || action === actionFilter)
+        return state.selectedHistoryActions.has(action)
             && (!range.start || (date && date >= range.start))
             && (!range.end || (date && date <= range.end));
     });
 
-    qs('#historyBody').innerHTML = state.history.map((log) => `<tr>
+    const pageCount = Math.max(1, Math.ceil(state.history.length / HISTORY_PAGE_SIZE));
+    state.historyPage = Math.min(Math.max(1, state.historyPage), pageCount);
+    const pageStart = (state.historyPage - 1) * HISTORY_PAGE_SIZE;
+    const pageRows = state.history.slice(pageStart, pageStart + HISTORY_PAGE_SIZE);
+    qs('#historyBody').innerHTML = pageRows.map((log) => `<tr>
         <td>${escapeHtml(log.createdAt)}</td>
         <td>${escapeHtml(formatHistoryAction(log.event || log.action))}</td>
         <td class="history-details">${escapeHtml(formatHistoryDetails(log.event || log.action, log.details || log.payload))}</td>
     </tr>`).join('') || '<tr><td colspan="3">История пока отсутствует.</td></tr>';
+    setTextIfPresent('#historyPageInfo', `Страница ${state.historyPage} из ${pageCount} · Записей: ${state.history.length}`);
+    qs('#historyPreviousPage').disabled = state.historyPage <= 1;
+    qs('#historyNextPage').disabled = state.historyPage >= pageCount;
 }
 
 function renderSettings() {
@@ -2680,7 +2733,20 @@ function bindEvents() {
         }
     });
 
-    ['#historyDatePreset', '#historyDateFrom', '#historyDateTo', '#historyActionFilter'].forEach((selector) => qs(selector).addEventListener('input', renderHistory));
+    ['#historyDatePreset', '#historyDateFrom', '#historyDateTo'].forEach((selector) => qs(selector).addEventListener('input', () => {
+        state.historyPage = 1;
+        renderHistory();
+    }));
+    qs('#historyActionsSelectAll').addEventListener('click', () => setAllHistoryActions(true));
+    qs('#historyActionsClearAll').addEventListener('click', () => setAllHistoryActions(false));
+    qs('#historyPreviousPage').addEventListener('click', () => {
+        state.historyPage -= 1;
+        renderHistory();
+    });
+    qs('#historyNextPage').addEventListener('click', () => {
+        state.historyPage += 1;
+        renderHistory();
+    });
 
     qsa('.event-period-filter').forEach((checkbox) => checkbox.addEventListener('change', () => {
         state.eventPeriodFilters = new Set(qsa('.event-period-filter:checked').map((item) => item.value));
