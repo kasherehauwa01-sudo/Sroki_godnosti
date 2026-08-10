@@ -58,6 +58,9 @@ $functionSource = substr((string)$apiSource, (int)$functionStart, (int)$function
 if (str_contains($functionSource, 'FROM batch_stock') || str_contains($functionSource, 'JOIN batch_stock')) {
     throw new RuntimeException('Автостатус не должен определять заполненность по общей batch_stock.');
 }
+if (!str_contains($functionSource, "writeLog(\$pdo, 'zero_stock_auto_status'")) {
+    throw new RuntimeException('Успешный автоноль должен сохраняться в истории отдельным типом события.');
+}
 
 $expiryFunctionStart = strpos((string)$apiSource, 'function sendDueExpiryNotifications(');
 $expiryFunctionEnd = strpos((string)$apiSource, 'function sendManualExpiryNotifications(', (int)$expiryFunctionStart);

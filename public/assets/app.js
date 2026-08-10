@@ -1616,10 +1616,12 @@ function formatHistoryAction(action) {
         expiry_notifications_failed: 'Ошибка уведомлений',
         auto_import_completed: 'Автозагрузка',
         auto_import_failed: 'Ошибка автозагрузки',
-        auto_import_not_found: 'Автозагрузка',
+        auto_import_not_found: 'Автозагрузка: письмо не найдено',
         expiry_check_no_matches: 'Проверка сроков без совпадений',
         expiry_check_skipped: 'Проверка сроков пропущена',
         auto_import_started: 'Запуск автозагрузки',
+        auto_write_off: 'Автосписание',
+        zero_stock_auto_status: 'Автоноль',
         delete_by_articles: 'Удаление партий по артикулам',
         delete_by_articles_no_matches: 'Удаление по артикулам без совпадений',
         expiry_180_section_filter: 'Фильтрация события 180 дней по разделам',
@@ -1721,6 +1723,16 @@ function formatHistoryDetails(action, payload) {
 
     if (action === 'auto_import_failed' || action === 'auto_import_not_found') {
         return `Автозагрузка не выполнена. ${parsed.error || parsed.message || 'Причина не указана.'}`;
+    }
+
+    if (action === 'auto_write_off') {
+        const replacement = parsed.replacement_batch ? ` После добавления ${formatHistoryBatch(parsed.replacement_batch)}.` : '';
+        return `Автосписание: базовые партии автоматически получили статус «Перемещено на СБ».${replacement}${parsed.written_off_batches?.length ? `\nПеремещённые партии:\n${formatHistoryBatchList(parsed.written_off_batches)}` : ''}`;
+    }
+
+    if (action === 'zero_stock_auto_status') {
+        const batch = parsed.after || { id: parsed.batch_id, article: parsed.article, status: 'Нет в наличии' };
+        return `Автоноль: ${formatHistoryBatch(batch)} автоматически получила статус «Нет в наличии», потому что все обязательные склады заполнили остатки и общий остаток равен 0.`;
     }
 
     if (action === 'update') {

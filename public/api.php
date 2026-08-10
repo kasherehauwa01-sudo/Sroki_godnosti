@@ -757,6 +757,13 @@ function createBatch(PDO $pdo, array $payload, bool $writeHistory = true): array
     $writtenOffBatches = writeOffBaseCodeBatchesForReplacement($pdo, $batch);
     $id = insertBatch($pdo, $batch);
     $batchInfo = historyBatchInfo($batch, $id);
+    if ($writtenOffBatches) {
+        writeLog($pdo, 'auto_write_off', [
+            'replacement_batch' => $batchInfo,
+            'written_off_batches' => $writtenOffBatches,
+            'reason' => 'Добавлен товар с кодом, оканчивающимся на -1; базовые партии перемещены на СБ',
+        ]);
+    }
     if ($writeHistory) {
         writeLog($pdo, 'create', ['batch' => $batchInfo, 'written_off_batches' => $writtenOffBatches]);
     }
@@ -2559,7 +2566,7 @@ function updateUnavailableStatusForZeroStockBatches(
         $update->execute([':status' => UNAVAILABLE_STATUS, ':id' => $batchId]);
         $after = $before;
         $after['status'] = UNAVAILABLE_STATUS;
-        writeLog($pdo, 'update', $logPayload + [
+        writeLog($pdo, 'zero_stock_auto_status', $logPayload + [
             'before' => $before,
             'after' => $after,
             'reason' => 'Все обязательные склады текущего события заполнили остатки, сумма остатков равна 0',

@@ -28,5 +28,14 @@ if (!str_contains($javascript, 'state.history.slice(pageStart, pageStart + HISTO
 if (!str_contains($javascript, "return actions[action] || (action ? 'Служебное действие'")) {
     throw new RuntimeException('Неизвестные англоязычные действия не должны показываться пользователю как есть.');
 }
+foreach ([
+    "auto_import_not_found: 'Автозагрузка: письмо не найдено'",
+    "auto_write_off: 'Автосписание'",
+    "zero_stock_auto_status: 'Автоноль'",
+] as $translatedAction) {
+    if (!str_contains($javascript, $translatedAction)) {
+        throw new RuntimeException('Отсутствует понятное название действия: ' . $translatedAction);
+    }
+}
 
 echo "Проверки фильтров и пагинации истории пройдены.\n";
