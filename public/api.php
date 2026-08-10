@@ -552,6 +552,10 @@ function getProtectedEmailNotificationLogs(PDO $pdo, array $payload): array
     $statement = $pdo->prepare($sql);
     $statement->execute($params);
     $logs = array_map(static function (array $row): array {
+        $row['notification_type'] = normalizeEmailNotificationType(
+            (string)($row['notification_type'] ?? ''),
+            (string)($row['subject'] ?? '')
+        );
         $row['recipients'] = json_decode((string)$row['recipients'], true) ?: [];
         $row['distribution_details'] = json_decode((string)($row['distribution_details'] ?? ''), true) ?: [];
         $row['date'] = formatMoscowDateTime((string)$row['created_at']);
@@ -1663,7 +1667,10 @@ function sendDueOverdueStockCheckNotifications(PDO $pdo): void
             $body = "Просьба заполнить остатки по данному товара.\n\n" . (string)$form['url'];
             $emailError = '';
             try {
-                enqueueNotificationEmails($pdo, $form['emails'], $subject, $body, [], ['warehouse_name' => (string)$warehouse['name']]);
+                enqueueNotificationEmails($pdo, $form['emails'], $subject, $body, [], [
+                    'warehouse_name' => (string)$warehouse['name'],
+                    'notification_type' => 'Заполнение остатков по просроченной партии',
+                ]);
             } catch (Throwable $error) {
                 $emailError = $error->getMessage();
             }

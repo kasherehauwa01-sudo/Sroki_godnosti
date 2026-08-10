@@ -507,12 +507,23 @@ function emailNotificationType(string $subject): string
 {
     $value = mb_strtolower($subject, 'UTF-8');
     return match (true) {
+        str_contains($value, 'проверка наличия товара') => 'Заполнение остатков по просроченной партии',
         str_contains($value, 'остатк') => 'Остатки по товару',
         str_contains($value, 'срок') => 'Истекает срок годности',
         str_contains($value, 'фильтр') => 'Товар без фильтров',
         str_contains($value, 'тест') => 'Тестовое уведомление',
         default => 'Системное уведомление',
     };
+}
+
+/** Исправляет тип старых записей журнала, созданных до явной классификации письма. */
+function normalizeEmailNotificationType(string $type, string $subject): string
+{
+    if ($type === 'Системное уведомление' && str_contains(mb_strtolower($subject, 'UTF-8'), 'проверка наличия товара')) {
+        return 'Заполнение остатков по просроченной партии';
+    }
+
+    return $type;
 }
 
 function extractSmtpCode(string $response): string
