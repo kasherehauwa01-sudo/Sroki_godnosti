@@ -1,5 +1,6 @@
 const STOCK_EVENT_VIEWS_KEY = 'stockEventViews';
 const DEFAULT_HISTORY_ACTIONS = new Set(['bulk_create', 'create', 'update', 'delete', 'auto_import_completed', 'expiry_notifications_sent']);
+const ALWAYS_AVAILABLE_HISTORY_ACTIONS = [...DEFAULT_HISTORY_ACTIONS, 'auto_write_off', 'zero_stock_auto_status'];
 const HISTORY_PAGE_SIZE = 50;
 const storedStockEventViews = (() => {
     try {
@@ -1802,7 +1803,12 @@ async function loadHistory() {
 function renderHistoryActionOptions() {
     const container = qs('#historyActionOptions');
     if (!container) return;
-    const actions = [...new Set(state.allHistory.map((log) => String(log.event || log.action || '')).filter(Boolean))]
+    // Основные действия и системные события «Автосписание»/«Автоноль» должны
+    // быть доступны в фильтре ещё до появления первой записи такого типа.
+    const actions = [...new Set([
+        ...ALWAYS_AVAILABLE_HISTORY_ACTIONS,
+        ...state.allHistory.map((log) => String(log.event || log.action || '')).filter(Boolean),
+    ])]
         .sort((left, right) => formatHistoryAction(left).localeCompare(formatHistoryAction(right), 'ru'));
     container.innerHTML = actions.map((action) => `
         <label class="checkbox-row history-action-option">

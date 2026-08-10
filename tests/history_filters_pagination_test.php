@@ -37,5 +37,11 @@ foreach ([
         throw new RuntimeException('Отсутствует понятное название действия: ' . $translatedAction);
     }
 }
+if (!str_contains($javascript, "ALWAYS_AVAILABLE_HISTORY_ACTIONS = [...DEFAULT_HISTORY_ACTIONS, 'auto_write_off', 'zero_stock_auto_status']")) {
+    throw new RuntimeException('Автосписание и Автоноль должны всегда отображаться в фильтре истории.');
+}
+if (!str_contains($javascript, '...ALWAYS_AVAILABLE_HISTORY_ACTIONS')) {
+    throw new RuntimeException('Постоянные действия должны добавляться в список чекбоксов независимо от журнала.');
+}
 
 echo "Проверки фильтров и пагинации истории пройдены.\n";
