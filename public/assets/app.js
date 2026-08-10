@@ -1,6 +1,6 @@
 const STOCK_EVENT_VIEWS_KEY = 'stockEventViews';
-const DEFAULT_HISTORY_ACTIONS = new Set(['bulk_create', 'create', 'update', 'delete', 'auto_import_completed', 'expiry_notifications_sent']);
-const ALWAYS_AVAILABLE_HISTORY_ACTIONS = [...DEFAULT_HISTORY_ACTIONS, 'auto_write_off', 'zero_stock_auto_status'];
+const DEFAULT_HISTORY_ACTIONS = new Set(['bulk_create', 'create', 'update', 'delete', 'auto_import_completed', 'expiry_notifications_sent', 'auto_write_off', 'zero_stock_auto_status']);
+const ALWAYS_AVAILABLE_HISTORY_ACTIONS = [...DEFAULT_HISTORY_ACTIONS];
 const HISTORY_PAGE_SIZE = 50;
 const storedStockEventViews = (() => {
     try {

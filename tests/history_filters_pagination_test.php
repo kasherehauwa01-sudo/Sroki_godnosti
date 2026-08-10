@@ -13,7 +13,7 @@ foreach (['historyActionOptions', 'historyActionsSelectAll', 'historyActionsClea
     }
 }
 
-foreach (['bulk_create', 'create', 'update', 'delete', 'auto_import_completed', 'expiry_notifications_sent'] as $action) {
+foreach (['bulk_create', 'create', 'update', 'delete', 'auto_import_completed', 'expiry_notifications_sent', 'auto_write_off', 'zero_stock_auto_status'] as $action) {
     if (!str_contains($javascript, "DEFAULT_HISTORY_ACTIONS = new Set([") || !str_contains($javascript, "'{$action}'")) {
         throw new RuntimeException('По умолчанию не выбрано действие: ' . $action);
     }
@@ -37,7 +37,7 @@ foreach ([
         throw new RuntimeException('Отсутствует понятное название действия: ' . $translatedAction);
     }
 }
-if (!str_contains($javascript, "ALWAYS_AVAILABLE_HISTORY_ACTIONS = [...DEFAULT_HISTORY_ACTIONS, 'auto_write_off', 'zero_stock_auto_status']")) {
+if (!str_contains($javascript, 'ALWAYS_AVAILABLE_HISTORY_ACTIONS = [...DEFAULT_HISTORY_ACTIONS]')) {
     throw new RuntimeException('Автосписание и Автоноль должны всегда отображаться в фильтре истории.');
 }
 if (!str_contains($javascript, '...ALWAYS_AVAILABLE_HISTORY_ACTIONS')) {

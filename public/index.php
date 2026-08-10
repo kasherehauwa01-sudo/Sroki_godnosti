@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css?v=20260810-01">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260810-03"></script>
+    <script defer src="assets/app.js?v=20260810-04"></script>
 </head>
 <body>
     <header class="topbar">
@@ -516,7 +516,7 @@ declare(strict_types=1);
                 <div class="history-action-filter">
                     <span class="history-filter-label">Действие</span>
                     <details id="historyActionFilter">
-                        <summary id="historyActionFilterSummary">Выбрано: 6</summary>
+                        <summary id="historyActionFilterSummary">Выбрано: 8</summary>
                         <div class="history-action-dropdown">
                             <div class="history-action-filter-actions">
                                 <button class="small-button" id="historyActionsSelectAll" type="button">Выбрать все</button>
