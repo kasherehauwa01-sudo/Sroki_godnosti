@@ -11,9 +11,9 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260811-03">
+    <link rel="stylesheet" href="assets/styles.css?v=20260811-04">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260811-02"></script>
+    <script defer src="assets/app.js?v=20260811-03"></script>
 </head>
 <body>
     <header class="topbar">
@@ -550,7 +550,7 @@ declare(strict_types=1);
             <p class="subtitle" id="eventBatchesDialogMeta"></p>
             <div class="table-wrap event-batches-table-wrap">
                 <table>
-                    <thead><tr id="eventBatchesHead"><th>Артикул</th><th>Код</th><th>Наименование</th><th>Общий остаток</th></tr></thead>
+                    <thead><tr id="eventBatchesHead"><th class="event-main-column event-main-column-1">Артикул</th><th class="event-main-column event-main-column-2">Код</th><th class="event-main-column event-main-column-3">Наименование</th><th class="event-main-column event-main-column-4">Общий остаток</th></tr></thead>
                     <tbody id="eventBatchesBody"></tbody>
                 </table>
             </div>

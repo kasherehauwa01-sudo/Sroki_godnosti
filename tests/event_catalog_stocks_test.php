@@ -11,6 +11,12 @@ if (!is_string($api) || !is_string($javascript) || !is_string($html) || !is_stri
 if (!str_contains($css, '.modal.event-batches-dialog') || !str_contains($css, 'width: calc(100vw - 24px)')) {
     throw new RuntimeException('Окно события должно переопределять стандартную ширину modal и занимать ширину экрана.');
 }
+if (!str_contains($css, '.event-batches-table-wrap .event-main-column') || !str_contains($css, 'position: sticky')) {
+    throw new RuntimeException('Основные колонки таблицы события должны быть зафиксированы при горизонтальной прокрутке.');
+}
+if (!str_contains($css, 'width: 60ch') || !str_contains($css, 'overflow-wrap: anywhere')) {
+    throw new RuntimeException('Колонка «Наименование» должна иметь ширину 60 символов и переносить длинный текст.');
+}
 
 foreach ([
     "'event_catalog_stocks' => getExpiryEventCatalogStocks",
@@ -25,6 +31,9 @@ foreach (['Общий остаток', 'eventBatchesHead', 'event-batches-dialog
 }
 foreach (['event_catalog_stocks', 'eventCatalogWarehouseNames', 'eventCatalogStockQuantity', 'renderEventCatalogHeader', 'downloadEventCatalogStocks', '.xls'] as $fragment) {
     if (!str_contains($javascript, $fragment)) throw new RuntimeException('Клиент события не содержит: ' . $fragment);
+}
+if (!str_contains($javascript, 'event-main-column-${index + 1}') || !str_contains($javascript, 'event-main-column-4 numeric-cell')) {
+    throw new RuntimeException('Клиент должен назначать фиксирующие классы четырём основным колонкам.');
 }
 
 echo "Проверки остатков catalogvr в событии пройдены.\n";

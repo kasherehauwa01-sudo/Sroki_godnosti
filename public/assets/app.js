@@ -1230,7 +1230,7 @@ function eventCatalogStockQuantity(batch, warehouseName) {
 
 function renderEventCatalogHeader(warehouseNames) {
     qs('#eventBatchesHead').innerHTML = ['Артикул', 'Код', 'Наименование', 'Общий остаток', ...warehouseNames]
-        .map((title) => `<th>${escapeHtml(title)}</th>`).join('');
+        .map((title, index) => `<th${index < 4 ? ` class="event-main-column event-main-column-${index + 1}"` : ''}>${escapeHtml(title)}</th>`).join('');
 }
 
 async function openEventDetails(id) {
@@ -1251,10 +1251,10 @@ async function openEventDetails(id) {
         renderEventCatalogHeader(warehouseNames);
         qs('#eventBatchesBody').innerHTML = (detailedEvent.batches || []).map((batch) => `
         <tr>
-            <td>${escapeHtml(batch.article || '')}</td>
-            <td>${escapeHtml(batch.code || '')}</td>
-            <td>${escapeHtml(batch.name || '')}</td>
-            <td class="numeric-cell">${batch.catalog_total_stock === null ? '—' : formatQuantity(batch.catalog_total_stock)}</td>
+            <td class="event-main-column event-main-column-1">${escapeHtml(batch.article || '')}</td>
+            <td class="event-main-column event-main-column-2">${escapeHtml(batch.code || '')}</td>
+            <td class="event-main-column event-main-column-3">${escapeHtml(batch.name || '')}</td>
+            <td class="event-main-column event-main-column-4 numeric-cell">${batch.catalog_total_stock === null ? '—' : formatQuantity(batch.catalog_total_stock)}</td>
             ${warehouseNames.map((warehouseName) => {
                 const quantity = eventCatalogStockQuantity(batch, warehouseName);
                 return `<td class="numeric-cell">${quantity === null ? '—' : formatQuantity(quantity)}</td>`;
