@@ -115,7 +115,7 @@ function handleApiRequest(): void
                 'email_notification_logs' => getProtectedEmailNotificationLogs($pdo, $_GET),
                 'catalog_health' => getCatalogSyncStatus($pdo),
                 'purchase_event_summary' => ['ok' => true] + getPurchaseEventSummary($pdo, (string)($_GET['token'] ?? '')),
-                'purchase_event_xls' => downloadPurchaseEventXls($pdo, (string)($_GET['token'] ?? '')),
+                'purchase_event_xls' => downloadPurchaseEventXls($pdo, (string)($_GET['token'] ?? ''), (string)($_GET['format'] ?? 'view')),
                 'stock_batch_notifications' => ['ok' => true, 'notifications' => listPurchaseEventNotifications($pdo)],
                 'events' => ['ok' => true, 'events' => listExpiryEvents($pdo)],
                 'event_catalog_stocks' => getExpiryEventCatalogStocks($pdo, (string)($_GET['id'] ?? '')),
@@ -3273,7 +3273,8 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
         if ($personal && $total <= 0) continue;
         $displayName = trim((string)($catalogNames[(int)$batch['id']] ?? $batch['name'] ?? ''));
         if ($displayName === '') $displayName = (string)$batch['article'];
-        $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'total' => $total, 'status' => $batch['status'], 'quantities' => $quantities, 'auto_zero_quantities' => $autoZeroQuantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'manager_email' => $managerEmails[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
+        $fullyFilled = $quantities !== [] && !in_array(null, array_values($quantities), true);
+        $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'total' => $total, 'fully_filled' => $fullyFilled, 'status' => $batch['status'], 'quantities' => $quantities, 'auto_zero_quantities' => $autoZeroQuantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'manager_email' => $managerEmails[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
     }
     usort($rows, static fn (array $left, array $right): int => ($left['section'] <=> $right['section']) ?: ($left['id'] <=> $right['id']));
     return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'event_label' => str_starts_with((string)$log['event_key'], 'recount_') ? 'Пересчет' : ((int)$log['event_days'] . ' дней'), 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => BATCH_STATUSES, 'can_remind' => purchaseEventMissingWarehouses($event) !== []];
@@ -3404,9 +3405,35 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
     return ['ok' => true] + getPurchaseEventSummary($pdo, trim((string)($payload['token'] ?? '')));
 }
 
-function downloadPurchaseEventXls(PDO $pdo, string $token): array
+function purchaseEventPrimaryInvoiceRows(array $summary): array
+{
+    $rows = [['Номер', 'Просто колонка', 'Код', 'Просто колонка', 'Просто колонка', 'Просто колонка', 'Количество']];
+    $number = 1;
+    foreach ((array)($summary['rows'] ?? []) as $row) {
+        if (empty($row['fully_filled']) || (float)($row['total'] ?? 0) <= 0) continue;
+        $code = trim((string)($row['code'] ?? ''));
+        if ($code === '') continue;
+        $quantity = (float)$row['total'];
+        $rows[] = [$number++, '', $code, '', '', '', floor($quantity) === $quantity ? (int)$quantity : $quantity];
+    }
+    return $rows;
+}
+
+function downloadPurchaseEventXls(PDO $pdo, string $token, string $format = 'view'): array
 {
     $summary = getPurchaseEventSummary($pdo, $token);
+    if ($format === 'primary_invoice') {
+        $content = buildLegacyXlsContent(purchaseEventPrimaryInvoiceRows($summary));
+        $filename = sanitizeDownloadFilename('Первичный счет до ' . date('d.m.Y', strtotime((string)$summary['expiry_date'])) . '.xls');
+        header_remove('Content-Type');
+        header('Content-Type: application/vnd.ms-excel');
+        header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
+        header('Content-Length: ' . strlen($content));
+        echo $content;
+        exit;
+    }
+    if ($format !== 'view') throw new InvalidArgumentException('Неизвестный формат выгрузки сводной таблицы.');
+
     $headers = ['Раздел', "Код\nМенеджер", 'Наименование', 'Общий остаток', 'Статус'];
     foreach ($summary['warehouses'] as $warehouse) $headers[] = (string)$warehouse['name'];
     $rows = [$headers];
@@ -3582,6 +3609,34 @@ function buildBatchStockXlsxContent(array $rows): string
     }
 
     return buildSimpleXlsx($rows);
+}
+
+function buildLegacyXlsContent(array $rows): string
+{
+    if (!class_exists('PhpOffice\\PhpSpreadsheet\\Spreadsheet') || !class_exists('PhpOffice\\PhpSpreadsheet\\Writer\\Xls')) {
+        throw new RuntimeException('Для экспорта в первичный счет требуется поддержка записи XLS в PhpSpreadsheet.');
+    }
+    $spreadsheetClass = 'PhpOffice\\PhpSpreadsheet\\Spreadsheet';
+    $writerClass = 'PhpOffice\\PhpSpreadsheet\\Writer\\Xls';
+    $spreadsheet = new $spreadsheetClass();
+    $sheet = $spreadsheet->getActiveSheet();
+    foreach ($rows as $rowIndex => $row) {
+        foreach (array_values($row) as $columnIndex => $value) {
+            $sheet->setCellValue(xlsxColumnName($columnIndex + 1) . (string)($rowIndex + 1), $value);
+        }
+    }
+    $tmp = tempnam(sys_get_temp_dir(), 'primary-invoice-');
+    if ($tmp === false) throw new RuntimeException('Не удалось создать временный XLS-файл.');
+    try {
+        $writer = new $writerClass($spreadsheet);
+        $writer->save($tmp);
+        $content = file_get_contents($tmp);
+        if (!is_string($content) || $content === '') throw new RuntimeException('Не удалось сформировать XLS-файл.');
+        return $content;
+    } finally {
+        @unlink($tmp);
+        $spreadsheet->disconnectWorksheets();
+    }
 }
 
 

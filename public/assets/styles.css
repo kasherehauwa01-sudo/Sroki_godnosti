@@ -222,6 +222,11 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .purchase-event-card { max-width: 1500px; margin: 0 auto; display: grid; gap: 14px; }
 .purchase-event-card h1 { color: var(--text); font-size: clamp(26px, 4vw, 36px); }
 .purchase-event-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.purchase-event-export-options { display: grid; gap: 12px; }
+.purchase-event-export-option { display: grid; gap: 5px; width: 100%; padding: 16px; text-align: left; color: var(--text); background: #f8fafc; border: 1px solid var(--border); }
+.purchase-event-export-option:hover { border-color: var(--primary); background: #eef4ff; }
+.purchase-event-export-option strong { font-size: 16px; }
+.purchase-event-export-option small { color: var(--muted); font-weight: 500; }
 .purchase-event-table-wrap { width: 100%; max-width: 100%; height: calc(100vh - 190px); max-height: calc(100vh - 190px); overflow: auto; }
 .purchase-event-table { min-width: 980px; }
 .purchase-event-table th { position: sticky; top: 0; z-index: 3; }
