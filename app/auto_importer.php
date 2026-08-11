@@ -30,7 +30,7 @@ function runDueAutoImport(PDO $pdo): void
     ensureSettingsSchema($pdo);
 
     $settings = getRawSettings($pdo);
-    $time = AUTO_IMPORT_DEFAULT_TIME;
+    $time = autoImportTimeFromSettings($settings);
     $now = new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
     $scheduledAt = autoImportScheduledAt($now, $time);
 
@@ -70,9 +70,36 @@ function autoImportScheduledAt(DateTimeImmutable $now, string $time): DateTimeIm
     return $now < $scheduledAt ? $scheduledAt->modify('-1 day') : $scheduledAt;
 }
 
+function autoImportTimeFromSettings(array $settings): string
+{
+    $time = trim((string)($settings['auto_import_time'] ?? ''));
+
+    return preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time) ? $time : AUTO_IMPORT_DEFAULT_TIME;
+}
+
 function shouldRunAutoImportNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTimeImmutable $now): bool
 {
     $start = $scheduledAt->format('Y-m-d H:i:s');
+    $targetDates = autoImportTargetDates($scheduledAt, $now);
+    if (hasCompletedAutoImportForTargetDates($pdo, $targetDates)) {
+        // Успешно загруженную дату не ищем повторно даже после изменения времени
+        // расписания или появления более поздней технической ошибки.
+        return false;
+    }
+
+    $completedStatement = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM logs
+         WHERE action = 'auto_import_completed'
+           AND created_at >= :start"
+    );
+    $completedStatement->execute([':start' => $start]);
+    if ((int)$completedStatement->fetchColumn() > 0) {
+        // Успешная загрузка закрывает текущее окно расписания независимо от более поздних
+        // технических записей. Новые попытки разрешатся только в следующем окне.
+        return false;
+    }
+
     $attemptsStatement = $pdo->prepare(
         "SELECT COUNT(*)
          FROM logs
@@ -107,6 +134,30 @@ function shouldRunAutoImportNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTi
     $lastRunAt = new DateTimeImmutable((string)$lastRun['created_at'], new DateTimeZone(AUTO_IMPORT_TIMEZONE));
 
     return $lastRunAt <= $now->modify('-' . AUTO_IMPORT_RETRY_INTERVAL_SECONDS . ' seconds');
+}
+
+function hasCompletedAutoImportForTargetDates(PDO $pdo, array $targetDates): bool
+{
+    $expectedDates = array_fill_keys(array_map(
+        static fn (DateTimeImmutable $date): string => $date->format('Y-m-d'),
+        $targetDates
+    ), true);
+    if (!$expectedDates) return false;
+
+    $statement = $pdo->query(
+        "SELECT payload
+         FROM logs
+         WHERE action = 'auto_import_completed'
+         ORDER BY id DESC
+         LIMIT 30"
+    );
+    foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $payload) {
+        $details = json_decode((string)$payload, true);
+        $targetDate = is_array($details) ? trim((string)($details['target_date'] ?? '')) : '';
+        if ($targetDate !== '' && isset($expectedDates[$targetDate])) return true;
+    }
+
+    return false;
 }
 
 function acquireAutoImportLock(PDO $pdo): bool
@@ -286,6 +337,11 @@ function autoImportTargetDatesForAttempt(string $time): array
 {
     $now = new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
     $scheduledAt = autoImportScheduledAt($now, $time);
+    return autoImportTargetDates($scheduledAt, $now);
+}
+
+function autoImportTargetDates(DateTimeImmutable $scheduledAt, DateTimeImmutable $now): array
+{
     $dates = [$scheduledAt];
     if ($scheduledAt->format('Y-m-d') !== $now->format('Y-m-d')) {
         $dates[] = $now;
