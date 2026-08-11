@@ -22,6 +22,15 @@ foreach ($rows as $row) {
     if (count($row) !== 7) throw new RuntimeException('Каждая строка первичного счета должна физически содержать 7 колонок.');
 }
 
+$primaryFilename = sanitizeDownloadFilename('Первичный счет до 31.08.2026.xls');
+if ($primaryFilename !== 'Первичный счет до 31.08.2026.xls') {
+    throw new RuntimeException('Имя BIFF-файла должно сохранять расширение XLS: ' . $primaryFilename);
+}
+$unsafeFilename = sanitizeDownloadFilename('Первичный/счет:31.08.2026.xls');
+if ($unsafeFilename !== 'Первичный_счет_31.08.2026.xls') {
+    throw new RuntimeException('Запрещённые символы в имени файла должны заменяться без изменения расширения XLS.');
+}
+
 $page = file_get_contents(__DIR__ . '/../public/purchase-event.php');
 if (!is_string($page)) throw new RuntimeException('Не удалось прочитать страницу сводной таблицы.');
 foreach (['Выберите формат таблицы', 'Для просмотра', 'Для экспорта в первичный счет', "downloadPurchaseEventXls('view')", "downloadPurchaseEventXls('primary_invoice')"] as $fragment) {

@@ -3582,8 +3582,12 @@ function formatBatchExpiryForFilename(array $batch): string
 
 function sanitizeDownloadFilename(string $filename): string
 {
-    $filename = preg_replace('/[\\\/\:\*\?"\<\>\|]+/u', '_', $filename) ?: 'ostatki.xlsx';
-    return trim($filename) !== '' ? $filename : 'ostatki.xlsx';
+    // Разделитель ~ не конфликтует со слешем внутри набора запрещённых символов.
+    // Ранее некорректное регулярное выражение всегда подставляло ostatki.xlsx,
+    // поэтому настоящий BIFF-файл получал расширение XLSX и Excel его отклонял.
+    $sanitized = preg_replace('~[\\/:*?"<>|]+~u', '_', $filename);
+    if (!is_string($sanitized) || trim($sanitized) === '') return 'ostatki.xlsx';
+    return trim($sanitized);
 }
 
 
