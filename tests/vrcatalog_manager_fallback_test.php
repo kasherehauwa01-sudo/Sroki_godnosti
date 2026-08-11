@@ -102,6 +102,9 @@ assertSameValue([22], array_column(filterBatchesByVrCatalogWarehouseZeroStock([[
 assertSameValue([22], array_column(filterBatchesByVrCatalogWarehouseZeroStock([['id' => 22, 'article' => 'aviators-zero']], [$aviatorsZeroProduct], ['name' => 'Авиаторов Склад']), 'id'), 'Ноль объединённого склада должен давать автоноль для склада');
 
 foreach ([
+    'ОКА-47601-1' => 'ОКА-47601',
+    'ОКА-47601-25' => 'ОКА-47601',
+    'ОКА-47601-1-25' => 'ОКА-47601',
     'ЖС2344-1' => 'ЖС2344',
     'ЖС2344-1-25' => 'ЖС2344',
     'ЖС2344-25' => 'ЖС2344',

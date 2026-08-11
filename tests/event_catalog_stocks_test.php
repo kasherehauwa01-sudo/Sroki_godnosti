@@ -21,6 +21,9 @@ if (!str_contains($css, 'width: 30ch') || !str_contains($css, 'overflow-wrap: an
 foreach ([
     "'event_catalog_stocks' => getExpiryEventCatalogStocks",
     'fetchVrCatalogProductsByArticles(',
+    'fetchVrCatalogProductsWithManagerFallback(',
+    "\$batch['code']",
+    'managerProductsByCode',
     "'catalog_total_stock'",
     "'catalog_stocks'",
     "'catalog_manager'",

@@ -2750,10 +2750,27 @@ function getExpiryEventCatalogStocks(PDO $pdo, string $eventId): array
         $productsByArticle[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
     }
 
-    $event['batches'] = array_map(static function (array $batch) use ($productsByArticle): array {
+    // Остатки catalogvr связывает с артикулом, а менеджер в реестре определяется
+    // по коду товара. Для кодов -1, -25 и -1-25 helper выполнит второй поиск по
+    // базовому коду, если у исходного кода менеджер не найден.
+    $managerLookupCodes = array_values(array_unique(array_filter(array_map(
+        static fn (array $batch): string => trim((string)($batch['code'] ?? '')) ?: trim((string)($batch['article'] ?? '')),
+        $event['batches']
+    ))));
+    $managerProducts = fetchVrCatalogProductsWithManagerFallback($managerLookupCodes, $pdo);
+    $managerProductsByCode = [];
+    foreach ($managerProducts as $product) {
+        if (!is_array($product) || !vrCatalogProductFound($product)) continue;
+        $managerProductsByCode[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
+    }
+
+    $event['batches'] = array_map(static function (array $batch) use ($productsByArticle, $managerProductsByCode): array {
         $articleProducts = $productsByArticle[vrCatalogArticleLookupKey((string)$batch['article'])] ?? [];
         $summary = vrCatalogStockSummary($articleProducts);
-        $managerProduct = vrCatalogProductWithUnambiguousManager($articleProducts);
+        $managerLookupCode = trim((string)($batch['code'] ?? '')) ?: trim((string)$batch['article']);
+        $managerProduct = vrCatalogProductWithUnambiguousManager(
+            $managerProductsByCode[vrCatalogArticleLookupKey($managerLookupCode)] ?? []
+        );
         $manager = $managerProduct ? vrCatalogManagerValue($managerProduct) : ['value' => ''];
         $batch['catalog_found'] = (bool)$articleProducts;
         $batch['catalog_manager'] = (string)($manager['value'] ?? '');
