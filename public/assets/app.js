@@ -1212,8 +1212,25 @@ function renderEvents() {
     qsa('[data-event-id]').forEach((row) => row.addEventListener('click', () => openEventDetails(row.dataset.eventId)));
 }
 
-function formatEventCatalogStocks(stocks) {
-    return (stocks || []).map((stock) => `${stock.name}: ${formatQuantity(stock.quantity)}`).join('\n');
+function eventCatalogWarehouseNames(batches) {
+    const names = new Map();
+    (batches || []).flatMap((batch) => batch.catalog_stocks || []).forEach((stock) => {
+        const name = String(stock.name || '').trim();
+        const key = name.toLocaleLowerCase('ru-RU').replace(/\s+/g, ' ');
+        if (key && !names.has(key)) names.set(key, name);
+    });
+    return [...names.values()].sort((left, right) => left.localeCompare(right, 'ru'));
+}
+
+function eventCatalogStockQuantity(batch, warehouseName) {
+    const expected = String(warehouseName).trim().toLocaleLowerCase('ru-RU').replace(/\s+/g, ' ');
+    const stock = (batch.catalog_stocks || []).find((item) => String(item.name || '').trim().toLocaleLowerCase('ru-RU').replace(/\s+/g, ' ') === expected);
+    return stock ? stock.quantity : null;
+}
+
+function renderEventCatalogHeader(warehouseNames) {
+    qs('#eventBatchesHead').innerHTML = ['Артикул', 'Код', 'Наименование', 'Общий остаток', ...warehouseNames]
+        .map((title) => `<th>${escapeHtml(title)}</th>`).join('');
 }
 
 async function openEventDetails(id) {
@@ -1221,39 +1238,52 @@ async function openEventDetails(id) {
     if (!event) return;
     qs('#eventBatchesDialogTitle').textContent = `${Number(event.event_type)} день — ${formatDateRu(event.event_date)}`;
     qs('#eventBatchesDialogMeta').textContent = `Партий в событии: ${Number(event.batch_count || 0)}`;
-    qs('#eventBatchesBody').innerHTML = '<tr><td colspan="5">Загружаю остатки из catalogvr...</td></tr>';
+    renderEventCatalogHeader([]);
+    qs('#eventBatchesBody').innerHTML = '<tr><td colspan="4">Загружаю остатки из catalogvr...</td></tr>';
     qs('#downloadEventCatalogStocksButton').disabled = true;
     qs('#eventBatchesDialog').showModal();
     try {
         const result = await api('event_catalog_stocks', { id });
         const detailedEvent = result.event || event;
         state.selectedEventDetails = detailedEvent;
+        const warehouseNames = eventCatalogWarehouseNames(detailedEvent.batches);
+        detailedEvent.catalog_warehouse_names = warehouseNames;
+        renderEventCatalogHeader(warehouseNames);
         qs('#eventBatchesBody').innerHTML = (detailedEvent.batches || []).map((batch) => `
         <tr>
             <td>${escapeHtml(batch.article || '')}</td>
             <td>${escapeHtml(batch.code || '')}</td>
             <td>${escapeHtml(batch.name || '')}</td>
             <td class="numeric-cell">${batch.catalog_total_stock === null ? '—' : formatQuantity(batch.catalog_total_stock)}</td>
-            <td class="event-catalog-stocks">${escapeHtml(formatEventCatalogStocks(batch.catalog_stocks) || '—')}</td>
+            ${warehouseNames.map((warehouseName) => {
+                const quantity = eventCatalogStockQuantity(batch, warehouseName);
+                return `<td class="numeric-cell">${quantity === null ? '—' : formatQuantity(quantity)}</td>`;
+            }).join('')}
         </tr>
-        `).join('') || '<tr><td colspan="5">Партий нет.</td></tr>';
+        `).join('') || `<tr><td colspan="${4 + warehouseNames.length}">Партий нет.</td></tr>`;
         qs('#downloadEventCatalogStocksButton').disabled = !(detailedEvent.batches || []).length;
     } catch (error) {
         state.selectedEventDetails = null;
-        qs('#eventBatchesBody').innerHTML = `<tr><td colspan="5">${escapeHtml(error.message)}</td></tr>`;
+        qs('#eventBatchesBody').innerHTML = `<tr><td colspan="4">${escapeHtml(error.message)}</td></tr>`;
     }
 }
 
 function downloadEventCatalogStocks() {
     const event = state.selectedEventDetails;
     if (!event) return;
-    exportXlsx(event.batches || [], `sobytie_${event.event_type}_${event.event_date}.xls`, (batch) => ({
-        'Артикул': batch.article || '',
-        'Код': batch.code || '',
-        'Наименование': batch.name || '',
-        'Общий остаток': batch.catalog_total_stock ?? '',
-        'Остатки по складам': formatEventCatalogStocks(batch.catalog_stocks),
-    }));
+    const warehouseNames = event.catalog_warehouse_names || eventCatalogWarehouseNames(event.batches);
+    exportXlsx(event.batches || [], `sobytie_${event.event_type}_${event.event_date}.xls`, (batch) => {
+        const row = {
+            'Артикул': batch.article || '',
+            'Код': batch.code || '',
+            'Наименование': batch.name || '',
+            'Общий остаток': batch.catalog_total_stock ?? '',
+        };
+        warehouseNames.forEach((warehouseName) => {
+            row[warehouseName] = eventCatalogStockQuantity(batch, warehouseName) ?? '';
+        });
+        return row;
+    });
 }
 
 function closeEventBatchesDialog() {

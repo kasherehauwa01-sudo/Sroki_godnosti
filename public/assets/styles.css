@@ -69,7 +69,12 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .invalid-date-label { color: #6d28d9; font-weight: 800; }
 .status-select { min-width: 145px; }
 .history-details { white-space: pre-line; }
-.event-catalog-stocks { min-width: 220px; white-space: pre-line; }
+.event-batches-dialog { width: calc(100vw - 24px); max-width: none; height: calc(100vh - 24px); max-height: none; }
+.event-batches-card { height: calc(100vh - 24px); max-height: calc(100vh - 24px); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.event-batches-table-wrap { min-height: 0; height: 100%; overflow: auto; }
+.event-batches-table-wrap table { min-width: max-content; }
+.event-batches-table-wrap th { min-width: 130px; }
+.event-batches-table-wrap th:nth-child(3) { min-width: 260px; }
 .history-action-filter { display: grid; gap: 7px; position: relative; }
 .history-filter-label { font-weight: 700; color: #334155; }
 .history-action-filter details { position: relative; }

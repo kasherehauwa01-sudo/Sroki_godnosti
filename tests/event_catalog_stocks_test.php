@@ -16,10 +16,10 @@ foreach ([
 ] as $fragment) {
     if (!str_contains($api, $fragment)) throw new RuntimeException('API события не содержит: ' . $fragment);
 }
-foreach (['Общий остаток', 'Остатки по складам', 'downloadEventCatalogStocksButton', 'Скачать Excel'] as $fragment) {
+foreach (['Общий остаток', 'eventBatchesHead', 'event-batches-dialog', 'downloadEventCatalogStocksButton', 'Скачать Excel'] as $fragment) {
     if (!str_contains($html, $fragment)) throw new RuntimeException('Окно события не содержит: ' . $fragment);
 }
-foreach (['event_catalog_stocks', 'formatEventCatalogStocks', 'downloadEventCatalogStocks', '.xls'] as $fragment) {
+foreach (['event_catalog_stocks', 'eventCatalogWarehouseNames', 'eventCatalogStockQuantity', 'renderEventCatalogHeader', 'downloadEventCatalogStocks', '.xls'] as $fragment) {
     if (!str_contains($javascript, $fragment)) throw new RuntimeException('Клиент события не содержит: ' . $fragment);
 }
 
