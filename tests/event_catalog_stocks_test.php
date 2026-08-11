@@ -1,0 +1,30 @@
+<?php
+declare(strict_types=1);
+
+$api = file_get_contents(__DIR__ . '/../public/api.php');
+$javascript = file_get_contents(__DIR__ . '/../public/assets/app.js');
+$html = file_get_contents(__DIR__ . '/../public/index.php');
+$css = file_get_contents(__DIR__ . '/../public/assets/styles.css');
+if (!is_string($api) || !is_string($javascript) || !is_string($html) || !is_string($css)) {
+    throw new RuntimeException('Не удалось прочитать реализацию остатков события.');
+}
+if (!str_contains($css, '.modal.event-batches-dialog') || !str_contains($css, 'width: calc(100vw - 24px)')) {
+    throw new RuntimeException('Окно события должно переопределять стандартную ширину modal и занимать ширину экрана.');
+}
+
+foreach ([
+    "'event_catalog_stocks' => getExpiryEventCatalogStocks",
+    'fetchVrCatalogProductsByArticles(',
+    "'catalog_total_stock'",
+    "'catalog_stocks'",
+] as $fragment) {
+    if (!str_contains($api, $fragment)) throw new RuntimeException('API события не содержит: ' . $fragment);
+}
+foreach (['Общий остаток', 'eventBatchesHead', 'event-batches-dialog', 'downloadEventCatalogStocksButton', 'Скачать Excel'] as $fragment) {
+    if (!str_contains($html, $fragment)) throw new RuntimeException('Окно события не содержит: ' . $fragment);
+}
+foreach (['event_catalog_stocks', 'eventCatalogWarehouseNames', 'eventCatalogStockQuantity', 'renderEventCatalogHeader', 'downloadEventCatalogStocks', '.xls'] as $fragment) {
+    if (!str_contains($javascript, $fragment)) throw new RuntimeException('Клиент события не содержит: ' . $fragment);
+}
+
+echo "Проверки остатков catalogvr в событии пройдены.\n";
