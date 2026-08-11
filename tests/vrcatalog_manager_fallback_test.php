@@ -79,6 +79,11 @@ $nestedStockProduct = ['article' => '346051', 'found' => true, 'data' => ['remai
 assertSameValue(3.0, vrCatalogWarehouseStockQuantity($nestedStockProduct, ['name' => 'Козловская']), 'Остаток должен находиться рекурсивно и читаться из строки');
 assertSameValue(7.5, vrCatalogWarehouseStockQuantity($nestedStockProduct, ['name' => 'Стройград']), 'Дробный остаток с запятой должен читаться как число');
 
+$stockSummary = vrCatalogStockSummary([$russianStockProduct]);
+assertSameValue(15.0, $stockSummary['total'], 'Общий остаток должен быть суммой всех складских остатков catalogvr');
+assertSameValue(['Авиаторов Зал+Склад', 'Бахтурова'], array_column($stockSummary['stocks'], 'name'), 'Складские остатки должны сортироваться по названию');
+assertSameValue(null, vrCatalogStockSummary([['article' => 'без-остатков', 'found' => true]])['total'], 'Отсутствующие строки catalogvr нельзя выдавать за нулевой остаток');
+
 $zeroProducts = [
     ['article' => 'zero', 'found' => true, 'stocks' => [['Склад' => 'Бахтурова', 'Остаток' => 0]]],
     ['article' => 'positive', 'found' => true, 'stocks' => [['Склад' => 'Бахтурова', 'Остаток' => 2]]],

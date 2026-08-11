@@ -11,9 +11,9 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260810-01">
+    <link rel="stylesheet" href="assets/styles.css?v=20260811-01">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260810-04"></script>
+    <script defer src="assets/app.js?v=20260811-01"></script>
 </head>
 <body>
     <header class="topbar">
@@ -550,11 +550,12 @@ declare(strict_types=1);
             <p class="subtitle" id="eventBatchesDialogMeta"></p>
             <div class="table-wrap">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th></tr></thead>
+                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th><th>Общий остаток</th><th>Остатки по складам</th></tr></thead>
                     <tbody id="eventBatchesBody"></tbody>
                 </table>
             </div>
             <div class="modal-actions">
+                <button class="ghost-button" id="downloadEventCatalogStocksButton" type="button" disabled>Скачать Excel</button>
                 <button class="primary" id="confirmEventBatchesDialogButton" type="button">Закрыть</button>
             </div>
         </div>

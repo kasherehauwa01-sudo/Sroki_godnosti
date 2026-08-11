@@ -69,6 +69,7 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .invalid-date-label { color: #6d28d9; font-weight: 800; }
 .status-select { min-width: 145px; }
 .history-details { white-space: pre-line; }
+.event-catalog-stocks { min-width: 220px; white-space: pre-line; }
 .history-action-filter { display: grid; gap: 7px; position: relative; }
 .history-filter-label { font-weight: 700; color: #334155; }
 .history-action-filter details { position: relative; }

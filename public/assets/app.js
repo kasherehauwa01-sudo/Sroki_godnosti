@@ -39,6 +39,7 @@ const state = {
     stockEventViews: storedStockEventViews,
     selectedStockBatchId: null,
     events: [],
+    selectedEventDetails: null,
     eventPeriodFilters: new Set(['today', 'future']),
     emailNotificationLogs: [],
     selectedEmailNotificationLogId: null,
@@ -128,7 +129,7 @@ async function copyDeployCommand() {
 }
 
 function getApiMethod(action, data = {}) {
-    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'purchase_recipients', 'email_notification_logs', 'catalog_health']);
+    const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'event_catalog_stocks', 'purchase_recipients', 'email_notification_logs', 'catalog_health']);
     const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'run_notifications_now', 'catalog_sync_test']);
 
     // Действие settings используется и для чтения, и для сохранения:
@@ -1211,23 +1212,53 @@ function renderEvents() {
     qsa('[data-event-id]').forEach((row) => row.addEventListener('click', () => openEventDetails(row.dataset.eventId)));
 }
 
-function openEventDetails(id) {
+function formatEventCatalogStocks(stocks) {
+    return (stocks || []).map((stock) => `${stock.name}: ${formatQuantity(stock.quantity)}`).join('\n');
+}
+
+async function openEventDetails(id) {
     const event = state.events.find((item) => String(item.id) === String(id));
     if (!event) return;
     qs('#eventBatchesDialogTitle').textContent = `${Number(event.event_type)} день — ${formatDateRu(event.event_date)}`;
     qs('#eventBatchesDialogMeta').textContent = `Партий в событии: ${Number(event.batch_count || 0)}`;
-    qs('#eventBatchesBody').innerHTML = (event.batches || []).map((batch) => `
+    qs('#eventBatchesBody').innerHTML = '<tr><td colspan="5">Загружаю остатки из catalogvr...</td></tr>';
+    qs('#downloadEventCatalogStocksButton').disabled = true;
+    qs('#eventBatchesDialog').showModal();
+    try {
+        const result = await api('event_catalog_stocks', { id });
+        const detailedEvent = result.event || event;
+        state.selectedEventDetails = detailedEvent;
+        qs('#eventBatchesBody').innerHTML = (detailedEvent.batches || []).map((batch) => `
         <tr>
             <td>${escapeHtml(batch.article || '')}</td>
             <td>${escapeHtml(batch.code || '')}</td>
             <td>${escapeHtml(batch.name || '')}</td>
+            <td class="numeric-cell">${batch.catalog_total_stock === null ? '—' : formatQuantity(batch.catalog_total_stock)}</td>
+            <td class="event-catalog-stocks">${escapeHtml(formatEventCatalogStocks(batch.catalog_stocks) || '—')}</td>
         </tr>
-    `).join('') || '<tr><td colspan="3">Партий нет.</td></tr>';
-    qs('#eventBatchesDialog').showModal();
+        `).join('') || '<tr><td colspan="5">Партий нет.</td></tr>';
+        qs('#downloadEventCatalogStocksButton').disabled = !(detailedEvent.batches || []).length;
+    } catch (error) {
+        state.selectedEventDetails = null;
+        qs('#eventBatchesBody').innerHTML = `<tr><td colspan="5">${escapeHtml(error.message)}</td></tr>`;
+    }
+}
+
+function downloadEventCatalogStocks() {
+    const event = state.selectedEventDetails;
+    if (!event) return;
+    exportXlsx(event.batches || [], `sobytie_${event.event_type}_${event.event_date}.xls`, (batch) => ({
+        'Артикул': batch.article || '',
+        'Код': batch.code || '',
+        'Наименование': batch.name || '',
+        'Общий остаток': batch.catalog_total_stock ?? '',
+        'Остатки по складам': formatEventCatalogStocks(batch.catalog_stocks),
+    }));
 }
 
 function closeEventBatchesDialog() {
     qs('#eventBatchesDialog').close();
+    state.selectedEventDetails = null;
 }
 
 async function loadStockBatchNotifications() {
@@ -2772,6 +2803,7 @@ function bindEvents() {
     }));
     qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
     qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
+    qs('#downloadEventCatalogStocksButton').addEventListener('click', downloadEventCatalogStocks);
 
     qs('#filterSearch').addEventListener('input', renderRegistry);
     qs('#filterSearchColumn').addEventListener('change', renderRegistry);

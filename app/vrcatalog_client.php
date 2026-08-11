@@ -226,6 +226,32 @@ function vrCatalogExtractWarehouseStockRows(array $product): array
     return $rows;
 }
 
+/** Объединяет складские строки карточек одного артикула без подстановки ложного нуля. */
+function vrCatalogStockSummary(array $products): array
+{
+    $warehouseStocks = [];
+    foreach ($products as $product) {
+        if (!is_array($product) || !vrCatalogProductFound($product)) continue;
+        foreach (vrCatalogExtractWarehouseStockRows($product) as $stock) {
+            $key = vrCatalogWarehouseLookupKey((string)$stock['name']);
+            if ($key === '') continue;
+            if (!isset($warehouseStocks[$key])) {
+                $warehouseStocks[$key] = ['name' => trim((string)$stock['name']), 'quantity' => 0.0];
+            }
+            $warehouseStocks[$key]['quantity'] += (float)$stock['quantity'];
+        }
+    }
+    $stocks = array_values($warehouseStocks);
+    usort($stocks, static fn (array $left, array $right): int => strnatcasecmp((string)$left['name'], (string)$right['name']));
+
+    return [
+        'stocks' => $stocks,
+        // Если catalogvr не передал ни одной складской строки, показываем прочерк,
+        // а не вводящий в заблуждение нулевой общий остаток.
+        'total' => $stocks ? array_sum(array_column($stocks, 'quantity')) : null,
+    ];
+}
+
 function vrCatalogNormalizeStockContainer(array $stocks): array
 {
     $rows = [];

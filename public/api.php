@@ -118,6 +118,7 @@ function handleApiRequest(): void
                 'purchase_event_xls' => downloadPurchaseEventXls($pdo, (string)($_GET['token'] ?? '')),
                 'stock_batch_notifications' => ['ok' => true, 'notifications' => listPurchaseEventNotifications($pdo)],
                 'events' => ['ok' => true, 'events' => listExpiryEvents($pdo)],
+                'event_catalog_stocks' => getExpiryEventCatalogStocks($pdo, (string)($_GET['id'] ?? '')),
                 'batch_stock_xlsx' => downloadBatchStockXlsx($pdo, (int)($_GET['batch_id'] ?? 0)),
                 'tick' => ['ok' => true],
                 default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
@@ -2729,6 +2730,36 @@ function purchaseEventTypeLabel(string $eventKey, int $eventDays): string
     if ($eventKey === 'overdue_stock_check') return 'Проверка наличия товара';
     if (str_starts_with($eventKey, 'recount_')) return 'Пересчет';
     return $eventDays . ' дней';
+}
+
+function getExpiryEventCatalogStocks(PDO $pdo, string $eventId): array
+{
+    $event = null;
+    foreach (listExpiryEvents($pdo) as $candidate) {
+        if ((string)($candidate['id'] ?? '') === $eventId) {
+            $event = $candidate;
+            break;
+        }
+    }
+    if (!$event) throw new InvalidArgumentException('Событие не найдено.');
+
+    $products = fetchVrCatalogProductsByArticles(array_column($event['batches'], 'article'), $pdo);
+    $productsByArticle = [];
+    foreach ($products as $product) {
+        if (!is_array($product) || !vrCatalogProductFound($product)) continue;
+        $productsByArticle[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
+    }
+
+    $event['batches'] = array_map(static function (array $batch) use ($productsByArticle): array {
+        $articleProducts = $productsByArticle[vrCatalogArticleLookupKey((string)$batch['article'])] ?? [];
+        $summary = vrCatalogStockSummary($articleProducts);
+        $batch['catalog_found'] = (bool)$articleProducts;
+        $batch['catalog_stocks'] = $summary['stocks'];
+        $batch['catalog_total_stock'] = $summary['total'];
+        return $batch;
+    }, $event['batches']);
+
+    return ['ok' => true, 'event' => $event];
 }
 
 function listPurchaseEventNotifications(PDO $pdo): array
