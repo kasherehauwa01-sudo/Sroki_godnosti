@@ -1229,8 +1229,8 @@ function eventCatalogStockQuantity(batch, warehouseName) {
 }
 
 function renderEventCatalogHeader(warehouseNames) {
-    qs('#eventBatchesHead').innerHTML = ['Артикул', 'Код', 'Наименование', 'Общий остаток', ...warehouseNames]
-        .map((title, index) => `<th${index < 4 ? ` class="event-main-column event-main-column-${index + 1}"` : ''}>${escapeHtml(title)}</th>`).join('');
+    qs('#eventBatchesHead').innerHTML = ['Артикул', 'Код', 'Наименование', 'Менеджер', 'Общий остаток', ...warehouseNames]
+        .map((title, index) => `<th${index < 5 ? ` class="event-main-column event-main-column-${index + 1}"` : ''}>${escapeHtml(title)}</th>`).join('');
 }
 
 async function openEventDetails(id) {
@@ -1239,7 +1239,7 @@ async function openEventDetails(id) {
     qs('#eventBatchesDialogTitle').textContent = `${Number(event.event_type)} день — ${formatDateRu(event.event_date)}`;
     qs('#eventBatchesDialogMeta').textContent = `Партий в событии: ${Number(event.batch_count || 0)}`;
     renderEventCatalogHeader([]);
-    qs('#eventBatchesBody').innerHTML = '<tr><td colspan="4">Загружаю остатки из catalogvr...</td></tr>';
+    qs('#eventBatchesBody').innerHTML = '<tr><td colspan="5">Загружаю остатки из catalogvr...</td></tr>';
     qs('#downloadEventCatalogStocksButton').disabled = true;
     qs('#eventBatchesDialog').showModal();
     try {
@@ -1254,17 +1254,18 @@ async function openEventDetails(id) {
             <td class="event-main-column event-main-column-1">${escapeHtml(batch.article || '')}</td>
             <td class="event-main-column event-main-column-2">${escapeHtml(batch.code || '')}</td>
             <td class="event-main-column event-main-column-3">${escapeHtml(batch.name || '')}</td>
-            <td class="event-main-column event-main-column-4 numeric-cell">${batch.catalog_total_stock === null ? '—' : formatQuantity(batch.catalog_total_stock)}</td>
+            <td class="event-main-column event-main-column-4">${escapeHtml(batch.catalog_manager || '—')}</td>
+            <td class="event-main-column event-main-column-5 numeric-cell">${batch.catalog_total_stock === null ? '—' : formatQuantity(batch.catalog_total_stock)}</td>
             ${warehouseNames.map((warehouseName) => {
                 const quantity = eventCatalogStockQuantity(batch, warehouseName);
                 return `<td class="numeric-cell">${quantity === null ? '—' : formatQuantity(quantity)}</td>`;
             }).join('')}
         </tr>
-        `).join('') || `<tr><td colspan="${4 + warehouseNames.length}">Партий нет.</td></tr>`;
+        `).join('') || `<tr><td colspan="${5 + warehouseNames.length}">Партий нет.</td></tr>`;
         qs('#downloadEventCatalogStocksButton').disabled = !(detailedEvent.batches || []).length;
     } catch (error) {
         state.selectedEventDetails = null;
-        qs('#eventBatchesBody').innerHTML = `<tr><td colspan="4">${escapeHtml(error.message)}</td></tr>`;
+        qs('#eventBatchesBody').innerHTML = `<tr><td colspan="5">${escapeHtml(error.message)}</td></tr>`;
     }
 }
 
@@ -1277,6 +1278,7 @@ function downloadEventCatalogStocks() {
             'Артикул': batch.article || '',
             'Код': batch.code || '',
             'Наименование': batch.name || '',
+            'Менеджер': batch.catalog_manager || '',
             'Общий остаток': batch.catalog_total_stock ?? '',
         };
         warehouseNames.forEach((warehouseName) => {

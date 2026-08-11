@@ -2753,7 +2753,10 @@ function getExpiryEventCatalogStocks(PDO $pdo, string $eventId): array
     $event['batches'] = array_map(static function (array $batch) use ($productsByArticle): array {
         $articleProducts = $productsByArticle[vrCatalogArticleLookupKey((string)$batch['article'])] ?? [];
         $summary = vrCatalogStockSummary($articleProducts);
+        $managerProduct = vrCatalogProductWithUnambiguousManager($articleProducts);
+        $manager = $managerProduct ? vrCatalogManagerValue($managerProduct) : ['value' => ''];
         $batch['catalog_found'] = (bool)$articleProducts;
+        $batch['catalog_manager'] = (string)($manager['value'] ?? '');
         $batch['catalog_stocks'] = $summary['stocks'];
         $batch['catalog_total_stock'] = $summary['total'];
         return $batch;
