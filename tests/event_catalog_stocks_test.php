@@ -4,8 +4,12 @@ declare(strict_types=1);
 $api = file_get_contents(__DIR__ . '/../public/api.php');
 $javascript = file_get_contents(__DIR__ . '/../public/assets/app.js');
 $html = file_get_contents(__DIR__ . '/../public/index.php');
-if (!is_string($api) || !is_string($javascript) || !is_string($html)) {
+$css = file_get_contents(__DIR__ . '/../public/assets/styles.css');
+if (!is_string($api) || !is_string($javascript) || !is_string($html) || !is_string($css)) {
     throw new RuntimeException('Не удалось прочитать реализацию остатков события.');
+}
+if (!str_contains($css, '.modal.event-batches-dialog') || !str_contains($css, 'width: calc(100vw - 24px)')) {
+    throw new RuntimeException('Окно события должно переопределять стандартную ширину modal и занимать ширину экрана.');
 }
 
 foreach ([

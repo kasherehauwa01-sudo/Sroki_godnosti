@@ -69,7 +69,7 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .invalid-date-label { color: #6d28d9; font-weight: 800; }
 .status-select { min-width: 145px; }
 .history-details { white-space: pre-line; }
-.event-batches-dialog { width: calc(100vw - 24px); max-width: none; height: calc(100vh - 24px); max-height: none; }
+.modal.event-batches-dialog { width: calc(100vw - 24px); max-width: calc(100vw - 24px); height: calc(100vh - 24px); max-height: calc(100vh - 24px); margin: auto; }
 .event-batches-card { height: calc(100vh - 24px); max-height: calc(100vh - 24px); grid-template-rows: auto auto minmax(0, 1fr) auto; }
 .event-batches-table-wrap { min-height: 0; height: 100%; overflow: auto; }
 .event-batches-table-wrap table { min-width: max-content; }
