@@ -3,13 +3,20 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../public/api.php';
 
-$summary = ['rows' => [
-    ['code' => 'БР-Т20-05', 'total' => 15, 'fully_filled' => true],
-    ['code' => 'ГРА-747224', 'total' => 7, 'fully_filled' => true],
-    ['code' => 'НУЛЬ', 'total' => 0, 'fully_filled' => true],
-    ['code' => 'НЕЗАВЕРШЕНО', 'total' => 12, 'fully_filled' => false],
-]];
-$rows = purchaseEventPrimaryInvoiceRows($summary);
+$summary = [
+    'warehouses' => [
+        ['id' => 10, 'name' => 'Основной склад'],
+        ['id' => 20, 'name' => 'Склад/Юг'],
+        ['id' => 30, 'name' => 'Нулевой склад'],
+    ],
+    'rows' => [
+        ['code' => 'БР-Т20-05', 'fully_filled' => true, 'quantities' => ['10' => 15, '20' => 0]],
+        ['code' => 'ГРА-747224', 'fully_filled' => true, 'quantities' => ['10' => 7, '20' => 3]],
+        ['code' => 'НУЛЬ', 'fully_filled' => true, 'quantities' => ['10' => 0, '20' => 0]],
+        ['code' => 'НЕЗАВЕРШЕНО', 'fully_filled' => false, 'quantities' => ['10' => 12, '20' => 12]],
+    ],
+];
+$rows = purchaseEventPrimaryInvoiceRows($summary, 10);
 $expected = [
     ['Номер', 'Просто колонка', 'Код', 'Просто колонка', 'Просто колонка', 'Просто колонка', 'Количество'],
     [1, '', 'БР-Т20-05', '', '', '', 15],
@@ -22,8 +29,8 @@ foreach ($rows as $row) {
     if (count($row) !== 7) throw new RuntimeException('Каждая строка первичного счета должна физически содержать 7 колонок.');
 }
 
-$primaryFilename = sanitizeDownloadFilename('Первичный счет до 31.08.2026.xls');
-if ($primaryFilename !== 'Первичный счет до 31.08.2026.xls') {
+$primaryFilename = sanitizeDownloadFilename('Первичный счет. Основной склад. от 12.08.2026.xls');
+if ($primaryFilename !== 'Первичный счет. Основной склад. от 12.08.2026.xls') {
     throw new RuntimeException('Имя BIFF-файла должно сохранять расширение XLS: ' . $primaryFilename);
 }
 $unsafeFilename = sanitizeDownloadFilename('Первичный/счет:31.08.2026.xls');
@@ -41,6 +48,44 @@ if (class_exists('PhpOffice\\PhpSpreadsheet\\Writer\\Xls')) {
     $content = buildLegacyXlsContent($rows);
     if (substr($content, 0, 8) !== hex2bin('D0CF11E0A1B11AE1')) {
         throw new RuntimeException('Экспорт должен формировать настоящий OLE/BIFF XLS, а не файл XLSX с другим расширением.');
+    }
+
+    if (class_exists('ZipArchive')) {
+        $archive = buildPurchaseEventPrimaryInvoiceZip($summary, '12.08.2026');
+        $tmp = tempnam(sys_get_temp_dir(), 'primary-invoice-test-');
+        file_put_contents($tmp, $archive);
+        $zip = new ZipArchive();
+        if ($zip->open($tmp) !== true) throw new RuntimeException('Не удалось открыть сформированный ZIP-архив.');
+        $expectedFiles = [
+            'Первичный счет. Основной склад. от 12.08.2026.xls',
+            'Первичный счет. Склад_Юг. от 12.08.2026.xls',
+        ];
+        for ($index = 0; $index < count($expectedFiles); $index++) {
+            if ($zip->getNameIndex($index) !== $expectedFiles[$index]) {
+                throw new RuntimeException('Неверное имя файла склада в ZIP-архиве.');
+            }
+        }
+        if ($zip->numFiles !== count($expectedFiles)) {
+            throw new RuntimeException('Склад с нулевыми остатками не должен добавляться в ZIP-архив.');
+        }
+        if ($zip->locateName('Первичный счет. Нулевой склад. от 12.08.2026.xls') !== false) {
+            throw new RuntimeException('ZIP-архив содержит файл склада, у которого все остатки равны нулю.');
+        }
+        $zip->close();
+        @unlink($tmp);
+
+        $emptyArchive = buildPurchaseEventPrimaryInvoiceZip([
+            'warehouses' => [['id' => 30, 'name' => 'Нулевой склад']],
+            'rows' => $summary['rows'],
+        ], '12.08.2026');
+        $tmp = tempnam(sys_get_temp_dir(), 'empty-primary-invoice-test-');
+        file_put_contents($tmp, $emptyArchive);
+        $zip = new ZipArchive();
+        if ($zip->open($tmp) !== true || $zip->numFiles !== 0) {
+            throw new RuntimeException('При нулевых остатках всех складов должен формироваться корректный пустой ZIP-архив.');
+        }
+        $zip->close();
+        @unlink($tmp);
     }
 }
 
