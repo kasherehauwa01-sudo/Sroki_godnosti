@@ -11,9 +11,9 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260811-05">
+    <link rel="stylesheet" href="assets/styles.css?v=20260812-01">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260812-01"></script>
+    <script defer src="assets/app.js?v=20260812-02"></script>
 </head>
 <body>
     <header class="topbar">
@@ -578,6 +578,27 @@ declare(strict_types=1);
                 </button>
             </div>
             <div class="modal-actions"><button class="ghost-button" id="cancelEventExportDialogButton" type="button">Отмена</button></div>
+        </div>
+    </dialog>
+
+    <dialog class="modal" id="eventExportProductsDialog">
+        <div class="card form modal-card">
+            <div class="modal-heading">
+                <h2>Выберите товары для скачивания</h2>
+                <button class="icon-button" id="closeEventExportProductsDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <label class="checkbox-row"><input id="selectAllEventExportProducts" type="checkbox" checked> Выделить все / снять все</label>
+            <div class="table-wrap event-export-products-list">
+                <table>
+                    <thead><tr><th></th><th>Код</th><th>Наименование</th></tr></thead>
+                    <tbody id="eventExportProductsBody"></tbody>
+                </table>
+            </div>
+            <p class="field-error" id="eventExportProductsError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelEventExportProductsButton" type="button">Отмена</button>
+                <button class="primary" id="confirmEventExportProductsButton" type="button">Скачать</button>
+            </div>
         </div>
     </dialog>
 

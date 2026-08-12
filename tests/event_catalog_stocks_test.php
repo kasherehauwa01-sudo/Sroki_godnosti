@@ -34,10 +34,10 @@ foreach ([
 foreach (['Менеджер', 'Общий остаток', 'eventBatchesHead', 'event-batches-dialog', 'downloadEventCatalogStocksButton', 'Скачать Excel'] as $fragment) {
     if (!str_contains($html, $fragment)) throw new RuntimeException('Окно события не содержит: ' . $fragment);
 }
-foreach (['eventExportDialog', 'Выберите формат таблицы', 'Для просмотра', 'Для экспорта в первичный счет'] as $fragment) {
+foreach (['eventExportDialog', 'Выберите формат таблицы', 'Для просмотра', 'Для экспорта в первичный счет', 'eventExportProductsDialog', 'Выберите товары для скачивания', 'Выделить все / снять все'] as $fragment) {
     if (!str_contains($html, $fragment)) throw new RuntimeException('Диалог выбора формата события не содержит: ' . $fragment);
 }
-foreach (["downloadEventCatalogStocks('view')", "downloadEventCatalogStocks('primary_invoice')", "action', 'event_catalog_xls", 'hasPositiveStock'] as $fragment) {
+foreach (["openEventExportProducts('view')", "openEventExportProducts('primary_invoice')", "action', 'event_catalog_xls", 'hasPositiveStock', 'event-export-product-checkbox:checked', "batch_ids', [...selectedIds].join(',')"] as $fragment) {
     if (!str_contains($javascript, $fragment)) throw new RuntimeException('Клиент экспорта события не содержит: ' . $fragment);
 }
 foreach (['event_catalog_stocks', 'eventCatalogWarehouseNames', 'eventCatalogStockQuantity', 'renderEventCatalogHeader', 'downloadEventCatalogStocks', '.xls'] as $fragment) {

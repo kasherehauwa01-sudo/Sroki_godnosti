@@ -119,7 +119,7 @@ function handleApiRequest(): void
                 'stock_batch_notifications' => ['ok' => true, 'notifications' => listPurchaseEventNotifications($pdo)],
                 'events' => ['ok' => true, 'events' => listExpiryEvents($pdo)],
                 'event_catalog_stocks' => getExpiryEventCatalogStocks($pdo, (string)($_GET['id'] ?? '')),
-                'event_catalog_xls' => downloadExpiryEventCatalogXls($pdo, (string)($_GET['id'] ?? ''), (string)($_GET['format'] ?? 'view')),
+                'event_catalog_xls' => downloadExpiryEventCatalogXls($pdo, (string)($_GET['id'] ?? ''), (string)($_GET['format'] ?? 'view'), (string)($_GET['batch_ids'] ?? '')),
                 'batch_stock_xlsx' => downloadBatchStockXlsx($pdo, (int)($_GET['batch_id'] ?? 0)),
                 'tick' => ['ok' => true],
                 default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
@@ -2817,13 +2817,20 @@ function getExpiryEventCatalogStocks(PDO $pdo, string $eventId): array
     return ['ok' => true, 'event' => $event];
 }
 
-function downloadExpiryEventCatalogXls(PDO $pdo, string $eventId, string $format): array
+function downloadExpiryEventCatalogXls(PDO $pdo, string $eventId, string $format, string $batchIds = ''): array
 {
     if ($format !== 'primary_invoice') {
         throw new InvalidArgumentException('Неизвестный формат выгрузки события.');
     }
     $result = getExpiryEventCatalogStocks($pdo, $eventId);
     $event = (array)$result['event'];
+    $selectedBatchIds = array_values(array_unique(array_filter(array_map('intval', explode(',', $batchIds)), static fn (int $id): bool => $id > 0)));
+    if (!$selectedBatchIds) throw new InvalidArgumentException('Не выбраны товары для выгрузки.');
+    $event['batches'] = array_values(array_filter(
+        (array)($event['batches'] ?? []),
+        static fn (array $batch): bool => in_array((int)($batch['id'] ?? 0), $selectedBatchIds, true)
+    ));
+    if (!$event['batches']) throw new InvalidArgumentException('Выбранные товары не найдены в событии.');
     $warehouseNames = [];
     foreach ((array)($event['batches'] ?? []) as $batch) {
         foreach ((array)($batch['catalog_stocks'] ?? []) as $stock) {
