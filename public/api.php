@@ -3463,6 +3463,7 @@ function buildPurchaseEventPrimaryInvoiceZip(array $summary, string $documentDat
     if ($tmp === false) throw new RuntimeException('Не удалось создать временный ZIP-архив.');
     $zip = new ZipArchive();
     $isOpen = false;
+    $fileCount = 0;
     try {
         if ($zip->open($tmp, ZipArchive::OVERWRITE) !== true) {
             throw new RuntimeException('Не удалось создать ZIP-архив первичных счетов.');
@@ -3470,14 +3471,22 @@ function buildPurchaseEventPrimaryInvoiceZip(array $summary, string $documentDat
         $isOpen = true;
         foreach ((array)($summary['warehouses'] ?? []) as $warehouse) {
             $warehouseId = (int)($warehouse['id'] ?? 0);
+            $rows = purchaseEventPrimaryInvoiceRows($summary, $warehouseId);
+            // Если для склада нет ни одной товарной строки с положительным остатком,
+            // пустой XLS (с одной строкой заголовков) в архив не добавляем.
+            if (count($rows) === 1) continue;
             $warehouseName = trim((string)($warehouse['name'] ?? '')) ?: ('Склад ' . $warehouseId);
             $filename = sanitizeDownloadFilename('Первичный счет. ' . $warehouseName . '. от ' . $documentDate . '.xls');
-            if (!$zip->addFromString($filename, buildLegacyXlsContent(purchaseEventPrimaryInvoiceRows($summary, $warehouseId)))) {
+            if (!$zip->addFromString($filename, buildLegacyXlsContent($rows))) {
                 throw new RuntimeException('Не удалось добавить XLS-файл склада в ZIP-архив.');
             }
+            $fileCount++;
         }
         if (!$zip->close()) throw new RuntimeException('Не удалось завершить ZIP-архив первичных счетов.');
         $isOpen = false;
+        // libzip удаляет только что созданный архив, если в него не добавили файлы.
+        // Возвращаем корректный пустой ZIP, когда нулевые остатки оказались у всех складов.
+        if ($fileCount === 0) return "PK\x05\x06" . str_repeat("\x00", 18);
         $content = file_get_contents($tmp);
         if (!is_string($content) || $content === '') throw new RuntimeException('Не удалось прочитать ZIP-архив первичных счетов.');
         return $content;

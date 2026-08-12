@@ -7,6 +7,7 @@ $summary = [
     'warehouses' => [
         ['id' => 10, 'name' => 'Основной склад'],
         ['id' => 20, 'name' => 'Склад/Юг'],
+        ['id' => 30, 'name' => 'Нулевой склад'],
     ],
     'rows' => [
         ['code' => 'БР-Т20-05', 'fully_filled' => true, 'quantities' => ['10' => 15, '20' => 0]],
@@ -64,8 +65,24 @@ if (class_exists('PhpOffice\\PhpSpreadsheet\\Writer\\Xls')) {
                 throw new RuntimeException('Неверное имя файла склада в ZIP-архиве.');
             }
         }
-        if ($zip->numFiles !== count($summary['warehouses'])) {
-            throw new RuntimeException('Количество XLS-файлов должно совпадать с количеством складов.');
+        if ($zip->numFiles !== count($expectedFiles)) {
+            throw new RuntimeException('Склад с нулевыми остатками не должен добавляться в ZIP-архив.');
+        }
+        if ($zip->locateName('Первичный счет. Нулевой склад. от 12.08.2026.xls') !== false) {
+            throw new RuntimeException('ZIP-архив содержит файл склада, у которого все остатки равны нулю.');
+        }
+        $zip->close();
+        @unlink($tmp);
+
+        $emptyArchive = buildPurchaseEventPrimaryInvoiceZip([
+            'warehouses' => [['id' => 30, 'name' => 'Нулевой склад']],
+            'rows' => $summary['rows'],
+        ], '12.08.2026');
+        $tmp = tempnam(sys_get_temp_dir(), 'empty-primary-invoice-test-');
+        file_put_contents($tmp, $emptyArchive);
+        $zip = new ZipArchive();
+        if ($zip->open($tmp) !== true || $zip->numFiles !== 0) {
+            throw new RuntimeException('При нулевых остатках всех складов должен формироваться корректный пустой ZIP-архив.');
         }
         $zip->close();
         @unlink($tmp);
