@@ -3439,28 +3439,63 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
     return ['ok' => true] + getPurchaseEventSummary($pdo, trim((string)($payload['token'] ?? '')));
 }
 
-function purchaseEventPrimaryInvoiceRows(array $summary): array
+function purchaseEventPrimaryInvoiceRows(array $summary, int $warehouseId): array
 {
     $rows = [['Номер', 'Просто колонка', 'Код', 'Просто колонка', 'Просто колонка', 'Просто колонка', 'Количество']];
     $number = 1;
     foreach ((array)($summary['rows'] ?? []) as $row) {
-        if (empty($row['fully_filled']) || (float)($row['total'] ?? 0) <= 0) continue;
+        $quantity = (float)($row['quantities'][(string)$warehouseId] ?? 0);
+        if (empty($row['fully_filled']) || $quantity <= 0) continue;
         $code = trim((string)($row['code'] ?? ''));
         if ($code === '') continue;
-        $quantity = (float)$row['total'];
         $rows[] = [$number++, '', $code, '', '', '', floor($quantity) === $quantity ? (int)$quantity : $quantity];
     }
     return $rows;
+}
+
+function buildPurchaseEventPrimaryInvoiceZip(array $summary, string $documentDate): string
+{
+    if (!class_exists('ZipArchive')) {
+        throw new RuntimeException('Для экспорта в первичный счет требуется расширение PHP zip.');
+    }
+
+    $tmp = tempnam(sys_get_temp_dir(), 'primary-invoices-');
+    if ($tmp === false) throw new RuntimeException('Не удалось создать временный ZIP-архив.');
+    $zip = new ZipArchive();
+    $isOpen = false;
+    try {
+        if ($zip->open($tmp, ZipArchive::OVERWRITE) !== true) {
+            throw new RuntimeException('Не удалось создать ZIP-архив первичных счетов.');
+        }
+        $isOpen = true;
+        foreach ((array)($summary['warehouses'] ?? []) as $warehouse) {
+            $warehouseId = (int)($warehouse['id'] ?? 0);
+            $warehouseName = trim((string)($warehouse['name'] ?? '')) ?: ('Склад ' . $warehouseId);
+            $filename = sanitizeDownloadFilename('Первичный счет. ' . $warehouseName . '. от ' . $documentDate . '.xls');
+            if (!$zip->addFromString($filename, buildLegacyXlsContent(purchaseEventPrimaryInvoiceRows($summary, $warehouseId)))) {
+                throw new RuntimeException('Не удалось добавить XLS-файл склада в ZIP-архив.');
+            }
+        }
+        if (!$zip->close()) throw new RuntimeException('Не удалось завершить ZIP-архив первичных счетов.');
+        $isOpen = false;
+        $content = file_get_contents($tmp);
+        if (!is_string($content) || $content === '') throw new RuntimeException('Не удалось прочитать ZIP-архив первичных счетов.');
+        return $content;
+    } finally {
+        if ($isOpen) $zip->close();
+        @unlink($tmp);
+    }
 }
 
 function downloadPurchaseEventXls(PDO $pdo, string $token, string $format = 'view'): array
 {
     $summary = getPurchaseEventSummary($pdo, $token);
     if ($format === 'primary_invoice') {
-        $content = buildLegacyXlsContent(purchaseEventPrimaryInvoiceRows($summary));
-        $filename = sanitizeDownloadFilename('Первичный счет до ' . date('d.m.Y', strtotime((string)$summary['expiry_date'])) . '.xls');
+        $documentDate = date('d.m.Y');
+        $content = buildPurchaseEventPrimaryInvoiceZip($summary, $documentDate);
+        $filename = sanitizeDownloadFilename('Первичные счета от ' . $documentDate . '.zip');
         header_remove('Content-Type');
-        header('Content-Type: application/vnd.ms-excel');
+        header('Content-Type: application/zip');
         header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
         header('Content-Length: ' . strlen($content));
         echo $content;
