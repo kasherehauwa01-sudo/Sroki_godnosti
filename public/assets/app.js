@@ -40,6 +40,7 @@ const state = {
     selectedStockBatchId: null,
     events: [],
     selectedEventDetails: null,
+    eventExportFormat: 'view',
     eventPeriodFilters: new Set(['today', 'future']),
     emailNotificationLogs: [],
     selectedEmailNotificationLogId: null,
@@ -1269,11 +1270,60 @@ async function openEventDetails(id) {
     }
 }
 
+function openEventExportProducts(format) {
+    const event = state.selectedEventDetails;
+    if (!event) return;
+    qs('#eventExportDialog').close();
+    state.eventExportFormat = format;
+    qs('#eventExportProductsBody').innerHTML = (event.batches || []).map((batch) => `
+        <tr><td><input class="event-export-product-checkbox" type="checkbox" value="${escapeHtml(batch.id)}" checked></td>
+        <td>${escapeHtml(batch.code || '')}</td><td>${escapeHtml(batch.name || '')}</td></tr>
+    `).join('');
+    qs('#selectAllEventExportProducts').checked = true;
+    qs('#selectAllEventExportProducts').indeterminate = false;
+    qs('#eventExportProductsError').textContent = '';
+    qsa('.event-export-product-checkbox').forEach((checkbox) => checkbox.addEventListener('change', updateEventExportProductSelection));
+    qs('#eventExportProductsDialog').showModal();
+}
+
+function updateEventExportProductSelection() {
+    const checkboxes = qsa('.event-export-product-checkbox');
+    const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+    qs('#selectAllEventExportProducts').checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+    qs('#selectAllEventExportProducts').indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+    qs('#eventExportProductsError').textContent = '';
+}
+
 function downloadEventCatalogStocks() {
     const event = state.selectedEventDetails;
     if (!event) return;
+    const selectedIds = new Set(qsa('.event-export-product-checkbox:checked').map((checkbox) => String(checkbox.value)));
+    if (!selectedIds.size) {
+        qs('#eventExportProductsError').textContent = 'Выберите хотя бы один товар.';
+        return;
+    }
+    const selectedBatches = (event.batches || []).filter((batch) => selectedIds.has(String(batch.id)));
+    const format = state.eventExportFormat;
+    if (format === 'primary_invoice') {
+        const hasPositiveStock = selectedBatches.some((batch) =>
+            (batch.catalog_stocks || []).some((stock) => Number(stock.quantity) > 0)
+        );
+        if (!hasPositiveStock) {
+            alert('В данном событии нет товаров с положительными остатками. Скачивание остановлено.');
+            return;
+        }
+        const url = new URL('api.php', window.location.href);
+        url.searchParams.set('action', 'event_catalog_xls');
+        url.searchParams.set('id', event.id);
+        url.searchParams.set('format', format);
+        url.searchParams.set('batch_ids', [...selectedIds].join(','));
+        qs('#eventExportProductsDialog').close();
+        window.location.href = url.toString();
+        return;
+    }
     const warehouseNames = event.catalog_warehouse_names || eventCatalogWarehouseNames(event.batches);
-    exportXlsx(event.batches || [], `sobytie_${event.event_type}_${event.event_date}.xls`, (batch) => {
+    qs('#eventExportProductsDialog').close();
+    exportXlsx(selectedBatches, `sobytie_${event.event_type}_${event.event_date}.xls`, (batch) => {
         const row = {
             'Артикул': batch.article || '',
             'Код': batch.code || '',
@@ -2835,7 +2885,18 @@ function bindEvents() {
     }));
     qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
     qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
-    qs('#downloadEventCatalogStocksButton').addEventListener('click', downloadEventCatalogStocks);
+    qs('#downloadEventCatalogStocksButton').addEventListener('click', () => qs('#eventExportDialog').showModal());
+    qs('#closeEventExportDialogButton').addEventListener('click', () => qs('#eventExportDialog').close());
+    qs('#cancelEventExportDialogButton').addEventListener('click', () => qs('#eventExportDialog').close());
+    qs('#downloadEventViewButton').addEventListener('click', () => openEventExportProducts('view'));
+    qs('#downloadEventPrimaryInvoiceButton').addEventListener('click', () => openEventExportProducts('primary_invoice'));
+    qs('#closeEventExportProductsDialogButton').addEventListener('click', () => qs('#eventExportProductsDialog').close());
+    qs('#cancelEventExportProductsButton').addEventListener('click', () => qs('#eventExportProductsDialog').close());
+    qs('#selectAllEventExportProducts').addEventListener('change', (event) => {
+        qsa('.event-export-product-checkbox').forEach((checkbox) => { checkbox.checked = event.currentTarget.checked; });
+        updateEventExportProductSelection();
+    });
+    qs('#confirmEventExportProductsButton').addEventListener('click', downloadEventCatalogStocks);
 
     qs('#filterSearch').addEventListener('input', renderRegistry);
     qs('#filterSearchColumn').addEventListener('change', renderRegistry);
