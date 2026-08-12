@@ -12,7 +12,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сводная таблица остатков</title>
-    <link rel="stylesheet" href="assets/styles.css?v=20260812-01">
+    <link rel="stylesheet" href="assets/styles.css?v=20260812-02">
 </head>
 <body>
 <main class="layout purchase-event-page">
@@ -55,7 +55,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
         <div class="modal-actions"><button class="ghost-button" id="cancelPurchaseEventExportDialogButton" type="button">Отмена</button></div>
     </div>
 </dialog>
-<dialog class="modal" id="purchaseEventExportProductsDialog">
+<dialog class="modal event-export-products-dialog" id="purchaseEventExportProductsDialog">
     <div class="card form modal-card">
         <div class="modal-heading">
             <h2>Выберите товары для скачивания</h2>

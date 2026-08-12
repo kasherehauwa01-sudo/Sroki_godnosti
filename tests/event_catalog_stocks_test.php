@@ -11,6 +11,9 @@ if (!is_string($api) || !is_string($javascript) || !is_string($html) || !is_stri
 if (!str_contains($css, '.modal.event-batches-dialog') || !str_contains($css, 'width: calc(100vw - 24px)')) {
     throw new RuntimeException('Окно события должно переопределять стандартную ширину modal и занимать ширину экрана.');
 }
+if (!str_contains($css, '.modal.event-export-products-dialog') || !str_contains($html, 'modal event-export-products-dialog')) {
+    throw new RuntimeException('Окно выбора товаров для скачивания должно занимать всю ширину экрана.');
+}
 if (!str_contains($css, '.event-batches-table-wrap .event-main-column') || !str_contains($css, 'position: sticky')) {
     throw new RuntimeException('Основные колонки таблицы события должны быть зафиксированы при горизонтальной прокрутке.');
 }

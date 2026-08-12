@@ -40,6 +40,10 @@ if ($unsafeFilename !== 'Первичный_счет_31.08.2026.xls') {
 
 $page = file_get_contents(__DIR__ . '/../public/purchase-event.php');
 if (!is_string($page)) throw new RuntimeException('Не удалось прочитать страницу сводной таблицы.');
+$styles = file_get_contents(__DIR__ . '/../public/assets/styles.css');
+if (!is_string($styles) || !str_contains($page, 'modal event-export-products-dialog') || !str_contains($styles, '.modal.event-export-products-dialog')) {
+    throw new RuntimeException('Окно выбора товаров уведомления должно занимать всю ширину экрана.');
+}
 foreach (['Выберите формат таблицы', 'Для просмотра', 'Для экспорта в первичный счет', "openPurchaseEventExportProducts('view')", "openPurchaseEventExportProducts('primary_invoice')", 'Выберите товары для скачивания', 'Выделить все / снять все', 'purchase-event-export-product-checkbox:checked', "batch_ids', [...selectedIds].join(',')"] as $fragment) {
     if (!str_contains($page, $fragment)) throw new RuntimeException('В диалоге экспорта отсутствует: ' . $fragment);
 }

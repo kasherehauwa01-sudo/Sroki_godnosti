@@ -228,6 +228,7 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .purchase-event-export-option strong { font-size: 16px; }
 .purchase-event-export-option small { color: var(--muted); font-weight: 500; }
 .event-export-products-list { max-height: min(55vh, 520px); }
+.modal.event-export-products-dialog { width: calc(100vw - 24px); max-width: calc(100vw - 24px); margin: auto; }
 .event-export-product-checkbox { width: auto; }
 .purchase-event-table-wrap { width: 100%; max-width: 100%; height: calc(100vh - 190px); max-height: calc(100vh - 190px); overflow: auto; }
 .purchase-event-table { min-width: 980px; }
