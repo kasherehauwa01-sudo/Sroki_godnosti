@@ -115,7 +115,7 @@ function handleApiRequest(): void
                 'email_notification_logs' => getProtectedEmailNotificationLogs($pdo, $_GET),
                 'catalog_health' => getCatalogSyncStatus($pdo),
                 'purchase_event_summary' => ['ok' => true] + getPurchaseEventSummary($pdo, (string)($_GET['token'] ?? '')),
-                'purchase_event_xls' => downloadPurchaseEventXls($pdo, (string)($_GET['token'] ?? ''), (string)($_GET['format'] ?? 'view')),
+                'purchase_event_xls' => downloadPurchaseEventXls($pdo, (string)($_GET['token'] ?? ''), (string)($_GET['format'] ?? 'view'), (string)($_GET['batch_ids'] ?? '')),
                 'stock_batch_notifications' => ['ok' => true, 'notifications' => listPurchaseEventNotifications($pdo)],
                 'events' => ['ok' => true, 'events' => listExpiryEvents($pdo)],
                 'event_catalog_stocks' => getExpiryEventCatalogStocks($pdo, (string)($_GET['id'] ?? '')),
@@ -3545,9 +3545,24 @@ function buildPurchaseEventPrimaryInvoiceZip(array $summary, string $documentDat
     }
 }
 
-function downloadPurchaseEventXls(PDO $pdo, string $token, string $format = 'view'): array
+function filterPurchaseEventSummaryRows(array $summary, string $batchIds): array
 {
-    $summary = getPurchaseEventSummary($pdo, $token);
+    $selectedBatchIds = array_values(array_unique(array_filter(
+        array_map('intval', explode(',', $batchIds)),
+        static fn (int $id): bool => $id > 0
+    )));
+    if (!$selectedBatchIds) throw new InvalidArgumentException('Не выбраны товары для выгрузки.');
+    $summary['rows'] = array_values(array_filter(
+        (array)($summary['rows'] ?? []),
+        static fn (array $row): bool => in_array((int)($row['id'] ?? 0), $selectedBatchIds, true)
+    ));
+    if (!$summary['rows']) throw new InvalidArgumentException('Выбранные товары не найдены в событии.');
+    return $summary;
+}
+
+function downloadPurchaseEventXls(PDO $pdo, string $token, string $format = 'view', string $batchIds = ''): array
+{
+    $summary = filterPurchaseEventSummaryRows(getPurchaseEventSummary($pdo, $token), $batchIds);
     if ($format === 'primary_invoice') {
         $documentDate = date('d.m.Y');
         $content = buildPurchaseEventPrimaryInvoiceZip($summary, $documentDate);

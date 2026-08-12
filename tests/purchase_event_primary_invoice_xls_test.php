@@ -10,10 +10,10 @@ $summary = [
         ['id' => 30, 'name' => 'Нулевой склад'],
     ],
     'rows' => [
-        ['code' => 'БР-Т20-05', 'fully_filled' => true, 'quantities' => ['10' => 15, '20' => 0]],
-        ['code' => 'ГРА-747224', 'fully_filled' => true, 'quantities' => ['10' => 7, '20' => 3]],
-        ['code' => 'НУЛЬ', 'fully_filled' => true, 'quantities' => ['10' => 0, '20' => 0]],
-        ['code' => 'НЕЗАВЕРШЕНО', 'fully_filled' => false, 'quantities' => ['10' => 12, '20' => 12]],
+        ['id' => 1, 'code' => 'БР-Т20-05', 'fully_filled' => true, 'quantities' => ['10' => 15, '20' => 0]],
+        ['id' => 2, 'code' => 'ГРА-747224', 'fully_filled' => true, 'quantities' => ['10' => 7, '20' => 3]],
+        ['id' => 3, 'code' => 'НУЛЬ', 'fully_filled' => true, 'quantities' => ['10' => 0, '20' => 0]],
+        ['id' => 4, 'code' => 'НЕЗАВЕРШЕНО', 'fully_filled' => false, 'quantities' => ['10' => 12, '20' => 12]],
     ],
 ];
 $rows = purchaseEventPrimaryInvoiceRows($summary, 10);
@@ -40,9 +40,11 @@ if ($unsafeFilename !== 'Первичный_счет_31.08.2026.xls') {
 
 $page = file_get_contents(__DIR__ . '/../public/purchase-event.php');
 if (!is_string($page)) throw new RuntimeException('Не удалось прочитать страницу сводной таблицы.');
-foreach (['Выберите формат таблицы', 'Для просмотра', 'Для экспорта в первичный счет', "downloadPurchaseEventXls('view')", "downloadPurchaseEventXls('primary_invoice')"] as $fragment) {
+foreach (['Выберите формат таблицы', 'Для просмотра', 'Для экспорта в первичный счет', "openPurchaseEventExportProducts('view')", "openPurchaseEventExportProducts('primary_invoice')", 'Выберите товары для скачивания', 'Выделить все / снять все', 'purchase-event-export-product-checkbox:checked', "batch_ids', [...selectedIds].join(',')"] as $fragment) {
     if (!str_contains($page, $fragment)) throw new RuntimeException('В диалоге экспорта отсутствует: ' . $fragment);
 }
+$filteredSummary = filterPurchaseEventSummaryRows($summary, '2,3');
+if (array_column($filteredSummary['rows'], 'id') !== [2, 3]) throw new RuntimeException('В экспорт должны попадать только выбранные товары.');
 foreach (["format === 'primary_invoice'", 'hasPositiveStock', "alert('В данном событии нет товаров с положительными остатками. Скачивание остановлено.')", 'return;'] as $fragment) {
     if (!str_contains($page, $fragment)) throw new RuntimeException('Не реализована остановка скачивания при полностью нулевых остатках: ' . $fragment);
 }
