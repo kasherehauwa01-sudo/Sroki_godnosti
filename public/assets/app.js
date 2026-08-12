@@ -1269,9 +1269,25 @@ async function openEventDetails(id) {
     }
 }
 
-function downloadEventCatalogStocks() {
+function downloadEventCatalogStocks(format = 'view') {
     const event = state.selectedEventDetails;
     if (!event) return;
+    qs('#eventExportDialog').close();
+    if (format === 'primary_invoice') {
+        const hasPositiveStock = (event.batches || []).some((batch) =>
+            (batch.catalog_stocks || []).some((stock) => Number(stock.quantity) > 0)
+        );
+        if (!hasPositiveStock) {
+            alert('В данном событии нет товаров с положительными остатками. Скачивание остановлено.');
+            return;
+        }
+        const url = new URL('api.php', window.location.href);
+        url.searchParams.set('action', 'event_catalog_xls');
+        url.searchParams.set('id', event.id);
+        url.searchParams.set('format', format);
+        window.location.href = url.toString();
+        return;
+    }
     const warehouseNames = event.catalog_warehouse_names || eventCatalogWarehouseNames(event.batches);
     exportXlsx(event.batches || [], `sobytie_${event.event_type}_${event.event_date}.xls`, (batch) => {
         const row = {
@@ -2835,7 +2851,11 @@ function bindEvents() {
     }));
     qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
     qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
-    qs('#downloadEventCatalogStocksButton').addEventListener('click', downloadEventCatalogStocks);
+    qs('#downloadEventCatalogStocksButton').addEventListener('click', () => qs('#eventExportDialog').showModal());
+    qs('#closeEventExportDialogButton').addEventListener('click', () => qs('#eventExportDialog').close());
+    qs('#cancelEventExportDialogButton').addEventListener('click', () => qs('#eventExportDialog').close());
+    qs('#downloadEventViewButton').addEventListener('click', () => downloadEventCatalogStocks('view'));
+    qs('#downloadEventPrimaryInvoiceButton').addEventListener('click', () => downloadEventCatalogStocks('primary_invoice'));
 
     qs('#filterSearch').addEventListener('input', renderRegistry);
     qs('#filterSearchColumn').addEventListener('change', renderRegistry);

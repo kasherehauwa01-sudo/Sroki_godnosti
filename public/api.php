@@ -119,6 +119,7 @@ function handleApiRequest(): void
                 'stock_batch_notifications' => ['ok' => true, 'notifications' => listPurchaseEventNotifications($pdo)],
                 'events' => ['ok' => true, 'events' => listExpiryEvents($pdo)],
                 'event_catalog_stocks' => getExpiryEventCatalogStocks($pdo, (string)($_GET['id'] ?? '')),
+                'event_catalog_xls' => downloadExpiryEventCatalogXls($pdo, (string)($_GET['id'] ?? ''), (string)($_GET['format'] ?? 'view')),
                 'batch_stock_xlsx' => downloadBatchStockXlsx($pdo, (int)($_GET['batch_id'] ?? 0)),
                 'tick' => ['ok' => true],
                 default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
@@ -2814,6 +2815,47 @@ function getExpiryEventCatalogStocks(PDO $pdo, string $eventId): array
     }, $event['batches']);
 
     return ['ok' => true, 'event' => $event];
+}
+
+function downloadExpiryEventCatalogXls(PDO $pdo, string $eventId, string $format): array
+{
+    if ($format !== 'primary_invoice') {
+        throw new InvalidArgumentException('Неизвестный формат выгрузки события.');
+    }
+    $result = getExpiryEventCatalogStocks($pdo, $eventId);
+    $event = (array)$result['event'];
+    $warehouseNames = [];
+    foreach ((array)($event['batches'] ?? []) as $batch) {
+        foreach ((array)($batch['catalog_stocks'] ?? []) as $stock) {
+            $name = trim((string)($stock['name'] ?? ''));
+            if ($name !== '' && !in_array($name, $warehouseNames, true)) $warehouseNames[] = $name;
+        }
+    }
+    sort($warehouseNames, SORT_NATURAL | SORT_FLAG_CASE);
+    $summary = ['warehouses' => [], 'rows' => []];
+    foreach ($warehouseNames as $index => $name) {
+        $summary['warehouses'][] = ['id' => $index + 1, 'name' => $name];
+    }
+    foreach ((array)($event['batches'] ?? []) as $batch) {
+        $quantities = [];
+        foreach ($warehouseNames as $index => $name) {
+            $quantity = 0;
+            foreach ((array)($batch['catalog_stocks'] ?? []) as $stock) {
+                if (trim((string)($stock['name'] ?? '')) === $name) $quantity = (float)($stock['quantity'] ?? 0);
+            }
+            $quantities[(string)($index + 1)] = $quantity;
+        }
+        $summary['rows'][] = ['code' => (string)($batch['code'] ?? ''), 'fully_filled' => true, 'quantities' => $quantities];
+    }
+    $documentDate = date('d.m.Y');
+    $content = buildPurchaseEventPrimaryInvoiceZip($summary, $documentDate);
+    $filename = sanitizeDownloadFilename('Первичные счета события от ' . $documentDate . '.zip');
+    header_remove('Content-Type');
+    header('Content-Type: application/zip');
+    header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
+    header('Content-Length: ' . strlen($content));
+    echo $content;
+    exit;
 }
 
 function listPurchaseEventNotifications(PDO $pdo): array
