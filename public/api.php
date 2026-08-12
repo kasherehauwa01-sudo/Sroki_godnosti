@@ -3484,9 +3484,9 @@ function buildPurchaseEventPrimaryInvoiceZip(array $summary, string $documentDat
         }
         if (!$zip->close()) throw new RuntimeException('Не удалось завершить ZIP-архив первичных счетов.');
         $isOpen = false;
-        // libzip удаляет только что созданный архив, если в него не добавили файлы.
-        // Возвращаем корректный пустой ZIP, когда нулевые остатки оказались у всех складов.
-        if ($fileCount === 0) return "PK\x05\x06" . str_repeat("\x00", 18);
+        if ($fileCount === 0) {
+            throw new RuntimeException('В данном событии нет товаров с положительными остатками. Скачивание остановлено.');
+        }
         $content = file_get_contents($tmp);
         if (!is_string($content) || $content === '') throw new RuntimeException('Не удалось прочитать ZIP-архив первичных счетов.');
         return $content;

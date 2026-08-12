@@ -200,6 +200,16 @@ function closePurchaseEventExportDialog() {
     document.querySelector('#purchaseEventExportDialog').close();
 }
 function downloadPurchaseEventXls(format) {
+    if (format === 'primary_invoice') {
+        const hasPositiveStock = (purchaseEventData?.rows || []).some((row) =>
+            row.fully_filled && Object.values(row.quantities || {}).some((quantity) => Number(quantity) > 0)
+        );
+        if (!hasPositiveStock) {
+            closePurchaseEventExportDialog();
+            alert('В данном событии нет товаров с положительными остатками. Скачивание остановлено.');
+            return;
+        }
+    }
     const url = new URL(purchaseEventApiUrl, window.location.origin);
     url.searchParams.set('action', 'purchase_event_xls');
     url.searchParams.set('token', purchaseEventToken);

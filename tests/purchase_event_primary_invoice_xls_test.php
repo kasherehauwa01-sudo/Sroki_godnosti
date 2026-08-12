@@ -43,6 +43,9 @@ if (!is_string($page)) throw new RuntimeException('Не удалось проч�
 foreach (['Выберите формат таблицы', 'Для просмотра', 'Для экспорта в первичный счет', "downloadPurchaseEventXls('view')", "downloadPurchaseEventXls('primary_invoice')"] as $fragment) {
     if (!str_contains($page, $fragment)) throw new RuntimeException('В диалоге экспорта отсутствует: ' . $fragment);
 }
+foreach (["format === 'primary_invoice'", 'hasPositiveStock', "alert('В данном событии нет товаров с положительными остатками. Скачивание остановлено.')", 'return;'] as $fragment) {
+    if (!str_contains($page, $fragment)) throw new RuntimeException('Не реализована остановка скачивания при полностью нулевых остатках: ' . $fragment);
+}
 
 if (class_exists('PhpOffice\\PhpSpreadsheet\\Writer\\Xls')) {
     $content = buildLegacyXlsContent($rows);
@@ -74,18 +77,17 @@ if (class_exists('PhpOffice\\PhpSpreadsheet\\Writer\\Xls')) {
         $zip->close();
         @unlink($tmp);
 
-        $emptyArchive = buildPurchaseEventPrimaryInvoiceZip([
-            'warehouses' => [['id' => 30, 'name' => 'Нулевой склад']],
-            'rows' => $summary['rows'],
-        ], '12.08.2026');
-        $tmp = tempnam(sys_get_temp_dir(), 'empty-primary-invoice-test-');
-        file_put_contents($tmp, $emptyArchive);
-        $zip = new ZipArchive();
-        if ($zip->open($tmp) !== true || $zip->numFiles !== 0) {
-            throw new RuntimeException('При нулевых остатках всех складов должен формироваться корректный пустой ZIP-архив.');
+        try {
+            buildPurchaseEventPrimaryInvoiceZip([
+                'warehouses' => [['id' => 30, 'name' => 'Нулевой склад']],
+                'rows' => $summary['rows'],
+            ], '12.08.2026');
+            throw new RuntimeException('Экспорт с нулевыми остатками всех складов не был остановлен.');
+        } catch (RuntimeException $error) {
+            if ($error->getMessage() !== 'В данном событии нет товаров с положительными остатками. Скачивание остановлено.') {
+                throw $error;
+            }
         }
-        $zip->close();
-        @unlink($tmp);
     }
 }
 
