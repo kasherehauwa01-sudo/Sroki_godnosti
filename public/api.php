@@ -2285,15 +2285,25 @@ function sendDueStockReminderNotifications(PDO $pdo): void
             $event = getPurchaseEventData($pdo, (string)$row['event_key'], (string)$row['event_date'], false);
             foreach (purchaseEventMissingWarehouses($event) as $warehouse) {
                 $last = $pdo->prepare(
-                    'SELECT sent_at FROM stock_notification_reminder_log
+                    'SELECT sent_at, status FROM stock_notification_reminder_log
                      WHERE event_key = :event_key AND event_date = :event_date AND warehouse_id = :warehouse_id
                      ORDER BY reminder_number DESC LIMIT 1'
                 );
                 $last->execute([':event_key' => $event['event_key'], ':event_date' => $event['event_date'], ':warehouse_id' => (int)$warehouse['id']]);
-                $lastSentAt = (string)($last->fetchColumn() ?: '');
-                if ($lastSentAt !== '' && $now < (new DateTimeImmutable($lastSentAt, new DateTimeZone(APP_TIMEZONE)))->modify('+24 hours')) continue;
+                $lastReminder = $last->fetch() ?: null;
+                // Автоматически отправляется одно напоминание через три дня.
+                // Повторный запуск API/cron не должен ежедневно тревожить склад.
+                if (is_array($lastReminder) && (string)$lastReminder['status'] === 'SUCCESS') continue;
                 try {
-                    sendStockReminderForWarehouse($pdo, $event, $warehouse);
+                    // Повторно читаем событие непосредственно перед постановкой
+                    // письма в очередь: склад мог завершить форму после начала tick.
+                    $freshEvent = getPurchaseEventData($pdo, (string)$event['event_key'], (string)$event['event_date'], false);
+                    $stillMissing = array_filter(
+                        purchaseEventMissingWarehouses($freshEvent),
+                        static fn (array $candidate): bool => (int)$candidate['id'] === (int)$warehouse['id']
+                    );
+                    if (!$stillMissing) continue;
+                    sendStockReminderForWarehouse($pdo, $freshEvent, $warehouse);
                 } catch (Throwable $error) {
                     writeLog($pdo, 'stock_reminder_failed', ['event_key' => $event['event_key'], 'event_date' => $event['event_date'], 'warehouse_id' => (int)$warehouse['id'], 'error' => $error->getMessage()]);
                 }
@@ -2641,31 +2651,34 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
     if ($batchIds && $warehouseIds) {
         $batchMarks = implode(',', array_fill(0, count($batchIds), '?'));
         $warehouseMarks = implode(',', array_fill(0, count($warehouseIds), '?'));
-        $stockStatement = $pdo->prepare("SELECT batch_id, warehouse_id, quantity, updated_at FROM batch_stock WHERE batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)");
-        $stockStatement->execute(array_merge($batchIds, $warehouseIds));
-        foreach ($stockStatement->fetchAll() as $row) {
+        // Для определения заполненности события нельзя читать batch_stock: эта
+        // таблица содержит последнее значение пары партия+склад без привязки к
+        // событию. Берём только подтверждения именно текущего события.
+        $eventStockStatement = $pdo->prepare(
+            "SELECT batch_id, warehouse_id, quantity, filled_at
+             FROM purchase_event_stock_entries
+             WHERE event_key = ? AND event_date = ?
+               AND batch_id IN ($batchMarks) AND warehouse_id IN ($warehouseMarks)"
+        );
+        $eventStockStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+        foreach ($eventStockStatement->fetchAll() as $row) {
             $stock[(int)$row['batch_id']][(int)$row['warehouse_id']] = (float)$row['quantity'];
         }
 
-        // Старые технические автонули скрываем из сводной, но ручной ввод склада
-        // важнее: если по этой форме есть запись в журнале изменений, показываем
-        // сохранённый складом остаток вместо прочерка.
-        $legacyAutoZeroStatement = $pdo->prepare(
-            "SELECT z.batch_id, z.warehouse_id
-             FROM stock_auto_zero_entries z
-             WHERE z.event_key = ? AND z.event_date = ? AND z.source <> 'catalog_explicit_zero'
-               AND z.batch_id IN ($batchMarks) AND z.warehouse_id IN ($warehouseMarks)
-               AND NOT EXISTS (
-                   SELECT 1
-                   FROM stock_change_logs l
-                   INNER JOIN stock_notifications n ON n.id = l.notification_id
-                   WHERE n.event_key = ? AND DATE(n.sent_at) = ?
-                     AND l.batch_id = z.batch_id AND l.warehouse_id = z.warehouse_id
-               )"
+        // Для событий, заполненных до появления purchase_event_stock_entries,
+        // используем журнал формы. Он связан с notification_id и поэтому также
+        // однозначно относится к конкретному событию.
+        $legacyEventStockStatement = $pdo->prepare(
+            "SELECT l.batch_id, l.warehouse_id, l.new_quantity AS quantity
+             FROM stock_change_logs l
+             INNER JOIN stock_notifications n ON n.id = l.notification_id
+             WHERE n.event_key = ? AND DATE(n.sent_at) = ?
+               AND l.batch_id IN ($batchMarks) AND l.warehouse_id IN ($warehouseMarks)
+             ORDER BY l.created_at DESC, l.id DESC"
         );
-        $legacyAutoZeroStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds, [$eventKey, $eventDate]));
-        foreach ($legacyAutoZeroStatement->fetchAll() as $row) {
-            unset($stock[(int)$row['batch_id']][(int)$row['warehouse_id']]);
+        $legacyEventStockStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+        foreach ($legacyEventStockStatement->fetchAll() as $row) {
+            $stock[(int)$row['batch_id']][(int)$row['warehouse_id']] ??= (float)$row['quantity'];
         }
 
         $expectedStatement = $pdo->prepare(
@@ -2689,6 +2702,7 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
         $autoExpectedStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
         foreach ($autoExpectedStatement->fetchAll() as $row) {
             $expectedStock[(int)$row['batch_id']][(int)$row['warehouse_id']] = true;
+            $stock[(int)$row['batch_id']][(int)$row['warehouse_id']] ??= 0.0;
         }
 
         // Для признака «непрочитано» учитываем только фактические сохранения
