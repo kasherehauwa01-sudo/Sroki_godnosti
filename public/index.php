@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css?v=20260811-05">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260811-04"></script>
+    <script defer src="assets/app.js?v=20260812-01"></script>
 </head>
 <body>
     <header class="topbar">
@@ -558,6 +558,26 @@ declare(strict_types=1);
                 <button class="ghost-button" id="downloadEventCatalogStocksButton" type="button" disabled>Скачать Excel</button>
                 <button class="primary" id="confirmEventBatchesDialogButton" type="button">Закрыть</button>
             </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal" id="eventExportDialog">
+        <div class="card form modal-card">
+            <div class="modal-heading">
+                <h2>Выберите формат таблицы</h2>
+                <button class="icon-button" id="closeEventExportDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="purchase-event-export-options">
+                <button class="purchase-event-export-option" id="downloadEventViewButton" type="button">
+                    <strong>Для просмотра</strong>
+                    <small>Сводная таблица с остатками по складам</small>
+                </button>
+                <button class="purchase-event-export-option" id="downloadEventPrimaryInvoiceButton" type="button">
+                    <strong>Для экспорта в первичный счет</strong>
+                    <small>ZIP-архив с отдельным XLS-файлом для каждого склада</small>
+                </button>
+            </div>
+            <div class="modal-actions"><button class="ghost-button" id="cancelEventExportDialogButton" type="button">Отмена</button></div>
         </div>
     </dialog>
 
