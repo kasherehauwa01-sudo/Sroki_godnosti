@@ -24,11 +24,14 @@ if (!is_string($api)) throw new RuntimeException('Не удалось прочи
 $dataStart = strpos($api, 'function getPurchaseEventData(');
 $dataEnd = strpos($api, 'function purchaseEventTypeLabel(', (int)$dataStart);
 $dataSource = substr($api, (int)$dataStart, (int)$dataEnd - (int)$dataStart);
-if (str_contains($dataSource, 'FROM batch_stock')) {
-    throw new RuntimeException('Заполненность события не должна определяться по глобальной таблице batch_stock.');
-}
 if (!str_contains($dataSource, 'FROM purchase_event_stock_entries')) {
     throw new RuntimeException('Заполненность должна определяться по event-scoped остаткам.');
+}
+if (!str_contains($dataSource, "n.status = 'Заполнена' OR n.completed_at IS NOT NULL")) {
+    throw new RuntimeException('Остатки старых завершённых событий должны восстанавливаться по признаку завершённой формы.');
+}
+if (!str_contains($dataSource, 'INNER JOIN batch_stock bs')) {
+    throw new RuntimeException('Для старых завершённых форм должен сохраняться совместимый fallback остатков.');
 }
 
 $reminderStart = strpos($api, 'function sendDueStockReminderNotifications(');

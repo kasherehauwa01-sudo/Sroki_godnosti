@@ -2681,6 +2681,26 @@ function getPurchaseEventData(PDO $pdo, string $eventKey, string $eventDate, boo
             $stock[(int)$row['batch_id']][(int)$row['warehouse_id']] ??= (float)$row['quantity'];
         }
 
+        // Часть старых событий была завершена до появления event-scoped журнала:
+        // у них сохранён completed_at/статус формы, но отсутствуют строки в
+        // purchase_event_stock_entries и stock_change_logs. Для таких и только
+        // таких уже завершённых форм восстанавливаем показанные ранее остатки из
+        // batch_stock. Незавершённое событие этот fallback заполненным не сделает.
+        $completedLegacyStockStatement = $pdo->prepare(
+            "SELECT i.batch_id, n.warehouse_id, bs.quantity
+             FROM stock_notifications n
+             INNER JOIN stock_notification_items i ON i.notification_id = n.id
+             INNER JOIN batch_stock bs ON bs.batch_id = i.batch_id AND bs.warehouse_id = n.warehouse_id
+             WHERE n.event_key = ? AND DATE(n.sent_at) = ?
+               AND (n.status = 'Заполнена' OR n.completed_at IS NOT NULL)
+               AND i.batch_id IN ($batchMarks) AND n.warehouse_id IN ($warehouseMarks)
+             ORDER BY n.completed_at DESC, n.id DESC"
+        );
+        $completedLegacyStockStatement->execute(array_merge([$eventKey, $eventDate], $batchIds, $warehouseIds));
+        foreach ($completedLegacyStockStatement->fetchAll() as $row) {
+            $stock[(int)$row['batch_id']][(int)$row['warehouse_id']] ??= (float)$row['quantity'];
+        }
+
         $expectedStatement = $pdo->prepare(
             "SELECT DISTINCT i.batch_id, n.warehouse_id
              FROM stock_notifications n
