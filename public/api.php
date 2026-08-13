@@ -115,10 +115,11 @@ function handleApiRequest(): void
                 'email_notification_logs' => getProtectedEmailNotificationLogs($pdo, $_GET),
                 'catalog_health' => getCatalogSyncStatus($pdo),
                 'purchase_event_summary' => ['ok' => true] + getPurchaseEventSummary($pdo, (string)($_GET['token'] ?? '')),
-                'purchase_event_xls' => downloadPurchaseEventXls($pdo, (string)($_GET['token'] ?? ''), (string)($_GET['format'] ?? 'view')),
+                'purchase_event_xls' => downloadPurchaseEventXls($pdo, (string)($_GET['token'] ?? ''), (string)($_GET['format'] ?? 'view'), (string)($_GET['batch_ids'] ?? '')),
                 'stock_batch_notifications' => ['ok' => true, 'notifications' => listPurchaseEventNotifications($pdo)],
                 'events' => ['ok' => true, 'events' => listExpiryEvents($pdo)],
                 'event_catalog_stocks' => getExpiryEventCatalogStocks($pdo, (string)($_GET['id'] ?? '')),
+                'event_catalog_xls' => downloadExpiryEventCatalogXls($pdo, (string)($_GET['id'] ?? ''), (string)($_GET['format'] ?? 'view'), (string)($_GET['batch_ids'] ?? '')),
                 'batch_stock_xlsx' => downloadBatchStockXlsx($pdo, (int)($_GET['batch_id'] ?? 0)),
                 'tick' => ['ok' => true],
                 default => throw new InvalidArgumentException('Неизвестное GET-действие API: ' . $action),
@@ -516,6 +517,14 @@ function ensurePurchaseNotificationSchema(PDO $pdo): void
             INDEX idx_stock_reminder_due (event_key, event_date, warehouse_id, sent_at),
             CONSTRAINT fk_stock_reminder_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT,
             CONSTRAINT fk_stock_reminder_notification FOREIGN KEY (notification_id) REFERENCES stock_notifications(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS stock_event_completion_log (
+            event_key VARCHAR(128) NOT NULL,
+            event_date DATE NOT NULL,
+            completed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (event_key, event_date)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 }
@@ -2013,6 +2022,9 @@ function maybeSendPurchaseNotifications(PDO $pdo, array $notification, array $su
 
     $expected = countPurchaseEventExpectedStocks($event);
     if ((int)$event['filled_count'] < $expected) return;
+    // Фиксируем завершение до отправки итогового письма: даже ошибка почтовой
+    // очереди не должна снова превращать заполненное событие в ожидающее.
+    markStockEventCompleted($pdo, $event);
     if (purchaseEventNotificationAlreadySent($pdo, (string)$event['event_key'], (string)$event['event_date'])) return;
     sendPurchaseNotificationForEvent($pdo, $event, $eventDays);
 }
@@ -2035,6 +2047,23 @@ function purchaseEventMissingWarehouses(array $event): array
 function countPurchaseEventExpectedStocks(array $event): int
 {
     return array_sum(array_map('count', (array)($event['expected_stock'] ?? [])));
+}
+
+/** Завершённое событие фиксируется навсегда: последующие изменения catalogvr не должны возобновлять напоминания. */
+function markStockEventCompleted(PDO $pdo, array $event): bool
+{
+    $expected = countPurchaseEventExpectedStocks($event);
+    if ($expected <= 0 || (int)($event['filled_count'] ?? 0) < $expected) return false;
+    $statement = $pdo->prepare('INSERT IGNORE INTO stock_event_completion_log (event_key, event_date) VALUES (:event_key, :event_date)');
+    $statement->execute([':event_key' => (string)$event['event_key'], ':event_date' => (string)$event['event_date']]);
+    return true;
+}
+
+function stockEventWasCompleted(PDO $pdo, string $eventKey, string $eventDate): bool
+{
+    $statement = $pdo->prepare('SELECT COUNT(*) FROM stock_event_completion_log WHERE event_key = :event_key AND event_date = :event_date');
+    $statement->execute([':event_key' => $eventKey, ':event_date' => $eventDate]);
+    return (int)$statement->fetchColumn() > 0;
 }
 
 /** Обновляет персональную ссылку склада, чтобы просроченную форму снова можно было заполнить. */
@@ -2250,6 +2279,9 @@ function remindPurchaseEventWarehouses(PDO $pdo, array $payload): array
 {
     $link = findPurchaseEventByToken($pdo, trim((string)($payload['token'] ?? '')));
     $event = getPurchaseEventData($pdo, (string)$link['event_key'], (string)$link['event_date'], false);
+    if (stockEventWasCompleted($pdo, (string)$event['event_key'], (string)$event['event_date']) || markStockEventCompleted($pdo, $event)) {
+        return ['ok' => true, 'message' => 'Все склады уже заполнили остатки.', 'sent' => 0];
+    }
     $missing = purchaseEventMissingWarehouses($event);
     if (!$missing) return ['ok' => true, 'message' => 'Все склады уже заполнили остатки.', 'sent' => 0];
     $sent = 0;
@@ -2280,9 +2312,11 @@ function sendDueStockReminderNotifications(PDO $pdo): void
              GROUP BY event_key, DATE(sent_at)"
         );
         foreach ($statement->fetchAll() as $row) {
+            if (stockEventWasCompleted($pdo, (string)$row['event_key'], (string)$row['event_date'])) continue;
             $firstDue = (new DateTimeImmutable((string)$row['first_sent_at'], new DateTimeZone(APP_TIMEZONE)))->modify('+3 days')->setTime(12, 0);
             if ($now < $firstDue) continue;
             $event = getPurchaseEventData($pdo, (string)$row['event_key'], (string)$row['event_date'], false);
+            if (markStockEventCompleted($pdo, $event)) continue;
             foreach (purchaseEventMissingWarehouses($event) as $warehouse) {
                 $last = $pdo->prepare(
                     'SELECT sent_at, status FROM stock_notification_reminder_log
@@ -2298,6 +2332,7 @@ function sendDueStockReminderNotifications(PDO $pdo): void
                     // Повторно читаем событие непосредственно перед постановкой
                     // письма в очередь: склад мог завершить форму после начала tick.
                     $freshEvent = getPurchaseEventData($pdo, (string)$event['event_key'], (string)$event['event_date'], false);
+                    if (markStockEventCompleted($pdo, $freshEvent)) continue;
                     $stillMissing = array_filter(
                         purchaseEventMissingWarehouses($freshEvent),
                         static fn (array $candidate): bool => (int)$candidate['id'] === (int)$warehouse['id']
@@ -2814,6 +2849,54 @@ function getExpiryEventCatalogStocks(PDO $pdo, string $eventId): array
     }, $event['batches']);
 
     return ['ok' => true, 'event' => $event];
+}
+
+function downloadExpiryEventCatalogXls(PDO $pdo, string $eventId, string $format, string $batchIds = ''): array
+{
+    if ($format !== 'primary_invoice') {
+        throw new InvalidArgumentException('Неизвестный формат выгрузки события.');
+    }
+    $result = getExpiryEventCatalogStocks($pdo, $eventId);
+    $event = (array)$result['event'];
+    $selectedBatchIds = array_values(array_unique(array_filter(array_map('intval', explode(',', $batchIds)), static fn (int $id): bool => $id > 0)));
+    if (!$selectedBatchIds) throw new InvalidArgumentException('Не выбраны товары для выгрузки.');
+    $event['batches'] = array_values(array_filter(
+        (array)($event['batches'] ?? []),
+        static fn (array $batch): bool => in_array((int)($batch['id'] ?? 0), $selectedBatchIds, true)
+    ));
+    if (!$event['batches']) throw new InvalidArgumentException('Выбранные товары не найдены в событии.');
+    $warehouseNames = [];
+    foreach ((array)($event['batches'] ?? []) as $batch) {
+        foreach ((array)($batch['catalog_stocks'] ?? []) as $stock) {
+            $name = trim((string)($stock['name'] ?? ''));
+            if ($name !== '' && !in_array($name, $warehouseNames, true)) $warehouseNames[] = $name;
+        }
+    }
+    sort($warehouseNames, SORT_NATURAL | SORT_FLAG_CASE);
+    $summary = ['warehouses' => [], 'rows' => []];
+    foreach ($warehouseNames as $index => $name) {
+        $summary['warehouses'][] = ['id' => $index + 1, 'name' => $name];
+    }
+    foreach ((array)($event['batches'] ?? []) as $batch) {
+        $quantities = [];
+        foreach ($warehouseNames as $index => $name) {
+            $quantity = 0;
+            foreach ((array)($batch['catalog_stocks'] ?? []) as $stock) {
+                if (trim((string)($stock['name'] ?? '')) === $name) $quantity = (float)($stock['quantity'] ?? 0);
+            }
+            $quantities[(string)($index + 1)] = $quantity;
+        }
+        $summary['rows'][] = ['code' => (string)($batch['code'] ?? ''), 'fully_filled' => true, 'quantities' => $quantities];
+    }
+    $documentDate = date('d.m.Y');
+    $content = buildPurchaseEventPrimaryInvoiceZip($summary, $documentDate);
+    $filename = sanitizeDownloadFilename('Первичные счета события от ' . $documentDate . '.zip');
+    header_remove('Content-Type');
+    header('Content-Type: application/zip');
+    header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
+    header('Content-Length: ' . strlen($content));
+    echo $content;
+    exit;
 }
 
 function listPurchaseEventNotifications(PDO $pdo): array
@@ -3439,28 +3522,87 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
     return ['ok' => true] + getPurchaseEventSummary($pdo, trim((string)($payload['token'] ?? '')));
 }
 
-function purchaseEventPrimaryInvoiceRows(array $summary): array
+function purchaseEventPrimaryInvoiceRows(array $summary, int $warehouseId): array
 {
     $rows = [['Номер', 'Просто колонка', 'Код', 'Просто колонка', 'Просто колонка', 'Просто колонка', 'Количество']];
     $number = 1;
     foreach ((array)($summary['rows'] ?? []) as $row) {
-        if (empty($row['fully_filled']) || (float)($row['total'] ?? 0) <= 0) continue;
+        $quantity = (float)($row['quantities'][(string)$warehouseId] ?? 0);
+        if (empty($row['fully_filled']) || $quantity <= 0) continue;
         $code = trim((string)($row['code'] ?? ''));
         if ($code === '') continue;
-        $quantity = (float)$row['total'];
         $rows[] = [$number++, '', $code, '', '', '', floor($quantity) === $quantity ? (int)$quantity : $quantity];
     }
     return $rows;
 }
 
-function downloadPurchaseEventXls(PDO $pdo, string $token, string $format = 'view'): array
+function buildPurchaseEventPrimaryInvoiceZip(array $summary, string $documentDate): string
 {
-    $summary = getPurchaseEventSummary($pdo, $token);
+    if (!class_exists('ZipArchive')) {
+        throw new RuntimeException('Для экспорта в первичный счет требуется расширение PHP zip.');
+    }
+
+    $tmp = tempnam(sys_get_temp_dir(), 'primary-invoices-');
+    if ($tmp === false) throw new RuntimeException('Не удалось создать временный ZIP-архив.');
+    $zip = new ZipArchive();
+    $isOpen = false;
+    $fileCount = 0;
+    try {
+        if ($zip->open($tmp, ZipArchive::OVERWRITE) !== true) {
+            throw new RuntimeException('Не удалось создать ZIP-архив первичных счетов.');
+        }
+        $isOpen = true;
+        foreach ((array)($summary['warehouses'] ?? []) as $warehouse) {
+            $warehouseId = (int)($warehouse['id'] ?? 0);
+            $rows = purchaseEventPrimaryInvoiceRows($summary, $warehouseId);
+            // Если для склада нет ни одной товарной строки с положительным остатком,
+            // пустой XLS (с одной строкой заголовков) в архив не добавляем.
+            if (count($rows) === 1) continue;
+            $warehouseName = trim((string)($warehouse['name'] ?? '')) ?: ('Склад ' . $warehouseId);
+            $filename = sanitizeDownloadFilename('Первичный счет. ' . $warehouseName . '. от ' . $documentDate . '.xls');
+            if (!$zip->addFromString($filename, buildLegacyXlsContent($rows))) {
+                throw new RuntimeException('Не удалось добавить XLS-файл склада в ZIP-архив.');
+            }
+            $fileCount++;
+        }
+        if (!$zip->close()) throw new RuntimeException('Не удалось завершить ZIP-архив первичных счетов.');
+        $isOpen = false;
+        if ($fileCount === 0) {
+            throw new RuntimeException('В данном событии нет товаров с положительными остатками. Скачивание остановлено.');
+        }
+        $content = file_get_contents($tmp);
+        if (!is_string($content) || $content === '') throw new RuntimeException('Не удалось прочитать ZIP-архив первичных счетов.');
+        return $content;
+    } finally {
+        if ($isOpen) $zip->close();
+        @unlink($tmp);
+    }
+}
+
+function filterPurchaseEventSummaryRows(array $summary, string $batchIds): array
+{
+    $selectedBatchIds = array_values(array_unique(array_filter(
+        array_map('intval', explode(',', $batchIds)),
+        static fn (int $id): bool => $id > 0
+    )));
+    if (!$selectedBatchIds) throw new InvalidArgumentException('Не выбраны товары для выгрузки.');
+    $summary['rows'] = array_values(array_filter(
+        (array)($summary['rows'] ?? []),
+        static fn (array $row): bool => in_array((int)($row['id'] ?? 0), $selectedBatchIds, true)
+    ));
+    if (!$summary['rows']) throw new InvalidArgumentException('Выбранные товары не найдены в событии.');
+    return $summary;
+}
+
+function downloadPurchaseEventXls(PDO $pdo, string $token, string $format = 'view', string $batchIds = ''): array
+{
+    $summary = filterPurchaseEventSummaryRows(getPurchaseEventSummary($pdo, $token), $batchIds);
     if ($format === 'primary_invoice') {
-        $content = buildLegacyXlsContent(purchaseEventPrimaryInvoiceRows($summary));
-        $filename = sanitizeDownloadFilename('Первичный счет до ' . date('d.m.Y', strtotime((string)$summary['expiry_date'])) . '.xls');
+        $documentDate = date('d.m.Y');
+        $content = buildPurchaseEventPrimaryInvoiceZip($summary, $documentDate);
+        $filename = sanitizeDownloadFilename('Первичные счета от ' . $documentDate . '.zip');
         header_remove('Content-Type');
-        header('Content-Type: application/vnd.ms-excel');
+        header('Content-Type: application/zip');
         header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
         header('Content-Length: ' . strlen($content));
         echo $content;
