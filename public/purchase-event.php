@@ -12,7 +12,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сводная таблица остатков</title>
-    <link rel="stylesheet" href="assets/styles.css?v=20260812-02">
+    <link rel="stylesheet" href="assets/styles.css?v=20260811-06">
 </head>
 <body>
 <main class="layout purchase-event-page">
@@ -49,27 +49,10 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
             </button>
             <button class="purchase-event-export-option" id="downloadPurchaseEventPrimaryInvoiceButton" type="button">
                 <strong>Для экспорта в первичный счет</strong>
-                <small>ZIP-архив с отдельным XLS-файлом для каждого склада</small>
+                <small>Код товара и общее количество в формате для импорта</small>
             </button>
         </div>
         <div class="modal-actions"><button class="ghost-button" id="cancelPurchaseEventExportDialogButton" type="button">Отмена</button></div>
-    </div>
-</dialog>
-<dialog class="modal event-export-products-dialog" id="purchaseEventExportProductsDialog">
-    <div class="card form modal-card">
-        <div class="modal-heading">
-            <h2>Выберите товары для скачивания</h2>
-            <button class="icon-button" id="closePurchaseEventExportProductsDialogButton" type="button" aria-label="Закрыть">×</button>
-        </div>
-        <label class="checkbox-row"><input id="selectAllPurchaseEventExportProducts" type="checkbox" checked> Выделить все / снять все</label>
-        <div class="table-wrap event-export-products-list">
-            <table><thead><tr><th></th><th>Код</th><th>Наименование</th></tr></thead><tbody id="purchaseEventExportProductsBody"></tbody></table>
-        </div>
-        <p class="field-error" id="purchaseEventExportProductsError" role="alert"></p>
-        <div class="modal-actions">
-            <button class="ghost-button" id="cancelPurchaseEventExportProductsButton" type="button">Отмена</button>
-            <button class="primary" id="confirmPurchaseEventExportProductsButton" type="button">Скачать</button>
-        </div>
     </div>
 </dialog>
 <script>
@@ -217,66 +200,19 @@ document.querySelector('#savePurchaseEventStocksButton').addEventListener('click
 function closePurchaseEventExportDialog() {
     document.querySelector('#purchaseEventExportDialog').close();
 }
-function updatePurchaseEventExportProductSelection() {
-    const checkboxes = [...document.querySelectorAll('.purchase-event-export-product-checkbox')];
-    const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
-    const selectAll = document.querySelector('#selectAllPurchaseEventExportProducts');
-    selectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
-    selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
-    document.querySelector('#purchaseEventExportProductsError').textContent = '';
-}
-function openPurchaseEventExportProducts(format) {
-    purchaseEventExportFormat = format;
-    closePurchaseEventExportDialog();
-    document.querySelector('#purchaseEventExportProductsBody').innerHTML = (purchaseEventData?.rows || []).map((row) => `
-        <tr><td><input class="purchase-event-export-product-checkbox" type="checkbox" value="${escapeHtml(row.id)}" checked></td>
-        <td>${escapeHtml(row.code || '')}</td><td>${escapeHtml(row.name || '')}</td></tr>
-    `).join('');
-    const selectAll = document.querySelector('#selectAllPurchaseEventExportProducts');
-    selectAll.checked = true;
-    selectAll.indeterminate = false;
-    document.querySelector('#purchaseEventExportProductsError').textContent = '';
-    document.querySelectorAll('.purchase-event-export-product-checkbox').forEach((checkbox) => checkbox.addEventListener('change', updatePurchaseEventExportProductSelection));
-    document.querySelector('#purchaseEventExportProductsDialog').showModal();
-}
-function downloadPurchaseEventXls() {
-    const selectedIds = new Set([...document.querySelectorAll('.purchase-event-export-product-checkbox:checked')].map((checkbox) => String(checkbox.value)));
-    if (!selectedIds.size) {
-        document.querySelector('#purchaseEventExportProductsError').textContent = 'Выберите хотя бы один товар.';
-        return;
-    }
-    const selectedRows = (purchaseEventData?.rows || []).filter((row) => selectedIds.has(String(row.id)));
-    const format = purchaseEventExportFormat;
-    if (format === 'primary_invoice') {
-        const hasPositiveStock = selectedRows.some((row) =>
-            row.fully_filled && Object.values(row.quantities || {}).some((quantity) => Number(quantity) > 0)
-        );
-        if (!hasPositiveStock) {
-            closePurchaseEventExportDialog();
-            alert('В данном событии нет товаров с положительными остатками. Скачивание остановлено.');
-            return;
-        }
-    }
+function downloadPurchaseEventXls(format) {
     const url = new URL(purchaseEventApiUrl, window.location.origin);
     url.searchParams.set('action', 'purchase_event_xls');
     url.searchParams.set('token', purchaseEventToken);
     url.searchParams.set('format', format);
-    url.searchParams.set('batch_ids', [...selectedIds].join(','));
-    document.querySelector('#purchaseEventExportProductsDialog').close();
+    closePurchaseEventExportDialog();
     window.location.href = url.toString();
 }
 document.querySelector('#downloadPurchaseEventXlsButton').addEventListener('click', () => document.querySelector('#purchaseEventExportDialog').showModal());
 document.querySelector('#closePurchaseEventExportDialogButton').addEventListener('click', closePurchaseEventExportDialog);
 document.querySelector('#cancelPurchaseEventExportDialogButton').addEventListener('click', closePurchaseEventExportDialog);
-document.querySelector('#downloadPurchaseEventViewButton').addEventListener('click', () => openPurchaseEventExportProducts('view'));
-document.querySelector('#downloadPurchaseEventPrimaryInvoiceButton').addEventListener('click', () => openPurchaseEventExportProducts('primary_invoice'));
-document.querySelector('#closePurchaseEventExportProductsDialogButton').addEventListener('click', () => document.querySelector('#purchaseEventExportProductsDialog').close());
-document.querySelector('#cancelPurchaseEventExportProductsButton').addEventListener('click', () => document.querySelector('#purchaseEventExportProductsDialog').close());
-document.querySelector('#selectAllPurchaseEventExportProducts').addEventListener('change', (event) => {
-    document.querySelectorAll('.purchase-event-export-product-checkbox').forEach((checkbox) => { checkbox.checked = event.currentTarget.checked; });
-    updatePurchaseEventExportProductSelection();
-});
-document.querySelector('#confirmPurchaseEventExportProductsButton').addEventListener('click', downloadPurchaseEventXls);
+document.querySelector('#downloadPurchaseEventViewButton').addEventListener('click', () => downloadPurchaseEventXls('view'));
+document.querySelector('#downloadPurchaseEventPrimaryInvoiceButton').addEventListener('click', () => downloadPurchaseEventXls('primary_invoice'));
 document.querySelector('#remindPurchaseEventButton').addEventListener('click', async () => {
     const button = document.querySelector('#remindPurchaseEventButton');
     button.disabled = true;

@@ -11,9 +11,9 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260812-02">
+    <link rel="stylesheet" href="assets/styles.css?v=20260811-05">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260812-02"></script>
+    <script defer src="assets/app.js?v=20260813-01"></script>
 </head>
 <body>
     <header class="topbar">
@@ -450,7 +450,8 @@ declare(strict_types=1);
                 <p>Обязательные колонки файла:</p>
                 <ul>
                     <li><code>Артикул</code>;</li>
-                    <li><code>Срок годности до</code>, <code>Срок годности</code> или похожий заголовок.</li>
+                    <li><code>Срок годности до</code>, <code>Срок годности</code> или похожий заголовок. Допускается дата или значение <code>Не ограничен</code>.</li>
+                    <li>Партии со сроком <code>Не ограничен</code> заносятся в реестр, но не участвуют в уведомлениях о сроках годности.</li>
                 </ul>
                 <p>Необязательные колонки:</p>
                 <ul>
