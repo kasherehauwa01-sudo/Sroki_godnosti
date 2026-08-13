@@ -33,6 +33,12 @@ if (!str_contains($dataSource, "n.status = 'Заполнена' OR n.completed_a
 if (!str_contains($dataSource, 'INNER JOIN batch_stock bs')) {
     throw new RuntimeException('Для старых завершённых форм должен сохраняться совместимый fallback остатков.');
 }
+$purchaseStart = strpos($api, 'function maybeSendPurchaseNotifications(');
+$purchaseEnd = strpos($api, 'function purchaseEventMissingWarehouses(', (int)$purchaseStart);
+$purchaseSource = substr($api, (int)$purchaseStart, (int)$purchaseEnd - (int)$purchaseStart);
+if (!str_contains($purchaseSource, 'markStockEventCompleted($pdo, $event)')) {
+    throw new RuntimeException('Завершение события должно фиксироваться сразу после заполнения всех остатков.');
+}
 
 $reminderStart = strpos($api, 'function sendDueStockReminderNotifications(');
 $reminderEnd = strpos($api, 'function sendExpiredPurchaseEventNotifications(', (int)$reminderStart);
@@ -42,6 +48,16 @@ if (!str_contains($reminderSource, "(string)\$lastReminder['status'] === 'SUCCES
 }
 if (substr_count($reminderSource, 'getPurchaseEventData(') < 2) {
     throw new RuntimeException('Перед отправкой напоминания событие должно проверяться повторно.');
+}
+foreach (['stockEventWasCompleted(', 'markStockEventCompleted('] as $fragment) {
+    if (!str_contains($reminderSource, $fragment)) {
+        throw new RuntimeException('Автоматические напоминания должны учитывать навсегда зафиксированное завершение события: ' . $fragment);
+    }
+}
+$install = file_get_contents(__DIR__ . '/../database/install.sql');
+$migration = file_get_contents(__DIR__ . '/../database/migrations/20260813_stock_event_completion_log.sql');
+if (!is_string($install) || !is_string($migration) || !str_contains($install, 'stock_event_completion_log') || !str_contains($migration, 'stock_event_completion_log')) {
+    throw new RuntimeException('Миграция должна хранить постоянный признак завершения события.');
 }
 
 echo "Проверки повторных уведомлений пройдены.\n";
