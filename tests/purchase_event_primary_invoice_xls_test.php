@@ -43,8 +43,31 @@ if ($unsafeFilename !== 'Первичный_счет_31.08.2026.xls') {
 
 $page = file_get_contents(__DIR__ . '/../public/purchase-event.php');
 if (!is_string($page)) throw new RuntimeException('Не удалось прочитать страницу сводной таблицы.');
-foreach (['Выберите формат таблицы', 'Для просмотра', 'Для экспорта в первичный счет', "downloadPurchaseEventXls('view')", "downloadPurchaseEventXls('primary_invoice')"] as $fragment) {
+foreach (['Выберите формат таблицы', 'Для просмотра', 'Для экспорта в первичный счет', "downloadPurchaseEventXls('view')", 'openPurchaseEventBatchSelection', 'selected_batch_ids'] as $fragment) {
     if (!str_contains($page, $fragment)) throw new RuntimeException('В диалоге экспорта отсутствует: ' . $fragment);
+}
+
+$filterSummary = ['rows' => [
+    ['id' => 101, 'code' => 'ОДИН'], ['id' => 102, 'code' => 'ДВА'], ['id' => 103, 'code' => 'ТРИ'],
+]];
+$filtered = filterPurchaseEventSummaryByBatchIds($filterSummary, [101, 103, 999999]);
+if (array_column($filtered['rows'], 'id') !== [101, 103]) {
+    throw new RuntimeException('Фильтр должен оставить выбранные партии события и исключить посторонний batch_id.');
+}
+try {
+    filterPurchaseEventSummaryByBatchIds($filterSummary, []);
+    throw new RuntimeException('Пустой выбор не должен разрешать экспорт.');
+} catch (InvalidArgumentException $error) {
+    if ($error->getMessage() !== 'Не выбрано ни одного товара') throw $error;
+}
+
+$selectionScript = file_get_contents(__DIR__ . '/../public/assets/batch-export-selection.js');
+$applicationScript = file_get_contents(__DIR__ . '/../public/assets/app.js');
+foreach (['selectedIds = new Set', 'selectAll.indeterminate', 'batch-export-search', 'data-batch-id', 'Скачать XLS'] as $fragment) {
+    if (!str_contains((string)$selectionScript, $fragment)) throw new RuntimeException('Общий выбор партий не содержит: ' . $fragment);
+}
+foreach (['openEventExportDialog', 'openEventPrimaryInvoiceSelection', 'expiry_event_primary_invoice_xls', 'selected_batch_ids'] as $fragment) {
+    if (!str_contains((string)$applicationScript, $fragment)) throw new RuntimeException('Экспорт из вкладки «События» не содержит: ' . $fragment);
 }
 
 if (class_exists('PhpOffice\\PhpSpreadsheet\\Writer\\Xls')) {

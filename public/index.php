@@ -13,7 +13,8 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css?v=20260814-01">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260814-03"></script>
+    <script defer src="assets/batch-export-selection.js?v=20260814-01"></script>
+    <script defer src="assets/app.js?v=20260814-04"></script>
 </head>
 <body>
     <header class="topbar">
@@ -599,7 +600,7 @@ declare(strict_types=1);
     <dialog class="modal event-export-products-dialog" id="eventExportProductsDialog">
         <div class="card form modal-card">
             <div class="modal-heading">
-                <h2>Выберите товары для скачивания</h2>
+                <h2>Выберите товары для экспорта</h2>
                 <button class="icon-button" id="closeEventExportProductsDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
             <label class="checkbox-row"><input id="selectAllEventExportProducts" type="checkbox" checked> Выделить все / снять все</label>

@@ -1295,6 +1295,27 @@ function downloadEventCatalogStocks() {
     });
 }
 
+function openEventExportDialog() {
+    if (!state.selectedEventDetails) return;
+    qs('#eventExportDialog').showModal();
+}
+
+function closeEventExportDialog() { qs('#eventExportDialog').close(); }
+
+async function downloadSelectedEventBatches(selectedBatchIds) {
+    const response = await fetch('api.php?action=expiry_event_primary_invoice_xls', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event_id: state.selectedEventDetails.id, selected_batch_ids: selectedBatchIds }) });
+    if (!response.ok) { let result = {}; try { result = await response.json(); } catch (_) {} throw new Error(result.error || 'Не удалось сформировать ZIP'); }
+    const blob = await response.blob(), disposition = response.headers.get('Content-Disposition') || '', encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1];
+    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = encodedName ? decodeURIComponent(encodedName) : 'Первичные счета.zip'; document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(link.href);
+}
+
+function openEventPrimaryInvoiceSelection() {
+    closeEventExportDialog();
+    const event = state.selectedEventDetails;
+    if (!event) { showToast('Событие не найдено', true); return; }
+    window.openBatchExportSelection({ batches: event.batches || [], onDownload: downloadSelectedEventBatches });
+}
+
 function closeEventBatchesDialog() {
     qs('#eventBatchesDialog').close();
     state.selectedEventDetails = null;
@@ -2864,7 +2885,11 @@ function bindEvents() {
     }));
     qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
     qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
-    qs('#downloadEventCatalogStocksButton').addEventListener('click', downloadEventCatalogStocks);
+    qs('#downloadEventCatalogStocksButton').addEventListener('click', openEventExportDialog);
+    qs('#closeEventExportDialogButton').addEventListener('click', closeEventExportDialog);
+    qs('#cancelEventExportDialogButton').addEventListener('click', closeEventExportDialog);
+    qs('#downloadEventViewButton').addEventListener('click', () => { closeEventExportDialog(); downloadEventCatalogStocks(); });
+    qs('#downloadEventPrimaryInvoiceButton').addEventListener('click', openEventPrimaryInvoiceSelection);
 
     qs('#filterSearch').addEventListener('input', renderRegistry);
     qs('#filterSearchColumn').addEventListener('change', renderRegistry);
