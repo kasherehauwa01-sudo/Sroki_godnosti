@@ -563,6 +563,47 @@ declare(strict_types=1);
         </div>
     </dialog>
 
+    <dialog class="modal" id="eventExportDialog">
+        <div class="card form modal-card">
+            <div class="modal-heading">
+                <h2>Выберите формат таблицы</h2>
+                <button class="icon-button" id="closeEventExportDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="purchase-event-export-options">
+                <button class="purchase-event-export-option" id="downloadEventViewButton" type="button">
+                    <strong>Для просмотра</strong>
+                    <small>Сводная таблица с остатками по складам</small>
+                </button>
+                <button class="purchase-event-export-option" id="downloadEventPrimaryInvoiceButton" type="button">
+                    <strong>Для экспорта в первичный счет</strong>
+                    <small>ZIP-архив с отдельным XLS-файлом для каждого склада</small>
+                </button>
+            </div>
+            <div class="modal-actions"><button class="ghost-button" id="cancelEventExportDialogButton" type="button">Отмена</button></div>
+        </div>
+    </dialog>
+
+    <dialog class="modal event-export-products-dialog" id="eventExportProductsDialog">
+        <div class="card form modal-card">
+            <div class="modal-heading">
+                <h2>Выберите товары для скачивания</h2>
+                <button class="icon-button" id="closeEventExportProductsDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <label class="checkbox-row"><input id="selectAllEventExportProducts" type="checkbox" checked> Выделить все / снять все</label>
+            <div class="table-wrap event-export-products-list">
+                <table>
+                    <thead><tr><th></th><th>Код</th><th>Наименование</th></tr></thead>
+                    <tbody id="eventExportProductsBody"></tbody>
+                </table>
+            </div>
+            <p class="field-error" id="eventExportProductsError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelEventExportProductsButton" type="button">Отмена</button>
+                <button class="primary" id="confirmEventExportProductsButton" type="button">Скачать</button>
+            </div>
+        </div>
+    </dialog>
+
     <dialog class="modal batch-modal" id="addBatchesDialog">
         <form class="card form modal-card" id="addBatchesForm" method="dialog">
             <div class="modal-heading">
