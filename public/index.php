@@ -11,7 +11,7 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260811-05">
+    <link rel="stylesheet" href="assets/styles.css?v=20260814-01">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script defer src="assets/app.js?v=20260814-03"></script>
 </head>
@@ -543,13 +543,13 @@ declare(strict_types=1);
         </section>
     </main>
 
-    <dialog class="modal purchase-event-summary-dialog" id="purchaseEventSummaryDialog">
-        <div class="card modal-card purchase-event-summary-dialog-card">
+    <dialog class="modal purchase-event-summary-dialog" id="purchaseEventSummaryDialog" style="inset:8px;box-sizing:border-box;width:calc(100vw - 16px);min-width:calc(100vw - 16px);max-width:calc(100vw - 16px);height:calc(100vh - 16px);min-height:calc(100vh - 16px);max-height:calc(100vh - 16px);margin:auto">
+        <div class="card modal-card purchase-event-summary-dialog-card" style="box-sizing:border-box;display:grid;gap:12px;width:100%;height:100%;max-width:none;max-height:none;grid-template-rows:auto minmax(0,1fr) auto">
             <div class="modal-heading">
                 <h2>Сводная таблица остатков</h2>
                 <button class="icon-button" id="closePurchaseEventSummaryDialogIcon" type="button" aria-label="Закрыть">×</button>
             </div>
-            <iframe id="purchaseEventSummaryFrame" title="Сводная таблица остатков" src="about:blank"></iframe>
+            <iframe id="purchaseEventSummaryFrame" title="Сводная таблица остатков" src="about:blank" style="display:block;width:100%;height:100%;min-width:0;min-height:0;border:0;border-radius:14px;background:#f4f7fb"></iframe>
             <div class="modal-actions">
                 <button class="primary" id="closePurchaseEventSummaryDialogButton" type="button">Закрыть</button>
             </div>
