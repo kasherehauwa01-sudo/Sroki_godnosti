@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css?v=20260811-05">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260814-02"></script>
+    <script defer src="assets/app.js?v=20260814-03"></script>
 </head>
 <body>
     <header class="topbar">
@@ -542,6 +542,19 @@ declare(strict_types=1);
             </nav>
         </section>
     </main>
+
+    <dialog class="modal purchase-event-summary-dialog" id="purchaseEventSummaryDialog">
+        <div class="card modal-card purchase-event-summary-dialog-card">
+            <div class="modal-heading">
+                <h2>Сводная таблица остатков</h2>
+                <button class="icon-button" id="closePurchaseEventSummaryDialogIcon" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <iframe id="purchaseEventSummaryFrame" title="Сводная таблица остатков" src="about:blank"></iframe>
+            <div class="modal-actions">
+                <button class="primary" id="closePurchaseEventSummaryDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
 
     <dialog class="modal event-batches-dialog" id="eventBatchesDialog">
         <div class="card form modal-card event-batches-card">

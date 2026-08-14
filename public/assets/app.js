@@ -1402,7 +1402,7 @@ function renderStockBatchNotifications() {
         const openEvent = () => {
             if (notification) markStockEventViewed(notification, row);
             qs('#notificationsUnreadDot')?.classList.toggle('hidden', !state.stockBatchNotifications.some(stockEventHasUnreadChanges));
-            window.location.assign(row.dataset.stockEventUrl);
+            openPurchaseEventSummaryDialog(row.dataset.stockEventUrl);
         };
         row.addEventListener('click', () => {
             openEvent();
@@ -1414,6 +1414,25 @@ function renderStockBatchNotifications() {
             }
         });
     });
+}
+
+function openPurchaseEventSummaryDialog(eventUrl) {
+    const dialog = qs('#purchaseEventSummaryDialog');
+    const frame = qs('#purchaseEventSummaryFrame');
+    const url = new URL(eventUrl, window.location.href);
+    url.searchParams.set('embedded', '1');
+    frame.src = url.toString();
+    dialog.showModal();
+}
+
+function closePurchaseEventSummaryDialog() {
+    const dialog = qs('#purchaseEventSummaryDialog');
+    if (dialog.open) dialog.close();
+}
+
+function resetPurchaseEventSummaryDialog() {
+    qs('#purchaseEventSummaryFrame').src = 'about:blank';
+    loadStockBatchNotifications().catch((error) => showToast(error.message, true));
 }
 
 async function saveSelectedStockBatchStatus() {
@@ -2718,6 +2737,9 @@ async function importRowsInChunks(rows, chunkSize = 100) {
 
 function bindEvents() {
     qs('#markAllStockEventsReadButton')?.addEventListener('click', markAllStockEventsViewed);
+    qs('#closePurchaseEventSummaryDialogIcon').addEventListener('click', closePurchaseEventSummaryDialog);
+    qs('#closePurchaseEventSummaryDialogButton').addEventListener('click', closePurchaseEventSummaryDialog);
+    qs('#purchaseEventSummaryDialog').addEventListener('close', resetPurchaseEventSummaryDialog);
     qsa('.notification-type-filter').forEach((checkbox) => checkbox.addEventListener('change', updateNotificationEventTypeFilters));
     bindPurchaseRecipientEvents();
 
