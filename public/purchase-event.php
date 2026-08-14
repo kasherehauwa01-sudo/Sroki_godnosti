@@ -64,6 +64,7 @@ const inputQuantityValue = (value) => value === null || value === undefined ? ''
 let purchaseEventData = null;
 let purchaseEventEditPassword = '';
 let purchaseEventEditing = false;
+let purchaseEventExportFormat = 'view';
 const formatDate = (value) => {
     const [year, month, day] = String(value || '').split('-');
     return year && month && day ? `${day}.${month}.${year}` : value;
