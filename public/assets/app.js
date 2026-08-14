@@ -481,6 +481,8 @@ function normalizeBatch(row) {
     const serverFullDate = row.expiryFullDate ?? row.expiry_full_date;
     const expiryInvalid = serverInvalid === undefined ? expiryInfo.invalid : Boolean(serverInvalid);
     const expiryFullDate = serverFullDate === undefined ? expiryInfo.full : Boolean(serverFullDate);
+    const expiryRaw = String(getRowValue(row, ['expiryRaw', 'expiry_raw']) || (expiryInvalid ? expiryInfo.raw : '') || '').trim();
+    const expiryUnlimited = expiryRaw.toLocaleLowerCase('ru-RU') === 'не ограничен';
 
     return {
         id: String(getRowValue(row, ['id', 'ID']) || crypto.randomUUID()),
@@ -492,7 +494,8 @@ function normalizeBatch(row) {
         name: String(nameRaw || '').trim(),
         expiryDate: toExpiryDateValue(expiryRawValue),
         expiryFullDate,
-        expiryRaw: String(getRowValue(row, ['expiryRaw', 'expiry_raw']) || (expiryInvalid ? expiryInfo.raw : '') || '').trim(),
+        expiryRaw,
+        expiryUnlimited,
         expiryInvalid,
         daysLeft: expiryInvalid ? null : (Number.isFinite(Number(row.daysLeft ?? row.days_left)) ? Number(row.daysLeft ?? row.days_left) : null),
         status: getRowValue(row, ['status', 'Статус партии']) || 'В наличии',
@@ -600,10 +603,10 @@ function renderRegistry() {
         const selectionCell = selectionVisible
             ? `<td class="selection-column"><input class="batch-select-checkbox" data-id="${escapeHtml(batch.id)}" type="checkbox" ${state.selectedBatchIds.has(String(batch.id)) ? 'checked' : ''}></td>`
             : '';
-        const invalidDateActions = batch.expiryInvalid
+        const invalidDateActions = batch.expiryInvalid && !batch.expiryUnlimited
             ? `<span class="invalid-date-label">некорректная дата</span><button class="small-button fix-expiry-button" data-id="${escapeHtml(batch.id)}" type="button">Исправить</button>`
             : '';
-        return `<tr class="${batch.expiryInvalid ? 'indicator-purple invalid-expiry-row' : indicatorClass(days)}" data-batch-id="${escapeHtml(batch.id)}">
+        return `<tr class="${batch.expiryInvalid && !batch.expiryUnlimited ? 'indicator-purple invalid-expiry-row' : indicatorClass(days)}" data-batch-id="${escapeHtml(batch.id)}">
             ${selectionCell}
             <td>${escapeHtml(batch.article)}</td>
             <td>${escapeHtml(batch.code || '')}</td>

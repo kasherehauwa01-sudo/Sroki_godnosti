@@ -31,5 +31,8 @@ $js = file_get_contents(__DIR__ . '/../public/assets/app.js');
 if (!is_string($js) || !str_contains($js, "placeholder: '9999-12-31'") || !str_contains($js, "raw: 'Не ограничен'")) {
     throw new RuntimeException('Ручной XLS-импорт должен распознавать значение «Не ограничен».');
 }
+if (!str_contains($js, 'batch.expiryInvalid && !batch.expiryUnlimited') || !str_contains($js, 'expiryUnlimited,')) {
+    throw new RuntimeException('Бессрочная партия не должна получать жирное оформление некорректной даты.');
+}
 
 echo "Проверки импорта бессрочных партий пройдены.\n";
