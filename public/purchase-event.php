@@ -12,7 +12,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сводная таблица остатков</title>
-    <link rel="stylesheet" href="assets/styles.css">
+    <link rel="stylesheet" href="assets/styles.css?v=20260811-06">
 </head>
 <body>
 <main class="layout purchase-event-page">
@@ -36,6 +36,25 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
         </div>
     </section>
 </main>
+<dialog class="modal" id="purchaseEventExportDialog">
+    <div class="card form modal-card">
+        <div class="modal-heading">
+            <h2>Выберите формат таблицы</h2>
+            <button class="icon-button" id="closePurchaseEventExportDialogButton" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="purchase-event-export-options">
+            <button class="purchase-event-export-option" id="downloadPurchaseEventViewButton" type="button">
+                <strong>Для просмотра</strong>
+                <small>Сводная таблица с остатками по складам</small>
+            </button>
+            <button class="purchase-event-export-option" id="downloadPurchaseEventPrimaryInvoiceButton" type="button">
+                <strong>Для экспорта в первичный счет</strong>
+                <small>Код товара и общее количество в формате для импорта</small>
+            </button>
+        </div>
+        <div class="modal-actions"><button class="ghost-button" id="cancelPurchaseEventExportDialogButton" type="button">Отмена</button></div>
+    </div>
+</dialog>
 <script>
 const purchaseEventToken = <?= json_encode($token, JSON_UNESCAPED_UNICODE) ?>;
 const purchaseEventApiUrl = <?= json_encode($apiUrl, JSON_UNESCAPED_UNICODE) ?>;
@@ -88,7 +107,7 @@ async function loadPurchaseEvent() {
         if (!response.ok || !result.ok) throw new Error(result.error || 'Не удалось загрузить сводную таблицу.');
         purchaseEventData = result;
         document.querySelector('#remindPurchaseEventButton').classList.toggle('hidden', !result.can_remind);
-        document.querySelector('#purchaseEventInfo').textContent = `Срок годности до ${formatDate(result.expiry_date)}. Событие: ${result.event_days} дней.`;
+        document.querySelector('#purchaseEventInfo').textContent = `Срок годности до ${formatDate(result.expiry_date)}. Событие: ${result.event_label || `${result.event_days} дней`}.`;
         renderPurchaseEventTable(result);
         document.querySelector('#purchaseEventTableWrap').classList.remove('hidden');
     } catch (error) {
@@ -177,12 +196,22 @@ async function savePurchaseEventStocks() {
 
 document.querySelector('#editPurchaseEventButton').addEventListener('click', enablePurchaseEventEditing);
 document.querySelector('#savePurchaseEventStocksButton').addEventListener('click', savePurchaseEventStocks);
-document.querySelector('#downloadPurchaseEventXlsButton').addEventListener('click', () => {
+function closePurchaseEventExportDialog() {
+    document.querySelector('#purchaseEventExportDialog').close();
+}
+function downloadPurchaseEventXls(format) {
     const url = new URL(purchaseEventApiUrl, window.location.origin);
     url.searchParams.set('action', 'purchase_event_xls');
     url.searchParams.set('token', purchaseEventToken);
+    url.searchParams.set('format', format);
+    closePurchaseEventExportDialog();
     window.location.href = url.toString();
-});
+}
+document.querySelector('#downloadPurchaseEventXlsButton').addEventListener('click', () => document.querySelector('#purchaseEventExportDialog').showModal());
+document.querySelector('#closePurchaseEventExportDialogButton').addEventListener('click', closePurchaseEventExportDialog);
+document.querySelector('#cancelPurchaseEventExportDialogButton').addEventListener('click', closePurchaseEventExportDialog);
+document.querySelector('#downloadPurchaseEventViewButton').addEventListener('click', () => downloadPurchaseEventXls('view'));
+document.querySelector('#downloadPurchaseEventPrimaryInvoiceButton').addEventListener('click', () => downloadPurchaseEventXls('primary_invoice'));
 document.querySelector('#remindPurchaseEventButton').addEventListener('click', async () => {
     const button = document.querySelector('#remindPurchaseEventButton');
     button.disabled = true;
