@@ -34,5 +34,12 @@ if (!is_string($js) || !str_contains($js, "placeholder: '9999-12-31'") || !str_c
 if (!str_contains($js, 'batch.expiryInvalid && !batch.expiryUnlimited') || !str_contains($js, 'expiryUnlimited,')) {
     throw new RuntimeException('Бессрочная партия не должна получать жирное оформление некорректной даты.');
 }
+if (!str_contains($js, "filters.days_to === 'unlimited'") || !str_contains($js, '? batch.expiryUnlimited')) {
+    throw new RuntimeException('Фильтр остатка дней должен показывать только бессрочные партии.');
+}
+$page = file_get_contents(__DIR__ . '/../public/index.php');
+if (!is_string($page) || !str_contains($page, '<option value="unlimited">Не ограничен</option>')) {
+    throw new RuntimeException('В фильтре «Остаток дней до» отсутствует значение «Не ограничен».');
+}
 
 echo "Проверки импорта бессрочных партий пройдены.\n";

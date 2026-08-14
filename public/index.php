@@ -13,7 +13,7 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css?v=20260811-05">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260814-01"></script>
+    <script defer src="assets/app.js?v=20260814-02"></script>
 </head>
 <body>
     <header class="topbar">
@@ -58,6 +58,7 @@ declare(strict_types=1);
                 <label>Остаток дней до
                     <select id="filterDaysTo">
                         <option value="">Все</option>
+                        <option value="unlimited">Не ограничен</option>
                         <option value="expired">Просроченные</option>
                         <option value="1">1 день</option>
                         <option value="15">15 дней</option>

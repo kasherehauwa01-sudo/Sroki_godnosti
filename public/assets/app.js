@@ -578,13 +578,14 @@ function renderRegistry() {
     const filters = getFilterParams();
     state.filteredBatches = state.batches.filter((batch) => {
         const numericDays = getBatchDaysLeft(batch);
-        const matchesDaysTo = !filters.days_to
-            || (numericDays !== null && (filters.days_to === 'expired' ? numericDays < 0 : numericDays >= 0 && numericDays <= Number(filters.days_to)));
+        const matchesDaysTo = filters.days_to === 'unlimited'
+            ? batch.expiryUnlimited
+            : !filters.days_to
+                || (numericDays !== null && (filters.days_to === 'expired' ? numericDays < 0 : numericDays >= 0 && numericDays <= Number(filters.days_to)));
         const matchesEvent = matchesEventDaysFilter(batch, filters.event_days);
 
         return matchesRegistrySearch(batch, filters.search, filters.search_column)
             && (!filters.status || batch.status === filters.status)
-            && (!batch.expiryInvalid || !filters.days_to)
             && matchesDaysTo
             && matchesEvent;
     });
