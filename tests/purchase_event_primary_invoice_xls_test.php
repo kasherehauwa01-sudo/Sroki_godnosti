@@ -70,8 +70,12 @@ foreach (['selectedIds = new Set', 'selectAll.indeterminate', 'batch-export-sear
 foreach (['openEventExportDialog', 'openEventPrimaryInvoiceSelection', 'expiry_event_primary_invoice_xls', 'selected_batch_ids'] as $fragment) {
     if (!str_contains((string)$applicationScript, $fragment)) throw new RuntimeException('Экспорт из вкладки «События» не содержит: ' . $fragment);
 }
-if (!str_contains((string)$styles, '.modal.batch-export-selection-dialog { box-sizing: border-box; width: calc(100vw - 24px); min-width: calc(100vw - 24px); max-width: calc(100vw - 24px)')) {
+if (!str_contains((string)$styles, '.modal.event-export-products-dialog { box-sizing: border-box; width: calc(100vw - 24px); min-width: calc(100vw - 24px); max-width: calc(100vw - 24px)')) {
     throw new RuntimeException('Окно выбора товаров должно занимать всю доступную ширину экрана.');
+}
+$indexPage = file_get_contents(__DIR__ . '/../public/index.php');
+if (!str_contains((string)$indexPage, 'assets/styles.css?v=20260814-02')) {
+    throw new RuntimeException('Версию CSS вкладки «События» необходимо обновить для сброса браузерного кеша.');
 }
 
 if (class_exists('PhpOffice\\PhpSpreadsheet\\Writer\\Xls')) {
