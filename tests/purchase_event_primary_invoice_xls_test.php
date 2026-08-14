@@ -63,11 +63,15 @@ try {
 
 $selectionScript = file_get_contents(__DIR__ . '/../public/assets/batch-export-selection.js');
 $applicationScript = file_get_contents(__DIR__ . '/../public/assets/app.js');
+$styles = file_get_contents(__DIR__ . '/../public/assets/styles.css');
 foreach (['selectedIds = new Set', 'selectAll.indeterminate', 'batch-export-search', 'data-batch-id', 'Скачать XLS'] as $fragment) {
     if (!str_contains((string)$selectionScript, $fragment)) throw new RuntimeException('Общий выбор партий не содержит: ' . $fragment);
 }
 foreach (['openEventExportDialog', 'openEventPrimaryInvoiceSelection', 'expiry_event_primary_invoice_xls', 'selected_batch_ids'] as $fragment) {
     if (!str_contains((string)$applicationScript, $fragment)) throw new RuntimeException('Экспорт из вкладки «События» не содержит: ' . $fragment);
+}
+if (!str_contains((string)$styles, '.modal.batch-export-selection-dialog { box-sizing: border-box; width: calc(100vw - 24px); min-width: calc(100vw - 24px); max-width: calc(100vw - 24px)')) {
+    throw new RuntimeException('Окно выбора товаров должно занимать всю доступную ширину экрана.');
 }
 
 if (class_exists('PhpOffice\\PhpSpreadsheet\\Writer\\Xls')) {
