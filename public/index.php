@@ -11,9 +11,10 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260814-01">
+    <link rel="stylesheet" href="assets/styles.css?v=20260814-02">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260814-03"></script>
+    <script defer src="assets/batch-export-selection.js?v=20260814-01"></script>
+    <script defer src="assets/app.js?v=20260814-04"></script>
 </head>
 <body>
     <header class="topbar">
@@ -287,6 +288,7 @@ declare(strict_types=1);
             <div class="help-subtabs" aria-label="Разделы помощи">
                 <button class="help-subtab active" data-help-tab="description" type="button">Описание и возможности</button>
                 <button class="help-subtab" data-help-tab="instructions" type="button">Инструкция для пользователя</button>
+                <button class="help-subtab" data-help-tab="primary-invoice-import" type="button">Импорт в первичный счет</button>
             </div>
 
             <div class="card help-card help-subpanel active" data-help-panel="description">
@@ -497,6 +499,56 @@ declare(strict_types=1);
                     <li>Администратор видит прогресс заполнения во вкладке <code>Уведомления</code>.</li>
                 </ol>
             </div>
+
+            <div class="card help-card help-subpanel" data-help-panel="primary-invoice-import" hidden>
+                <h2>Инструкция по экспорту XLS в первичный счет</h2>
+
+                <h3>1. Формирование файлов для первичного счета</h3>
+                <ol>
+                    <li>Откройте сервис <strong>«Сроки годности»</strong>:<br><a href="https://kvasmix.ru/vr/sroki_godnosti/">https://kvasmix.ru/vr/sroki_godnosti/</a></li>
+                    <li>Перейдите во вкладку <strong>«Уведомления»</strong> или <strong>«События»</strong>.</li>
+                    <li>Найдите нужную запись и нажмите на нее.</li>
+                    <li>Откроется окно со сводной таблицей. Нажмите кнопку <strong>«Скачать XLS»</strong>.</li>
+                    <li>В появившемся окне выберите формат <strong>«Для экспорта в первичный счет»</strong>.</li>
+                    <li>Откроется список товаров, которые можно включить в экспорт. Отметьте галочками товары, по которым необходимо сформировать первичные счета.<p>По умолчанию выбраны все товары. При необходимости снимите галочки с тех товаров, которые не нужно выгружать.</p></li>
+                    <li>Нажмите кнопку <strong>«Скачать XLS»</strong> и выберите место для сохранения файла.</li>
+                    <li>Будет загружен ZIP-архив с названием <strong>«Первичные счета от дд.мм.гггг»</strong>.<p>В архив попадут XLS-файлы только по тем товарам, которые были отмечены при экспорте.</p></li>
+                </ol>
+
+                <hr>
+                <h3>2. Распаковка архива</h3>
+                <ol>
+                    <li>Перейдите в папку, в которую был загружен ZIP-архив.</li>
+                    <li>Нажмите на архив <strong>правой кнопкой мыши</strong>.</li>
+                    <li>Выберите <strong>7-Zip → Распаковать в «Первичные счета от дд.мм.гггг\»</strong>.</li>
+                    <li>Рядом с ZIP-архивом появится папка <strong>«Первичные счета от дд.мм.гггг»</strong>.</li>
+                    <li>Скопируйте полученную папку в место, доступное из <strong>1С</strong>.</li>
+                </ol>
+
+                <hr>
+                <h3>3. Импорт первичного счета в 1С</h3>
+                <ol>
+                    <li>В 1С перейдите: <strong>Сервис → Дополнительные возможности → Импорт счетов</strong>.</li>
+                    <li>Нажмите кнопку <strong>«Выбрать файл»</strong>.</li>
+                    <li>Найдите ранее скопированную папку <strong>«Первичные счета от дд.мм.гггг»</strong>.</li>
+                    <li>Откройте папку и выберите нужный XLS-файл.</li>
+                    <li>Нажмите <strong>«ОК»</strong>.</li>
+                    <li>Нажмите кнопку <strong>«Загрузить из файла»</strong>.</li>
+                    <li>После загрузки появится печатная форма. <strong>Проверьте корректность данных перед созданием счета.</strong></li>
+                    <li>Если данные указаны верно, нажмите <strong>«Записать в базу»</strong>.</li>
+                    <li>Дождитесь сообщения <strong>«Импорт завершен»</strong>.</li>
+                </ol>
+
+                <hr>
+                <h3>4. Проверка созданного счета и списание</h3>
+                <ol>
+                    <li>Перейдите в <strong>«Журналы»</strong>.</li>
+                    <li>Найдите созданный первичный счет.</li>
+                    <li>Проверьте данные первичного счета.</li>
+                    <li><strong>На основании созданного первичного счета оформите списание товара.</strong></li>
+                </ol>
+                <blockquote><strong>Важно:</strong> если в ZIP-архиве находится несколько XLS-файлов, импортируйте необходимые файлы в 1С поочередно.</blockquote>
+            </div>
         </section>
 
         <!-- Вкладка истории должна быть самостоятельной панелью, а не частью скрытой инструкции. -->
@@ -599,7 +651,7 @@ declare(strict_types=1);
     <dialog class="modal event-export-products-dialog" id="eventExportProductsDialog">
         <div class="card form modal-card">
             <div class="modal-heading">
-                <h2>Выберите товары для скачивания</h2>
+                <h2>Выберите товары для экспорта</h2>
                 <button class="icon-button" id="closeEventExportProductsDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
             <label class="checkbox-row"><input id="selectAllEventExportProducts" type="checkbox" checked> Выделить все / снять все</label>
