@@ -49,7 +49,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
             </button>
             <button class="purchase-event-export-option" id="downloadPurchaseEventPrimaryInvoiceButton" type="button">
                 <strong>Для экспорта в первичный счет</strong>
-                <small>Код товара и общее количество в формате для импорта</small>
+                <small>ZIP-архив: отдельный XLS для каждого склада с его остатками</small>
             </button>
         </div>
         <div class="modal-actions"><button class="ghost-button" id="cancelPurchaseEventExportDialogButton" type="button">Отмена</button></div>

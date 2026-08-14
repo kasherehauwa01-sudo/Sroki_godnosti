@@ -3490,28 +3490,43 @@ function updatePurchaseEventStocks(PDO $pdo, array $payload): array
     return ['ok' => true] + getPurchaseEventSummary($pdo, trim((string)($payload['token'] ?? '')));
 }
 
-function purchaseEventPrimaryInvoiceRows(array $summary): array
+function purchaseEventPrimaryInvoiceRowsForWarehouse(array $summary, int $warehouseId): array
 {
     $rows = [['Номер', 'Просто колонка', 'Код', 'Просто колонка', 'Просто колонка', 'Просто колонка', 'Количество']];
     $number = 1;
     foreach ((array)($summary['rows'] ?? []) as $row) {
-        if (empty($row['fully_filled']) || (float)($row['total'] ?? 0) <= 0) continue;
+        $quantity = $row['quantities'][(string)$warehouseId] ?? null;
+        if ($quantity === null || (float)$quantity <= 0) continue;
         $code = trim((string)($row['code'] ?? ''));
         if ($code === '') continue;
-        $quantity = (float)$row['total'];
+        $quantity = (float)$quantity;
         $rows[] = [$number++, '', $code, '', '', '', floor($quantity) === $quantity ? (int)$quantity : $quantity];
     }
     return $rows;
+}
+
+function purchaseEventPrimaryInvoiceFiles(array $summary): array
+{
+    $date = date('d.m.Y', strtotime((string)($summary['expiry_date'] ?? '')));
+    $files = [];
+    foreach ((array)($summary['warehouses'] ?? []) as $warehouse) {
+        $warehouseId = (int)($warehouse['id'] ?? 0);
+        if ($warehouseId <= 0) continue;
+        $warehouseName = trim((string)($warehouse['name'] ?? '')) ?: ('Склад ' . $warehouseId);
+        $filename = sanitizeDownloadFilename('Первичный счет - ' . $warehouseName . ' - до ' . $date . ' - ' . $warehouseId . '.xls');
+        $files[$filename] = buildLegacyXlsContent(purchaseEventPrimaryInvoiceRowsForWarehouse($summary, $warehouseId));
+    }
+    return $files;
 }
 
 function downloadPurchaseEventXls(PDO $pdo, string $token, string $format = 'view'): array
 {
     $summary = getPurchaseEventSummary($pdo, $token);
     if ($format === 'primary_invoice') {
-        $content = buildLegacyXlsContent(purchaseEventPrimaryInvoiceRows($summary));
-        $filename = sanitizeDownloadFilename('Первичный счет до ' . date('d.m.Y', strtotime((string)$summary['expiry_date'])) . '.xls');
+        $content = buildZipArchiveContent(purchaseEventPrimaryInvoiceFiles($summary));
+        $filename = sanitizeDownloadFilename('Первичные счета до ' . date('d.m.Y', strtotime((string)$summary['expiry_date'])) . '.zip');
         header_remove('Content-Type');
-        header('Content-Type: application/vnd.ms-excel');
+        header('Content-Type: application/zip');
         header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
         header('Content-Length: ' . strlen($content));
         echo $content;
@@ -3725,6 +3740,29 @@ function buildLegacyXlsContent(array $rows): string
     } finally {
         @unlink($tmp);
         $spreadsheet->disconnectWorksheets();
+    }
+}
+
+function buildZipArchiveContent(array $files): string
+{
+    if (!class_exists('ZipArchive')) throw new RuntimeException('Для формирования ZIP-архива требуется расширение PHP zip.');
+    $tmp = tempnam(sys_get_temp_dir(), 'primary-invoices-');
+    if ($tmp === false) throw new RuntimeException('Не удалось создать временный ZIP-архив.');
+    try {
+        $zip = new ZipArchive();
+        if ($zip->open($tmp, ZipArchive::OVERWRITE) !== true) throw new RuntimeException('Не удалось открыть ZIP-архив для записи.');
+        foreach ($files as $filename => $content) {
+            if (!$zip->addFromString((string)$filename, (string)$content)) {
+                $zip->close();
+                throw new RuntimeException('Не удалось добавить XLS-файл в ZIP-архив.');
+            }
+        }
+        if (!$zip->close()) throw new RuntimeException('Не удалось завершить ZIP-архив.');
+        $content = file_get_contents($tmp);
+        if (!is_string($content) || $content === '') throw new RuntimeException('Сформирован пустой ZIP-архив.');
+        return $content;
+    } finally {
+        @unlink($tmp);
     }
 }
 
