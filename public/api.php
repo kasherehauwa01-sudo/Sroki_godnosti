@@ -153,6 +153,7 @@ function handleApiRequest(): void
                 'purchase_event_stocks' => updatePurchaseEventStocks($pdo, $payload),
                 'purchase_event_primary_invoice_xls' => downloadSelectedPurchaseEventPrimaryInvoice($pdo, $payload),
                 'expiry_event_primary_invoice_xls' => downloadSelectedExpiryEventPrimaryInvoice($pdo, $payload),
+                'registry_primary_invoice_xls' => downloadSelectedRegistryPrimaryInvoice($pdo, $payload),
                 'purchase_event_remind' => remindPurchaseEventWarehouses($pdo, $payload),
                 'registry_recount' => sendRegistryRecountNotifications($pdo, $payload),
                 'email_notification_retry' => retryEmailNotification($pdo, $payload),
@@ -3367,7 +3368,7 @@ function getPurchaseEventSummary(PDO $pdo, string $token): array
         $displayName = trim((string)($catalogNames[(int)$batch['id']] ?? $batch['name'] ?? ''));
         if ($displayName === '') $displayName = (string)$batch['article'];
         $fullyFilled = $quantities !== [] && !in_array(null, array_values($quantities), true);
-        $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'total' => $total, 'fully_filled' => $fullyFilled, 'status' => $batch['status'], 'quantities' => $quantities, 'auto_zero_quantities' => $autoZeroQuantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'manager_email' => $managerEmails[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
+        $rows[] = ['id' => (int)$batch['id'], 'article' => $batch['article'], 'code' => $batch['code'], 'name' => $displayName, 'expiry_date' => $batch['expiry_date'], 'total' => $total, 'fully_filled' => $fullyFilled, 'status' => $batch['status'], 'quantities' => $quantities, 'auto_zero_quantities' => $autoZeroQuantities, 'manager_value' => $managerValues[(int)$batch['id']] ?? '', 'manager_email' => $managerEmails[(int)$batch['id']] ?? '', 'section' => in_array((int)$batch['id'], $unassignedIds, true) ? 'unassigned' : 'assigned'];
     }
     usort($rows, static fn (array $left, array $right): int => ($left['section'] <=> $right['section']) ?: ($left['id'] <=> $right['id']));
     return ['expiry_date' => (string)$log['expiry_date'], 'event_days' => (int)$log['event_days'], 'event_label' => str_starts_with((string)$log['event_key'], 'recount_') ? 'Пересчет' : ((int)$log['event_days'] . ' дней'), 'warehouses' => $event['warehouses'], 'rows' => $rows, 'statuses' => BATCH_STATUSES, 'can_remind' => purchaseEventMissingWarehouses($event) !== []];
@@ -3522,9 +3523,167 @@ function purchaseEventPrimaryInvoiceFiles(array $summary): array
         if ($warehouseId <= 0) continue;
         $warehouseName = trim((string)($warehouse['name'] ?? '')) ?: ('Склад ' . $warehouseId);
         $filename = sanitizeDownloadFilename('Первичный счет - ' . $warehouseName . ' - до ' . $date . ' - ' . $warehouseId . '.xls');
-        $files[$filename] = buildLegacyXlsContent(purchaseEventPrimaryInvoiceRowsForWarehouse($summary, $warehouseId));
+        $rows = purchaseEventPrimaryInvoiceRowsForWarehouse($summary, $warehouseId);
+        // Пустые складские группы после отбора не должны создавать XLS-файлы.
+        if (count($rows) <= 1) continue;
+        $files[$filename] = buildLegacyXlsContent($rows);
     }
     return $files;
+}
+
+function filterPurchaseEventSummaryByBatchIds(array $summary, array $selectedBatchIds): array
+{
+    $requested = array_values(array_unique(array_filter(array_map('intval', $selectedBatchIds), static fn (int $id): bool => $id > 0)));
+    if (!$requested) throw new InvalidArgumentException('Не выбрано ни одного товара');
+
+    $allowed = array_map(static fn (array $row): int => (int)($row['id'] ?? 0), (array)($summary['rows'] ?? []));
+    $selected = array_values(array_intersect($requested, $allowed));
+    if (!$selected) throw new InvalidArgumentException('Не выбрано ни одного товара');
+
+    // Проверяем принадлежность и фильтруем по batch_id до складской группировки и формирования XLS.
+    $summary['rows'] = array_values(array_filter(
+        (array)$summary['rows'],
+        static fn (array $row): bool => in_array((int)($row['id'] ?? 0), $selected, true)
+    ));
+    return $summary;
+}
+
+function outputPurchaseEventPrimaryInvoiceZip(array $summary): never
+{
+    try {
+        $files = purchaseEventPrimaryInvoiceFiles($summary);
+    } catch (Throwable $error) {
+        error_log('Не удалось сформировать Excel: ' . $error->getMessage());
+        throw new RuntimeException('Не удалось сформировать Excel');
+    }
+    if (!$files) throw new RuntimeException('Не удалось сформировать Excel');
+
+    try {
+        $content = buildZipArchiveContent($files);
+    } catch (Throwable $error) {
+        error_log('Не удалось сформировать ZIP: ' . $error->getMessage());
+        throw new RuntimeException('Не удалось сформировать ZIP');
+    }
+    $filename = sanitizeDownloadFilename('Первичные счета до ' . date('d.m.Y', strtotime((string)$summary['expiry_date'])) . '.zip');
+    header_remove('Content-Type');
+    header('Content-Type: application/zip');
+    header('Content-Disposition: attachment; filename="' . addcslashes($filename, '"') . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
+    header('Content-Length: ' . strlen($content));
+    echo $content;
+    exit;
+}
+
+function downloadSelectedPurchaseEventPrimaryInvoice(PDO $pdo, array $payload): never
+{
+    try {
+        $summary = getPurchaseEventSummary($pdo, trim((string)($payload['token'] ?? '')));
+    } catch (InvalidArgumentException) {
+        throw new InvalidArgumentException('Событие не найдено');
+    } catch (Throwable $error) {
+        error_log('Не удалось получить событие для экспорта: ' . $error->getMessage());
+        throw new RuntimeException('Не удалось сформировать Excel');
+    }
+    outputPurchaseEventPrimaryInvoiceZip(filterPurchaseEventSummaryByBatchIds($summary, (array)($payload['selected_batch_ids'] ?? [])));
+}
+
+function downloadSelectedExpiryEventPrimaryInvoice(PDO $pdo, array $payload): never
+{
+    try {
+        $result = getExpiryEventCatalogStocks($pdo, trim((string)($payload['event_id'] ?? '')));
+    } catch (InvalidArgumentException) {
+        throw new InvalidArgumentException('Событие не найдено');
+    } catch (Throwable $error) {
+        error_log('Не удалось получить событие для экспорта: ' . $error->getMessage());
+        throw new RuntimeException('Не удалось сформировать Excel');
+    }
+    $event = (array)$result['event'];
+    $warehouses = [];
+    foreach ((array)$event['batches'] as $batch) {
+        foreach ((array)($batch['catalog_stocks'] ?? []) as $stock) {
+            $name = trim((string)($stock['name'] ?? ''));
+            if ($name !== '' && !isset($warehouses[$name])) $warehouses[$name] = count($warehouses) + 1;
+        }
+    }
+    $summary = [
+        'expiry_date' => max(array_column((array)$event['batches'], 'expiry_date')),
+        'warehouses' => array_map(static fn (string $name, int $id): array => ['id' => $id, 'name' => $name], array_keys($warehouses), array_values($warehouses)),
+        'rows' => [],
+    ];
+    foreach ((array)$event['batches'] as $batch) {
+        $quantities = [];
+        foreach ((array)($batch['catalog_stocks'] ?? []) as $stock) {
+            $name = trim((string)($stock['name'] ?? ''));
+            if (isset($warehouses[$name])) $quantities[(string)$warehouses[$name]] = $stock['quantity'] ?? null;
+        }
+        $summary['rows'][] = ['id' => (int)$batch['id'], 'code' => (string)$batch['code'], 'quantities' => $quantities];
+    }
+    outputPurchaseEventPrimaryInvoiceZip(filterPurchaseEventSummaryByBatchIds($summary, (array)($payload['selected_batch_ids'] ?? [])));
+}
+
+function registryPrimaryInvoiceSummary(PDO $pdo, array $selectedBatchIds, ?callable $productFetcher = null): array
+{
+    $selectedBatchIds = array_values(array_unique(array_filter(array_map('intval', $selectedBatchIds), static fn (int $id): bool => $id > 0)));
+    if (!$selectedBatchIds) throw new InvalidArgumentException('Не выбрано ни одного товара');
+
+    $placeholders = implode(',', array_fill(0, count($selectedBatchIds), '?'));
+    $statement = $pdo->prepare("SELECT id, article, code, expiry_date FROM batches WHERE status = ? AND id IN ($placeholders) ORDER BY id");
+    $statement->execute(array_merge([ACTIVE_STATUS], $selectedBatchIds));
+    $batches = $statement->fetchAll();
+    if (!$batches) throw new InvalidArgumentException('Не выбрано ни одного товара');
+
+    $productFetcher ??= static fn (array $articles): array => fetchVrCatalogProductsByArticles($articles, $pdo);
+    $products = $productFetcher(array_column($batches, 'article'));
+    return registryPrimaryInvoiceSummaryFromCatalog($batches, $products);
+}
+
+function registryPrimaryInvoiceSummaryFromCatalog(array $batches, array $products): array
+{
+    $productsByArticle = [];
+    foreach ($products as $product) {
+        if (!is_array($product) || !vrCatalogProductFound($product)) continue;
+        $productsByArticle[vrCatalogArticleLookupKey(vrCatalogProductArticle($product))][] = $product;
+    }
+
+    $warehouseIds = [];
+    $batchStocks = [];
+    foreach ($batches as $batch) {
+        $batchId = (int)$batch['id'];
+        $summary = vrCatalogStockSummary($productsByArticle[vrCatalogArticleLookupKey((string)$batch['article'])] ?? []);
+        $batchStocks[$batchId] = $summary['stocks'];
+        foreach ($summary['stocks'] as $stock) {
+            $name = trim((string)($stock['name'] ?? ''));
+            if ($name !== '' && !isset($warehouseIds[$name])) $warehouseIds[$name] = count($warehouseIds) + 1;
+        }
+    }
+
+    $rows = [];
+    foreach ($batches as $batch) {
+        $quantities = [];
+        foreach ($batchStocks[(int)$batch['id']] as $stock) {
+            $name = trim((string)($stock['name'] ?? ''));
+            if (isset($warehouseIds[$name])) $quantities[(string)$warehouseIds[$name]] = $stock['quantity'];
+        }
+        $rows[] = ['id' => (int)$batch['id'], 'code' => (string)$batch['code'], 'quantities' => $quantities];
+    }
+
+    return [
+        'expiry_date' => max(array_column($batches, 'expiry_date')),
+        'warehouses' => array_map(static fn (string $name, int $id): array => ['id' => $id, 'name' => $name], array_keys($warehouseIds), array_values($warehouseIds)),
+        'rows' => $rows,
+    ];
+}
+
+function downloadSelectedRegistryPrimaryInvoice(PDO $pdo, array $payload): never
+{
+    try {
+        $summary = registryPrimaryInvoiceSummary($pdo, (array)($payload['selected_batch_ids'] ?? []));
+    } catch (InvalidArgumentException $error) {
+        throw $error;
+    } catch (Throwable $error) {
+        error_log('Не удалось получить остатки реестра из catalogvr: ' . $error->getMessage());
+        throw new RuntimeException('Не удалось сформировать Excel');
+    }
+    outputPurchaseEventPrimaryInvoiceZip($summary);
 }
 
 function downloadPurchaseEventXls(PDO $pdo, string $token, string $format = 'view'): array

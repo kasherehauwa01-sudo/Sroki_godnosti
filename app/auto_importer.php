@@ -367,9 +367,10 @@ function fetchAutoImportMessageForDates(string $username, string $password, arra
     return null;
 }
 
-function fetchAutoImportMessageForDate(string $username, string $password, DateTimeImmutable $targetDate): ?array
+function fetchAutoImportMessageForDate(string $username, string $password, DateTimeImmutable $targetDate, ?callable $imapFactory = null): ?array
 {
-    $imap = new SimpleImapClient(AUTO_IMPORT_MAIL_HOST, AUTO_IMPORT_MAIL_PORT);
+    $imapFactory ??= static fn (): SimpleImapClient => new SimpleImapClient(AUTO_IMPORT_MAIL_HOST, AUTO_IMPORT_MAIL_PORT);
+    $imap = $imapFactory();
     try {
         $imap->login($username, $password);
         foreach ($imap->listMailboxes() as $folder) {
@@ -381,13 +382,17 @@ function fetchAutoImportMessageForDate(string $username, string $password, DateT
 
             $ids = $imap->searchUnreadMessagesForDate($targetDate);
             foreach (array_reverse($ids) as $id) {
-                $message = $imap->fetchMessage($id);
-                $headers = parseMailHeaders($message);
+                // Сначала безопасно читаем только заголовки. BODY.PEEK не меняет
+                // флаг \Seen у посторонних писем, которые не пройдут проверку.
+                $headers = parseMailHeaders($imap->fetchHeaders($id));
                 $subject = trim((string)($headers['subject'] ?? ''));
                 if (
                     autoImportSenderMatches($headers)
                     && autoImportSubjectMatches($subject)
                 ) {
+                    // Полное письмо также читается через BODY.PEEK[] без \Seen.
+                    // Явный markSeen вызывается позднее, только после успешного импорта.
+                    $message = $imap->fetchMessage($id);
                     return ['message' => $message, 'folder' => $folder, 'id' => $id, 'target_date' => $targetDate->format('Y-m-d')];
                 }
             }
@@ -860,7 +865,17 @@ final class SimpleImapClient
 
     public function fetchMessage(string $id): string
     {
-        $response = $this->command('FETCH ' . preg_replace('/[^0-9]/', '', $id) . ' RFC822');
+        return $this->fetchBodySection($id, 'BODY.PEEK[]');
+    }
+
+    public function fetchHeaders(string $id): string
+    {
+        return $this->fetchBodySection($id, 'BODY.PEEK[HEADER]');
+    }
+
+    private function fetchBodySection(string $id, string $section): string
+    {
+        $response = $this->command('FETCH ' . preg_replace('/[^0-9]/', '', $id) . ' ' . $section);
         if (preg_match('/\{(\d+)\}\r?\n/s', $response, $match, PREG_OFFSET_CAPTURE)) {
             $length = (int)$match[1][0];
             $start = $match[0][1] + strlen($match[0][0]);
