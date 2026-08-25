@@ -605,7 +605,7 @@ declare(strict_types=1);
                 </button>
                 <button class="purchase-event-export-option" id="exportRegistryXlsButton" type="button">
                     <strong>Для импорта в первичный счет</strong>
-                    <small>Таблица в совместимом формате XLS</small>
+                    <small>ZIP-архив: отдельный XLS для каждого склада catalogvr</small>
                 </button>
             </div>
             <div class="modal-actions"><button class="ghost-button" id="cancelRegistryExportDialogButton" type="button">Отмена</button></div>
