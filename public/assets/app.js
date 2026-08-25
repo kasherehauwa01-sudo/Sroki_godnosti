@@ -29,11 +29,13 @@ const state = {
     writeOffAccessGranted: false,
     writeOffPassword: '',
     selectedBatchIds: new Set(),
+    recountSelectionMode: false,
     warehouses: [],
     editingWarehouseId: null,
     stockNotifications: [],
     expandedStockNotificationGroups: new Set(),
     stockBatchNotifications: [],
+    notificationEventTypeFilters: new Set(['expiry', 'overdue', 'recount']),
     stockEventViews: storedStockEventViews,
     selectedStockBatchId: null,
     events: [],
@@ -581,7 +583,7 @@ function renderRegistry() {
             && matchesExpiryPeriod;
     });
     sortRegistryRows();
-    if (!state.writeOffAccessGranted) {
+    if (!state.writeOffAccessGranted && !state.recountSelectionMode) {
         state.selectedBatchIds.clear();
     }
     pruneSelectedBatchesToFilteredRows();

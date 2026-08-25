@@ -151,6 +151,8 @@ function handleApiRequest(): void
                 'purchase_recipient_delete' => deletePurchaseRecipient($pdo, $payload),
                 'purchase_event_batch_status' => updatePurchaseEventBatchStatus($pdo, $payload),
                 'purchase_event_stocks' => updatePurchaseEventStocks($pdo, $payload),
+                'purchase_event_primary_invoice_xls' => downloadSelectedPurchaseEventPrimaryInvoice($pdo, $payload),
+                'expiry_event_primary_invoice_xls' => downloadSelectedExpiryEventPrimaryInvoice($pdo, $payload),
                 'purchase_event_remind' => remindPurchaseEventWarehouses($pdo, $payload),
                 'registry_recount' => sendRegistryRecountNotifications($pdo, $payload),
                 'email_notification_retry' => retryEmailNotification($pdo, $payload),
@@ -516,6 +518,14 @@ function ensurePurchaseNotificationSchema(PDO $pdo): void
             INDEX idx_stock_reminder_due (event_key, event_date, warehouse_id, sent_at),
             CONSTRAINT fk_stock_reminder_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT,
             CONSTRAINT fk_stock_reminder_notification FOREIGN KEY (notification_id) REFERENCES stock_notifications(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS stock_event_completion_log (
+            event_key VARCHAR(128) NOT NULL,
+            event_date DATE NOT NULL,
+            completed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (event_key, event_date)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 }
@@ -2037,6 +2047,9 @@ function maybeSendPurchaseNotifications(PDO $pdo, array $notification, array $su
 
     $expected = countPurchaseEventExpectedStocks($event);
     if ((int)$event['filled_count'] < $expected) return;
+    // Фиксируем завершение до отправки итогового письма: даже ошибка почтовой
+    // очереди не должна снова превращать заполненное событие в ожидающее.
+    markStockEventCompleted($pdo, $event);
     if (purchaseEventNotificationAlreadySent($pdo, (string)$event['event_key'], (string)$event['event_date'])) return;
     sendPurchaseNotificationForEvent($pdo, $event, $eventDays);
 }
@@ -2059,6 +2072,23 @@ function purchaseEventMissingWarehouses(array $event): array
 function countPurchaseEventExpectedStocks(array $event): int
 {
     return array_sum(array_map('count', (array)($event['expected_stock'] ?? [])));
+}
+
+/** Завершённое событие фиксируется навсегда: последующие изменения catalogvr не должны возобновлять напоминания. */
+function markStockEventCompleted(PDO $pdo, array $event): bool
+{
+    $expected = countPurchaseEventExpectedStocks($event);
+    if ($expected <= 0 || (int)($event['filled_count'] ?? 0) < $expected) return false;
+    $statement = $pdo->prepare('INSERT IGNORE INTO stock_event_completion_log (event_key, event_date) VALUES (:event_key, :event_date)');
+    $statement->execute([':event_key' => (string)$event['event_key'], ':event_date' => (string)$event['event_date']]);
+    return true;
+}
+
+function stockEventWasCompleted(PDO $pdo, string $eventKey, string $eventDate): bool
+{
+    $statement = $pdo->prepare('SELECT COUNT(*) FROM stock_event_completion_log WHERE event_key = :event_key AND event_date = :event_date');
+    $statement->execute([':event_key' => $eventKey, ':event_date' => $eventDate]);
+    return (int)$statement->fetchColumn() > 0;
 }
 
 /** Обновляет персональную ссылку склада, чтобы просроченную форму снова можно было заполнить. */
@@ -2274,6 +2304,9 @@ function remindPurchaseEventWarehouses(PDO $pdo, array $payload): array
 {
     $link = findPurchaseEventByToken($pdo, trim((string)($payload['token'] ?? '')));
     $event = getPurchaseEventData($pdo, (string)$link['event_key'], (string)$link['event_date'], false);
+    if (stockEventWasCompleted($pdo, (string)$event['event_key'], (string)$event['event_date']) || markStockEventCompleted($pdo, $event)) {
+        return ['ok' => true, 'message' => 'Все склады уже заполнили остатки.', 'sent' => 0];
+    }
     $missing = purchaseEventMissingWarehouses($event);
     if (!$missing) return ['ok' => true, 'message' => 'Все склады уже заполнили остатки.', 'sent' => 0];
     $sent = 0;
@@ -2304,9 +2337,11 @@ function sendDueStockReminderNotifications(PDO $pdo): void
              GROUP BY event_key, DATE(sent_at)"
         );
         foreach ($statement->fetchAll() as $row) {
+            if (stockEventWasCompleted($pdo, (string)$row['event_key'], (string)$row['event_date'])) continue;
             $firstDue = (new DateTimeImmutable((string)$row['first_sent_at'], new DateTimeZone(APP_TIMEZONE)))->modify('+3 days')->setTime(12, 0);
             if ($now < $firstDue) continue;
             $event = getPurchaseEventData($pdo, (string)$row['event_key'], (string)$row['event_date'], false);
+            if (markStockEventCompleted($pdo, $event)) continue;
             foreach (purchaseEventMissingWarehouses($event) as $warehouse) {
                 $last = $pdo->prepare(
                     'SELECT sent_at, status FROM stock_notification_reminder_log
