@@ -11,9 +11,9 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260825-01">
+    <link rel="stylesheet" href="assets/styles.css?v=20260825-02">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260825-02"></script>
+    <script defer src="assets/app.js?v=20260825-03"></script>
 </head>
 <body>
     <header class="topbar">
@@ -72,12 +72,13 @@ declare(strict_types=1);
                         <option value="custom">Выбрать значение</option>
                     </select>
                 </label>
-                <label>Срок годности от
-                    <input id="filterExpiryFrom" type="date">
-                </label>
-                <label>Срок годности до
-                    <input id="filterExpiryTo" type="date">
-                </label>
+                <fieldset class="expiry-period-filter">
+                    <legend>Срок годности</legend>
+                    <div class="expiry-period-fields">
+                        <label>От<input id="filterExpiryFrom" type="date"></label>
+                        <label>До<input id="filterExpiryTo" type="date"></label>
+                    </div>
+                </fieldset>
                 <button class="ghost-button" id="resetFiltersButton" type="button">Сбросить фильтры</button>
                 <button class="ghost-button" id="exportFilteredButton" type="button">Выгрузить в XLS</button>
                 </div>
@@ -598,12 +599,12 @@ declare(strict_types=1);
             </div>
             <div class="purchase-event-export-options">
                 <button class="purchase-event-export-option" id="exportRegistryXlsxButton" type="button">
-                    <strong>Excel XLSX</strong>
-                    <small>Современный формат для просмотра и обработки</small>
+                    <strong>Для просмотра</strong>
+                    <small>Полная таблица отфильтрованного реестра</small>
                 </button>
                 <button class="purchase-event-export-option" id="exportRegistryXlsButton" type="button">
-                    <strong>Excel XLS</strong>
-                    <small>Совместимый формат для старых версий Excel</small>
+                    <strong>Для импорта в первичный счет</strong>
+                    <small>Таблица в совместимом формате XLS</small>
                 </button>
             </div>
             <div class="modal-actions"><button class="ghost-button" id="cancelRegistryExportDialogButton" type="button">Отмена</button></div>

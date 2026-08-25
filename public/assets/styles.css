@@ -51,6 +51,10 @@ h1 { margin: 0; font-size: clamp(28px, 5vw, 46px); }
 .registry-search-input-wrap { position: relative; }
 .registry-search-input-wrap input { padding-right: 44px; }
 .registry-search-clear { position: absolute; top: 50%; right: 7px; transform: translateY(-50%); width: 32px; height: 32px; min-height: 32px; padding: 0; border-radius: 999px; background: #e2e8f0; color: #475569; font-size: 21px; line-height: 1; }
+.expiry-period-filter { grid-column: span 2; min-width: 300px; margin: 0; padding: 8px 12px 12px; border: 1px solid var(--border); border-radius: 14px; }
+.expiry-period-filter legend { padding: 0 7px; color: #334155; font-weight: 800; }
+.expiry-period-fields { display: grid; grid-template-columns: repeat(2, minmax(130px, 1fr)); gap: 10px; }
+@media (max-width: 920px) { .expiry-period-filter { grid-column: auto; min-width: 0; } .expiry-period-fields { grid-template-columns: 1fr; } }
 label { display: grid; gap: 7px; font-weight: 700; color: #334155; }
 input, select { width: 100%; border: 1px solid var(--border); border-radius: 12px; padding: 11px 12px; font: inherit; background: #fff; }
 .primary, .ghost-button { padding: 12px 16px; min-height: 44px; }

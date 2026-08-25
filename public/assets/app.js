@@ -2709,8 +2709,9 @@ function closeRegistryExportDialog() {
     qs('#registryExportDialog').close();
 }
 
-function downloadRegistryExport(extension) {
+function downloadRegistryExport(format) {
     closeRegistryExportDialog();
+    const extension = format === 'primary_invoice' ? 'xls' : 'xlsx';
     exportXlsx(activeRowsForExport(state.filteredBatches), `reestr_filtr.${extension}`, batchExportMapper);
 }
 
@@ -2905,8 +2906,8 @@ function bindEvents() {
     qs('#exportFilteredButton').addEventListener('click', openRegistryExportDialog);
     qs('#closeRegistryExportDialogButton').addEventListener('click', closeRegistryExportDialog);
     qs('#cancelRegistryExportDialogButton').addEventListener('click', closeRegistryExportDialog);
-    qs('#exportRegistryXlsxButton').addEventListener('click', () => downloadRegistryExport('xlsx'));
-    qs('#exportRegistryXlsButton').addEventListener('click', () => downloadRegistryExport('xls'));
+    qs('#exportRegistryXlsxButton').addEventListener('click', () => downloadRegistryExport('view'));
+    qs('#exportRegistryXlsButton').addEventListener('click', () => downloadRegistryExport('primary_invoice'));
 
     qs('#openDeleteArticlesDialogButton').addEventListener('click', openDeleteArticlesDialog);
     qs('#deleteArticlesForm').addEventListener('submit', submitDeleteArticles);
