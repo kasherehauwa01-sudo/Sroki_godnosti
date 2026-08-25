@@ -72,6 +72,7 @@ try {
 $selectionScript = file_get_contents(__DIR__ . '/../public/assets/batch-export-selection.js');
 $applicationScript = file_get_contents(__DIR__ . '/../public/assets/app.js');
 $indexPage = file_get_contents(__DIR__ . '/../public/index.php');
+$styles = file_get_contents(__DIR__ . '/../public/assets/styles.css');
 foreach (['selectedIds = new Set', 'selectAll.indeterminate', 'batch-export-search', 'data-batch-id', 'Скачать XLS', 'Выбрано:'] as $fragment) {
     if (!str_contains((string)$selectionScript, $fragment)) throw new RuntimeException('Общий выбор партий не содержит: ' . $fragment);
 }
@@ -80,6 +81,9 @@ foreach (['openEventExportDialog', 'openEventPrimaryInvoiceSelection', 'expiry_e
 }
 if (!str_contains((string)$indexPage, 'assets/batch-export-selection.js')) {
     throw new RuntimeException('Общий механизм выбора партий не подключен во вкладке «События».');
+}
+foreach (['.modal.batch-export-selection-dialog', 'width: calc(100vw - 16px)', 'max-width: calc(100vw - 16px)', '.batch-export-list', 'overflow: auto'] as $fragment) {
+    if (!str_contains((string)$styles, $fragment)) throw new RuntimeException('Полноширинное окно выбора партий не содержит стиль: ' . $fragment);
 }
 
 $emptyWarehouseRows = purchaseEventPrimaryInvoiceRowsForWarehouse([

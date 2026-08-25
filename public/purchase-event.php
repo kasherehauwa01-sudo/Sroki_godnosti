@@ -12,7 +12,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сводная таблица остатков</title>
-    <link rel="stylesheet" href="assets/styles.css?v=20260811-06">
+    <link rel="stylesheet" href="assets/styles.css?v=20260825-03">
 </head>
 <body>
 <main class="layout purchase-event-page">
