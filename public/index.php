@@ -11,10 +11,9 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260814-02">
+    <link rel="stylesheet" href="assets/styles.css?v=20260825-01">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/batch-export-selection.js?v=20260814-01"></script>
-    <script defer src="assets/app.js?v=20260814-04"></script>
+    <script defer src="assets/app.js?v=20260825-01"></script>
 </head>
 <body>
     <header class="topbar">
@@ -40,7 +39,10 @@ declare(strict_types=1);
             </div>
             <div class="card registry-filter-card">
                 <div class="registry-search-row">
-                    <input id="filterSearch" aria-label="Поиск" placeholder="Поиск...">
+                    <div class="registry-search-input-wrap">
+                        <input id="filterSearch" aria-label="Поиск" placeholder="Поиск...">
+                        <button class="registry-search-clear hidden" id="clearRegistrySearchButton" type="button" aria-label="Очистить поиск" title="Очистить поиск">×</button>
+                    </div>
                     <select id="filterSearchColumn" aria-label="Искать в">
                         <option value="article">Артикул</option>
                         <option value="code" selected>Код</option>
@@ -70,21 +72,14 @@ declare(strict_types=1);
                         <option value="custom">Выбрать значение</option>
                     </select>
                 </label>
-                <label>Событие
-                    <select id="filterEventDays">
-                        <option value="">Все</option>
-                        <option value="180">180 дней</option>
-                        <option value="90">90 дней</option>
-                        <option value="60">60 дней</option>
-                        <option value="30">30 дней</option>
-                        <option value="15">15 дней</option>
-                        <option value="0">Сегодня</option>
-                        <option value="1">1 день</option>
-                        <option value="custom">Выбрать значение</option>
-                    </select>
+                <label>Срок годности от
+                    <input id="filterExpiryFrom" type="date">
+                </label>
+                <label>Срок годности до
+                    <input id="filterExpiryTo" type="date">
                 </label>
                 <button class="ghost-button" id="resetFiltersButton" type="button">Сбросить фильтры</button>
-                <button class="ghost-button" id="exportFilteredButton" type="button">Выгрузить в XLSX</button>
+                <button class="ghost-button" id="exportFilteredButton" type="button">Выгрузить в XLS</button>
                 </div>
             </div>
             <div class="registry-summary" id="registrySummary">Показано строк: 0</div>
@@ -594,6 +589,26 @@ declare(strict_types=1);
             </nav>
         </section>
     </main>
+
+    <dialog class="modal" id="registryExportDialog">
+        <div class="card form modal-card">
+            <div class="modal-heading">
+                <h2>Выберите формат таблицы</h2>
+                <button class="icon-button" id="closeRegistryExportDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="purchase-event-export-options">
+                <button class="purchase-event-export-option" id="exportRegistryXlsxButton" type="button">
+                    <strong>Excel XLSX</strong>
+                    <small>Современный формат для просмотра и обработки</small>
+                </button>
+                <button class="purchase-event-export-option" id="exportRegistryXlsButton" type="button">
+                    <strong>Excel XLS</strong>
+                    <small>Совместимый формат для старых версий Excel</small>
+                </button>
+            </div>
+            <div class="modal-actions"><button class="ghost-button" id="cancelRegistryExportDialogButton" type="button">Отмена</button></div>
+        </div>
+    </dialog>
 
     <dialog class="modal purchase-event-summary-dialog" id="purchaseEventSummaryDialog" style="inset:8px;box-sizing:border-box;width:calc(100vw - 16px);min-width:calc(100vw - 16px);max-width:calc(100vw - 16px);height:calc(100vh - 16px);min-height:calc(100vh - 16px);max-height:calc(100vh - 16px);margin:auto">
         <div class="card modal-card purchase-event-summary-dialog-card" style="box-sizing:border-box;display:grid;gap:12px;width:100%;height:100%;max-width:none;max-height:none;grid-template-rows:auto minmax(0,1fr) auto">

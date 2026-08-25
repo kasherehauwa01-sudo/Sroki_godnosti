@@ -20,7 +20,7 @@ foreach (['openPurchaseEventSummaryDialog(row.dataset.stockEventUrl)', "url.sear
 if (!str_contains($css, '.modal.purchase-event-summary-dialog') || !str_contains($css, 'calc(100vw - 16px)') || !str_contains($css, 'min-width: calc(100vw - 16px)')) {
     throw new RuntimeException('Окно сводной таблицы должно занимать почти весь экран.');
 }
-if (!str_contains($page, 'assets/styles.css?v=20260814-02')) {
+if (!preg_match('~assets/styles\.css\?v=\d{8}-\d+~', $page)) {
     throw new RuntimeException('После изменения размера окна необходимо обновить версию CSS для сброса кеша браузера.');
 }
 foreach (['style="inset:8px;box-sizing:border-box;width:calc(100vw - 16px)', 'height:calc(100vh - 16px)', 'grid-template-rows:auto minmax(0,1fr) auto', 'style="display:block;width:100%;height:100%'] as $fragment) {

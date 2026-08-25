@@ -513,7 +513,8 @@ function getFilterParams() {
         search_column: qs('#filterSearchColumn').value,
         status: qs('#filterStatus').value,
         days_to: getFilterSelectValue('#filterDaysTo'),
-        event_days: getFilterSelectValue('#filterEventDays'),
+        expiry_from: qs('#filterExpiryFrom').value,
+        expiry_to: qs('#filterExpiryTo').value,
     };
 }
 
@@ -532,17 +533,6 @@ function matchesRegistrySearch(batch, search, column) {
     const value = String(batch[column] || '').toLowerCase();
 
     return value.includes(query);
-}
-
-function matchesEventDaysFilter(batch, eventDays) {
-    if (!eventDays) return true;
-
-    const numericEventDays = Number(eventDays);
-    const numericDays = getBatchDaysLeft(batch);
-
-    // Фильтр «Событие» должен искать точное совпадение с числом,
-    // которое отображается в колонке «Остаток дней».
-    return numericDays !== null && Number.isFinite(numericEventDays) && numericDays === numericEventDays;
 }
 
 function updateSelectionControls() {
@@ -582,12 +572,15 @@ function renderRegistry() {
             ? batch.expiryUnlimited
             : !filters.days_to
                 || (numericDays !== null && (filters.days_to === 'expired' ? numericDays < 0 : numericDays >= 0 && numericDays <= Number(filters.days_to)));
-        const matchesEvent = matchesEventDaysFilter(batch, filters.event_days);
+        const matchesExpiryPeriod = (!filters.expiry_from && !filters.expiry_to)
+            || (!batch.expiryInvalid
+                && (!filters.expiry_from || batch.expiryDate >= filters.expiry_from)
+                && (!filters.expiry_to || batch.expiryDate <= filters.expiry_to));
 
         return matchesRegistrySearch(batch, filters.search, filters.search_column)
             && (!filters.status || batch.status === filters.status)
             && matchesDaysTo
-            && matchesEvent;
+            && matchesExpiryPeriod;
     });
     sortRegistryRows();
     if (!state.writeOffAccessGranted && !state.recountSelectionMode) {
@@ -1293,27 +1286,6 @@ function downloadEventCatalogStocks() {
         });
         return row;
     });
-}
-
-function openEventExportDialog() {
-    if (!state.selectedEventDetails) return;
-    qs('#eventExportDialog').showModal();
-}
-
-function closeEventExportDialog() { qs('#eventExportDialog').close(); }
-
-async function downloadSelectedEventBatches(selectedBatchIds) {
-    const response = await fetch('api.php?action=expiry_event_primary_invoice_xls', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event_id: state.selectedEventDetails.id, selected_batch_ids: selectedBatchIds }) });
-    if (!response.ok) { let result = {}; try { result = await response.json(); } catch (_) {} throw new Error(result.error || 'Не удалось сформировать ZIP'); }
-    const blob = await response.blob(), disposition = response.headers.get('Content-Disposition') || '', encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1];
-    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = encodedName ? decodeURIComponent(encodedName) : 'Первичные счета.zip'; document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(link.href);
-}
-
-function openEventPrimaryInvoiceSelection() {
-    closeEventExportDialog();
-    const event = state.selectedEventDetails;
-    if (!event) { showToast('Событие не найдено', true); return; }
-    window.openBatchExportSelection({ batches: event.batches || [], onDownload: downloadSelectedEventBatches });
 }
 
 function closeEventBatchesDialog() {
@@ -2704,14 +2676,39 @@ function readXlsx(file) {
 }
 
 function resetRegistryFilters() {
-    ['#filterSearch', '#filterDaysTo', '#filterEventDays'].forEach((selector) => {
+    ['#filterSearch', '#filterDaysTo', '#filterExpiryFrom', '#filterExpiryTo'].forEach((selector) => {
         const field = qs(selector);
         field.value = '';
         delete field.dataset.customValue;
     });
     qs('#filterSearchColumn').value = 'code';
     qs('#filterStatus').value = '';
+    updateRegistrySearchClearButton();
     renderRegistry();
+}
+
+function updateRegistrySearchClearButton() {
+    qs('#clearRegistrySearchButton').classList.toggle('hidden', qs('#filterSearch').value === '');
+}
+
+function clearRegistrySearch() {
+    qs('#filterSearch').value = '';
+    updateRegistrySearchClearButton();
+    renderRegistry();
+    qs('#filterSearch').focus();
+}
+
+function openRegistryExportDialog() {
+    qs('#registryExportDialog').showModal();
+}
+
+function closeRegistryExportDialog() {
+    qs('#registryExportDialog').close();
+}
+
+function downloadRegistryExport(extension) {
+    closeRegistryExportDialog();
+    exportXlsx(activeRowsForExport(state.filteredBatches), `reestr_filtr.${extension}`, batchExportMapper);
 }
 
 function formatHistoryBatchList(batches) {
@@ -2733,7 +2730,7 @@ function handleCustomFilterSelect(select, label) {
 
     const enteredValue = prompt(`Введите значение фильтра «${label}» в днях`, select.dataset.customValue || '');
     const normalizedValue = Number.parseInt(String(enteredValue || '').trim(), 10);
-    if (!Number.isFinite(normalizedValue) || (select.id !== 'filterEventDays' && normalizedValue < 0)) {
+    if (!Number.isFinite(normalizedValue) || normalizedValue < 0) {
         select.value = '';
         delete select.dataset.customValue;
         showToast('Введите целое число дней для фильтра.', true);
@@ -2885,26 +2882,28 @@ function bindEvents() {
     }));
     qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
     qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
-    qs('#downloadEventCatalogStocksButton').addEventListener('click', openEventExportDialog);
-    qs('#closeEventExportDialogButton').addEventListener('click', closeEventExportDialog);
-    qs('#cancelEventExportDialogButton').addEventListener('click', closeEventExportDialog);
-    qs('#downloadEventViewButton').addEventListener('click', () => { closeEventExportDialog(); downloadEventCatalogStocks(); });
-    qs('#downloadEventPrimaryInvoiceButton').addEventListener('click', openEventPrimaryInvoiceSelection);
+    qs('#downloadEventCatalogStocksButton').addEventListener('click', downloadEventCatalogStocks);
 
-    qs('#filterSearch').addEventListener('input', renderRegistry);
+    qs('#filterSearch').addEventListener('input', () => {
+        updateRegistrySearchClearButton();
+        renderRegistry();
+    });
+    qs('#clearRegistrySearchButton').addEventListener('click', clearRegistrySearch);
     qs('#filterSearchColumn').addEventListener('change', renderRegistry);
     qs('#filterStatus').addEventListener('change', renderRegistry);
     qs('#filterDaysTo').addEventListener('change', (event) => {
         handleCustomFilterSelect(event.target, 'Остаток дней до');
         renderRegistry();
     });
-    qs('#filterEventDays').addEventListener('change', (event) => {
-        handleCustomFilterSelect(event.target, 'Событие');
-        renderRegistry();
-    });
+    qs('#filterExpiryFrom').addEventListener('change', renderRegistry);
+    qs('#filterExpiryTo').addEventListener('change', renderRegistry);
     qsa('[data-sort]').forEach((button) => button.addEventListener('click', () => toggleRegistrySort(button.dataset.sort)));
     qs('#resetFiltersButton').addEventListener('click', resetRegistryFilters);
-    qs('#exportFilteredButton').addEventListener('click', () => exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper));
+    qs('#exportFilteredButton').addEventListener('click', openRegistryExportDialog);
+    qs('#closeRegistryExportDialogButton').addEventListener('click', closeRegistryExportDialog);
+    qs('#cancelRegistryExportDialogButton').addEventListener('click', closeRegistryExportDialog);
+    qs('#exportRegistryXlsxButton').addEventListener('click', () => downloadRegistryExport('xlsx'));
+    qs('#exportRegistryXlsButton').addEventListener('click', () => downloadRegistryExport('xls'));
 
     qs('#openDeleteArticlesDialogButton').addEventListener('click', openDeleteArticlesDialog);
     qs('#deleteArticlesForm').addEventListener('submit', submitDeleteArticles);

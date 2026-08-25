@@ -12,7 +12,7 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сводная таблица остатков</title>
-    <link rel="stylesheet" href="assets/styles.css?v=20260814-02">
+    <link rel="stylesheet" href="assets/styles.css?v=20260811-06">
 </head>
 <body>
 <main class="layout purchase-event-page">
@@ -55,7 +55,6 @@ $apiUrl = ($apiPath === '' ? '' : $apiPath) . '/api.php';
         <div class="modal-actions"><button class="ghost-button" id="cancelPurchaseEventExportDialogButton" type="button">Отмена</button></div>
     </div>
 </dialog>
-<script src="assets/batch-export-selection.js?v=20260814-01"></script>
 <script>
 const purchaseEventToken = <?= json_encode($token, JSON_UNESCAPED_UNICODE) ?>;
 const purchaseEventApiUrl = <?= json_encode($apiUrl, JSON_UNESCAPED_UNICODE) ?>;
@@ -209,25 +208,11 @@ function downloadPurchaseEventXls(format) {
     closePurchaseEventExportDialog();
     window.location.href = url.toString();
 }
-async function downloadSelectedPurchaseEventBatches(selectedBatchIds) {
-    const response = await fetch(`${purchaseEventApiUrl}?action=purchase_event_primary_invoice_xls`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: purchaseEventToken, selected_batch_ids: selectedBatchIds }) });
-    if (!response.ok) { let result = {}; try { result = await response.json(); } catch (_) {} throw new Error(result.error || 'Не удалось сформировать ZIP'); }
-    const blob = await response.blob();
-    const disposition = response.headers.get('Content-Disposition') || '';
-    const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1];
-    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = encodedName ? decodeURIComponent(encodedName) : 'Первичные счета.zip';
-    document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(link.href);
-}
-function openPurchaseEventBatchSelection() {
-    closePurchaseEventExportDialog();
-    if (!purchaseEventData?.rows?.length) { document.querySelector('#purchaseEventError').textContent = 'Событие не найдено'; return; }
-    window.openBatchExportSelection({ batches: purchaseEventData.rows, onDownload: downloadSelectedPurchaseEventBatches });
-}
 document.querySelector('#downloadPurchaseEventXlsButton').addEventListener('click', () => document.querySelector('#purchaseEventExportDialog').showModal());
 document.querySelector('#closePurchaseEventExportDialogButton').addEventListener('click', closePurchaseEventExportDialog);
 document.querySelector('#cancelPurchaseEventExportDialogButton').addEventListener('click', closePurchaseEventExportDialog);
 document.querySelector('#downloadPurchaseEventViewButton').addEventListener('click', () => downloadPurchaseEventXls('view'));
-document.querySelector('#downloadPurchaseEventPrimaryInvoiceButton').addEventListener('click', openPurchaseEventBatchSelection);
+document.querySelector('#downloadPurchaseEventPrimaryInvoiceButton').addEventListener('click', () => downloadPurchaseEventXls('primary_invoice'));
 document.querySelector('#remindPurchaseEventButton').addEventListener('click', async () => {
     const button = document.querySelector('#remindPurchaseEventButton');
     button.disabled = true;
