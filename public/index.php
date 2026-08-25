@@ -11,9 +11,10 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260825-02">
+    <link rel="stylesheet" href="assets/styles.css?v=20260825-03">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260825-03"></script>
+    <script defer src="assets/batch-export-selection.js?v=20260825-01"></script>
+    <script defer src="assets/app.js?v=20260825-04"></script>
 </head>
 <body>
     <header class="topbar">
@@ -604,7 +605,7 @@ declare(strict_types=1);
                 </button>
                 <button class="purchase-event-export-option" id="exportRegistryXlsButton" type="button">
                     <strong>Для импорта в первичный счет</strong>
-                    <small>Таблица в совместимом формате XLS</small>
+                    <small>ZIP-архив: отдельный XLS для каждого склада catalogvr</small>
                 </button>
             </div>
             <div class="modal-actions"><button class="ghost-button" id="cancelRegistryExportDialogButton" type="button">Отмена</button></div>

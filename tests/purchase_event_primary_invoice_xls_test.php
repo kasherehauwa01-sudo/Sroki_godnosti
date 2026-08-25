@@ -43,8 +43,54 @@ if ($unsafeFilename !== 'Первичный_счет_31.08.2026.xls') {
 
 $page = file_get_contents(__DIR__ . '/../public/purchase-event.php');
 if (!is_string($page)) throw new RuntimeException('Не удалось прочитать страницу сводной таблицы.');
-foreach (['Выберите формат таблицы', 'Для просмотра', 'Для экспорта в первичный счет', "downloadPurchaseEventXls('view')", "downloadPurchaseEventXls('primary_invoice')"] as $fragment) {
+foreach (['Выберите формат таблицы', 'Для просмотра', 'Для экспорта в первичный счет', "downloadPurchaseEventXls('view')", 'openPurchaseEventBatchSelection', 'selected_batch_ids'] as $fragment) {
     if (!str_contains($page, $fragment)) throw new RuntimeException('В диалоге экспорта отсутствует: ' . $fragment);
+}
+
+$filterSummary = ['rows' => [
+    ['id' => 101, 'article' => 'A', 'code' => 'ОДИН'],
+    ['id' => 102, 'article' => 'A', 'code' => 'ДВА'],
+    ['id' => 103, 'article' => 'C', 'code' => 'ТРИ'],
+    ['id' => 104, 'article' => 'D', 'code' => 'ЧЕТЫРЕ'],
+    ['id' => 105, 'article' => 'E', 'code' => 'ПЯТЬ'],
+]];
+$allFiltered = filterPurchaseEventSummaryByBatchIds($filterSummary, [101, 102, 103, 104, 105]);
+if (array_column($allFiltered['rows'], 'id') !== [101, 102, 103, 104, 105]) {
+    throw new RuntimeException('При выборе пяти партий экспорт должен сохранить все пять.');
+}
+$partFiltered = filterPurchaseEventSummaryByBatchIds($filterSummary, [101, 103, 105, 999999]);
+if (array_column($partFiltered['rows'], 'id') !== [101, 103, 105]) {
+    throw new RuntimeException('Фильтр должен оставить три выбранные партии и исключить посторонний batch_id.');
+}
+try {
+    filterPurchaseEventSummaryByBatchIds($filterSummary, []);
+    throw new RuntimeException('Пустой выбор не должен разрешать экспорт.');
+} catch (InvalidArgumentException $error) {
+    if ($error->getMessage() !== 'Не выбрано ни одного товара') throw $error;
+}
+
+$selectionScript = file_get_contents(__DIR__ . '/../public/assets/batch-export-selection.js');
+$applicationScript = file_get_contents(__DIR__ . '/../public/assets/app.js');
+$indexPage = file_get_contents(__DIR__ . '/../public/index.php');
+$styles = file_get_contents(__DIR__ . '/../public/assets/styles.css');
+foreach (['selectedIds = new Set', 'selectAll.indeterminate', 'batch-export-search', 'data-batch-id', 'Скачать XLS', 'Выбрано:'] as $fragment) {
+    if (!str_contains((string)$selectionScript, $fragment)) throw new RuntimeException('Общий выбор партий не содержит: ' . $fragment);
+}
+foreach (['openEventExportDialog', 'openEventPrimaryInvoiceSelection', 'expiry_event_primary_invoice_xls', 'selected_batch_ids'] as $fragment) {
+    if (!str_contains((string)$applicationScript, $fragment)) throw new RuntimeException('Экспорт из вкладки «События» не содержит: ' . $fragment);
+}
+if (!str_contains((string)$indexPage, 'assets/batch-export-selection.js')) {
+    throw new RuntimeException('Общий механизм выбора партий не подключен во вкладке «События».');
+}
+foreach (['.modal.batch-export-selection-dialog', 'width: calc(100vw - 16px)', 'max-width: calc(100vw - 16px)', '.batch-export-list', 'overflow: auto'] as $fragment) {
+    if (!str_contains((string)$styles, $fragment)) throw new RuntimeException('Полноширинное окно выбора партий не содержит стиль: ' . $fragment);
+}
+
+$emptyWarehouseRows = purchaseEventPrimaryInvoiceRowsForWarehouse([
+    'rows' => [['id' => 101, 'code' => 'ОДИН', 'quantities' => ['20' => 0]]],
+], 20);
+if (count($emptyWarehouseRows) !== 1) {
+    throw new RuntimeException('После фильтрации пустая складская группа должна содержать только заголовок и не создавать файл.');
 }
 
 if (class_exists('PhpOffice\\PhpSpreadsheet\\Writer\\Xls')) {
