@@ -14,7 +14,7 @@ function sendNotificationEmail(PDO $pdo, array $emails, string $subject, string 
     $startedAt = microtime(true);
     $baseSubject = trim((string)($context['subject_base'] ?? $subject));
     $context['subject_base'] = $baseSubject;
-    $subject = formatNotificationEmailSubject($baseSubject, $emails, $context);
+    $subject = !empty($context['exact_subject']) ? $baseSubject : formatNotificationEmailSubject($baseSubject, $emails, $context);
     $messageId = createEmailMessageId($settings);
     $recipientsBeforeFilters = array_values(array_map(static fn ($email): string => (string)$email, $emails));
     $emails = normalizeSmtpRecipients($emails);
@@ -507,12 +507,23 @@ function emailNotificationType(string $subject): string
 {
     $value = mb_strtolower($subject, 'UTF-8');
     return match (true) {
+        str_contains($value, 'проверка наличия товара') => 'Заполнение остатков по просроченной партии',
         str_contains($value, 'остатк') => 'Остатки по товару',
         str_contains($value, 'срок') => 'Истекает срок годности',
         str_contains($value, 'фильтр') => 'Товар без фильтров',
         str_contains($value, 'тест') => 'Тестовое уведомление',
         default => 'Системное уведомление',
     };
+}
+
+/** Исправляет тип старых записей журнала, созданных до явной классификации письма. */
+function normalizeEmailNotificationType(string $type, string $subject): string
+{
+    if ($type === 'Системное уведомление' && str_contains(mb_strtolower($subject, 'UTF-8'), 'проверка наличия товара')) {
+        return 'Заполнение остатков по просроченной партии';
+    }
+
+    return $type;
 }
 
 function extractSmtpCode(string $response): string

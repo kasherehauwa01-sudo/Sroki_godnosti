@@ -11,9 +11,9 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css">
+    <link rel="stylesheet" href="assets/styles.css?v=20260825-01">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260707-15"></script>
+    <script defer src="assets/app.js?v=20260825-01"></script>
 </head>
 <body>
     <header class="topbar">
@@ -33,12 +33,16 @@ declare(strict_types=1);
         <section class="panel active" id="tab-registry">
             <div class="registry-actions registry-top-actions">
                 <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
-                <button class="ghost-button" id="openWriteOffButton" type="button">Изменить статус / Удалить</button>
+                <button class="ghost-button" id="openWriteOffButton" type="button">Режим супервайзера</button>
                 <button class="small-button danger hidden" id="bulkDeleteButton" type="button">Удалить</button>
+                <button class="small-button hidden" id="sendRecountButton" type="button">Отправить на пересчет</button>
             </div>
             <div class="card registry-filter-card">
                 <div class="registry-search-row">
-                    <input id="filterSearch" aria-label="Поиск" placeholder="Поиск...">
+                    <div class="registry-search-input-wrap">
+                        <input id="filterSearch" aria-label="Поиск" placeholder="Поиск...">
+                        <button class="registry-search-clear hidden" id="clearRegistrySearchButton" type="button" aria-label="Очистить поиск" title="Очистить поиск">×</button>
+                    </div>
                     <select id="filterSearchColumn" aria-label="Искать в">
                         <option value="article">Артикул</option>
                         <option value="code" selected>Код</option>
@@ -57,6 +61,7 @@ declare(strict_types=1);
                 <label>Остаток дней до
                     <select id="filterDaysTo">
                         <option value="">Все</option>
+                        <option value="unlimited">Не ограничен</option>
                         <option value="expired">Просроченные</option>
                         <option value="1">1 день</option>
                         <option value="15">15 дней</option>
@@ -67,21 +72,14 @@ declare(strict_types=1);
                         <option value="custom">Выбрать значение</option>
                     </select>
                 </label>
-                <label>Событие
-                    <select id="filterEventDays">
-                        <option value="">Все</option>
-                        <option value="180">180 дней</option>
-                        <option value="90">90 дней</option>
-                        <option value="60">60 дней</option>
-                        <option value="30">30 дней</option>
-                        <option value="15">15 дней</option>
-                        <option value="0">Сегодня</option>
-                        <option value="1">1 день</option>
-                        <option value="custom">Выбрать значение</option>
-                    </select>
+                <label>Срок годности от
+                    <input id="filterExpiryFrom" type="date">
+                </label>
+                <label>Срок годности до
+                    <input id="filterExpiryTo" type="date">
                 </label>
                 <button class="ghost-button" id="resetFiltersButton" type="button">Сбросить фильтры</button>
-                <button class="ghost-button" id="exportFilteredButton" type="button">Выгрузить в XLSX</button>
+                <button class="ghost-button" id="exportFilteredButton" type="button">Выгрузить в XLS</button>
                 </div>
             </div>
             <div class="registry-summary" id="registrySummary">Показано строк: 0</div>
@@ -120,6 +118,12 @@ declare(strict_types=1);
                     <p>События по срокам годности и прогресс заполнения остатков складами.</p>
                 </div>
                 <button class="ghost-button" id="markAllStockEventsReadButton" type="button">Пометить все как прочитанное</button>
+            </div>
+            <div class="notification-type-tags card" role="group" aria-label="Фильтр уведомлений по типу события">
+                <span class="notification-type-tags-title">Тип события</span>
+                <label class="notification-type-tag"><input class="notification-type-filter" type="checkbox" value="expiry" checked> Сроки годности</label>
+                <label class="notification-type-tag"><input class="notification-type-filter" type="checkbox" value="overdue" checked> Проверка наличия товара</label>
+                <label class="notification-type-tag"><input class="notification-type-filter" type="checkbox" value="recount" checked> Пересчет</label>
             </div>
             <div class="table-wrap card">
                 <table>
@@ -181,6 +185,18 @@ declare(strict_types=1);
                     </dl>
                 </div>
 
+
+                <div class="card form settings-catalog-sync-card">
+                    <h3>Синхронизация с catalogvr</h3>
+                    <dl class="system-info">
+                        <dt>Статус:</dt><dd id="catalogSyncStatus">Не проверялось</dd>
+                        <dt>HTTP:</dt><dd id="catalogSyncHttp">—</dd>
+                        <dt>Авторизация:</dt><dd id="catalogSyncAuth">—</dd>
+                        <dt>Последняя проверка:</dt><dd id="catalogSyncCheckedAt">—</dd>
+                        <dt>Ошибка:</dt><dd id="catalogSyncError">—</dd>
+                    </dl>
+                    <button class="ghost-button" id="openCatalogSyncTestButton" formnovalidate type="button">Тест синхронизации</button>
+                </div>
                 <div class="card form settings-delete-articles-card">
                     <h3>Удаление артикулов</h3>
                     <p class="subtitle">Удаляет из реестра все партии с точным совпадением в колонке «Артикул».</p>
@@ -219,6 +235,7 @@ declare(strict_types=1);
                     </label>
                     <div class="settings-actions">
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
+                        <button class="ghost-button" id="runNotificationsNowButton" formnovalidate type="button">Запустить отправку</button>
                         <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">История уведомлений</button>
                     </div>
                     <label>Email для проверки доставки
@@ -281,7 +298,7 @@ declare(strict_types=1);
                     <li>Ручное добавление одной или нескольких партий.</li>
                     <li>Импорт партий из XLS/XLSX, включая старые XLS-файлы с русскими заголовками в Windows-1251.</li>
                     <li>Редактирование партии.</li>
-                    <li>Защищенная паролем смена статуса, одиночное удаление и массовое удаление выбранных строк.</li>
+                    <li>Режим супервайзера: защищенный паролем режим для смены статусов, одиночного удаления, массового удаления выбранных строк и отправки выбранных товаров на пересчет остатков.</li>
                     <li>Экспорт отфильтрованного результата в XLSX.</li>
                     <li>Цветовая индикация сроков годности:
                         <ul>
@@ -294,12 +311,35 @@ declare(strict_types=1);
                     </li>
                 </ul>
 
+                <h3>Режим супервайзера</h3>
+                <ul>
+                    <li>Кнопка <code>Режим супервайзера</code> находится в реестре рядом с основными действиями.</li>
+                    <li>После нажатия сервис запрашивает пароль ответственного пользователя и включает расширенные действия с партиями.</li>
+                    <li>В режиме супервайзера можно выделять строки чекбоксами, менять статусы партий, удалять одну или несколько выбранных партий.</li>
+                    <li>В этом же режиме появляется кнопка <code>Отправить на пересчет</code>: она создает событие <code>Пересчет</code> по выбранным товарам.</li>
+                    <li>При отправке на пересчет для каждого активного склада формируется персональная форма заполнения, а письма складам ставятся в очередь рассылки.</li>
+                    <li>Режим нужен для ответственных операций, поэтому обычная работа с реестром остается доступной без показа опасных действий.</li>
+                </ul>
+
                 <h3>События по срокам годности</h3>
                 <ul>
-                    <li>В сервисе используются 5 типов событий по срокам годности: 180, 90, 60, 30 и 1 день.</li>
+                    <li>В сервисе используются 6 типов событий по срокам годности: 180, 90, 60, 30, 15 и 1 день.</li>
+                    <li>Событие <code>180 дней</code> формируется только для товаров, у которых catalogvr вернул один из избранных разделов:
+                        <ul>
+                            <li>Биоактиваторы для выгребных и компостных ям;</li>
+                            <li>Газ для зажигалок, горелок и плит;</li>
+                            <li>Земля для цветов, рассады;</li>
+                            <li>Защита от насекомых;</li>
+                            <li>Семена;</li>
+                            <li>Удобрения, лекарства для растений;</li>
+                            <li>Средства для бассейнов.</li>
+                        </ul>
+                    </li>
+                    <li>Перед отправкой уведомления за 180 дней сервис запрашивает у catalogvr параметр <code>Раздел</code>. Товары из других разделов и товары без переданного раздела в это уведомление не включаются.</li>
                     <li>Вкладка <code>События</code> показывает прошедшие, сегодняшние и будущие события.</li>
                     <li>По умолчанию отображаются сегодняшние и будущие события.</li>
                     <li>События группируются по типу события и дате события.</li>
+                    <li>Событие <code>Пересчет</code> создается вручную из реестра через режим супервайзера и отображается отдельно от плановых событий по срокам годности.</li>
                     <li>В строке события отображаются тип события, дата события и количество партий в событии.</li>
                     <li>При клике на строку события открывается окно со списком партий события: <code>Артикул</code>, <code>Код</code>, <code>Наименование</code>.</li>
                 </ul>
@@ -315,6 +355,8 @@ declare(strict_types=1);
                     <li>В уведомлениях отображается общий остаток по партии и колонка <code>Заполнили остатки</code> в формате <code>x из y</code>, где <code>x</code> — количество активных складов с заполненными остатками, а <code>y</code> — текущее количество активных складов.</li>
                     <li>Если склад добавлен, удален или деактивирован, значение <code>y</code> пересчитывается по текущему списку активных складов.</li>
                     <li>Партии со статусом <code>Перемещено на СБ</code> не попадают в формы заполнения остатков и в список складских уведомлений.</li>
+                    <li>Для плановых событий сервис сверяет остатки с catalogvr: при положительном остатке склада в сводной таблице показывается прочерк до заполнения формы, а при явно нулевом остатке catalogvr автоматически ставится синий <code>0</code>.</li>
+                    <li>Если в catalogvr склад объединен, например <code>Авиаторов Зал+Склад</code>, его остаток применяется к локальным складам <code>Авиаторов Зал</code> и <code>Авиаторов Склад</code>.</li>
                     <li>Из вкладки <code>Уведомления</code> можно открыть партию и посмотреть остатки по активным складам.</li>
                     <li>В окне остатков доступна кнопка <code>Сменить статус</code>: после нажатия появляется выбор статуса, пользователь выбирает статус и нажимает <code>Сохранить</code>. Статус партии обновляется в реестре.</li>
                 </ul>
@@ -367,7 +409,7 @@ declare(strict_types=1);
                 <h3>Настройки</h3>
                 <ul>
                     <li>Вкладка <code>Настройки</code> защищена паролем.</li>
-                    <li>В настройках доступны параметры дней уведомлений, получатели основных уведомлений, SMTP-параметры, история уведомлений, получатели рассылки товаров без фильтров, тест рассылки товаров без фильтров, тест автозагрузки, логи автозагрузки, управление складами, настройки заполнения остатков и системная информация.</li>
+                    <li>В настройках доступны параметры дней уведомлений, ручной запуск отправки уведомлений, получатели основных уведомлений, SMTP-параметры, история уведомлений, получатели рассылки товаров без фильтров, тест рассылки товаров без фильтров, тест автозагрузки, логи автозагрузки, управление складами, настройки заполнения остатков, статус и тест синхронизации с catalogvr, а также системная информация.</li>
                 </ul>
             </div>
 
@@ -405,7 +447,8 @@ declare(strict_types=1);
                 <p>Обязательные колонки файла:</p>
                 <ul>
                     <li><code>Артикул</code>;</li>
-                    <li><code>Срок годности до</code>, <code>Срок годности</code> или похожий заголовок.</li>
+                    <li><code>Срок годности до</code>, <code>Срок годности</code> или похожий заголовок. Допускается дата или значение <code>Не ограничен</code>.</li>
+                    <li>Партии со сроком <code>Не ограничен</code> заносятся в реестр, но не участвуют в уведомлениях о сроках годности.</li>
                 </ul>
                 <p>Необязательные колонки:</p>
                 <ul>
@@ -417,14 +460,23 @@ declare(strict_types=1);
 
                 <h3>4. Смена статуса и перемещение на СБ</h3>
                 <ol>
-                    <li>Нажмите <code>Изменить статус / Удалить</code>.</li>
+                    <li>Нажмите <code>Режим супервайзера</code>.</li>
                     <li>Введите пароль ответственного пользователя.</li>
-                    <li>После успешного ввода пароля можно менять статусы в реестре.</li>
+                    <li>После успешного ввода пароля можно менять статусы в реестре, удалять партии и отмечать строки чекбоксами для массовых действий.</li>
                     <li>Выберите новый статус: <code>В наличии</code>, <code>Перемещено на СБ</code> или <code>Нет в наличии</code>.</li>
                 </ol>
                 <p>Статус также можно изменить из окна остатков партии во вкладке <code>Уведомления</code>.</p>
 
-                <h3>5. Работа с событиями</h3>
+                <h3>5. Отправка выбранных товаров на пересчет</h3>
+                <ol>
+                    <li>Откройте вкладку <code>Реестр</code>.</li>
+                    <li>Нажмите <code>Режим супервайзера</code> и введите пароль.</li>
+                    <li>Отметьте чекбоксами товары, по которым нужно запросить повторное заполнение остатков.</li>
+                    <li>Нажмите <code>Отправить на пересчет</code>.</li>
+                    <li>Сервис создаст событие <code>Пересчет</code>, сформирует персональные формы для складов и поставит email-уведомления в очередь.</li>
+                </ol>
+
+                <h3>6. Работа с событиями</h3>
                 <ol>
                     <li>Откройте вкладку <code>События</code>.</li>
                     <li>Выберите фильтры <code>Сегодня</code>, <code>Прошедшие</code>, <code>Будущие</code>.</li>
@@ -432,7 +484,7 @@ declare(strict_types=1);
                     <li>Нажмите на строку, чтобы открыть список партий события.</li>
                 </ol>
 
-                <h3>6. Заполнение остатков складами</h3>
+                <h3>7. Заполнение остатков складами</h3>
                 <ol>
                     <li>Склад получает email со ссылкой на форму заполнения остатков.</li>
                     <li>Ответственный сотрудник открывает ссылку.</li>
@@ -459,21 +511,19 @@ declare(strict_types=1);
                 </label>
                 <label class="history-custom-date hidden">Дата от<input id="historyDateFrom" type="date"></label>
                 <label class="history-custom-date hidden">Дата до<input id="historyDateTo" type="date"></label>
-                <label>Действие
-                    <select id="historyActionFilter">
-                        <option value="">Все действия</option>
-                        <option value="bulk_create">Импорт партий</option>
-                        <option value="create">Добавление партий</option>
-                        <option value="update">Изменение партий</option>
-                        <option value="delete">Удаление партий</option>
-                        <option value="auto_import_completed">Автозагрузка</option>
-                        <option value="auto_import_failed">Ошибка автозагрузки</option>
-                        <option value="auto_import_not_found">Автозагрузка без файлов</option>
-                        <option value="delete_by_articles">Удаление артикулов</option>
-                        <option value="expiry_notifications_sent">Отправка уведомлений</option>
-                        <option value="expiry_notifications_failed">Ошибка уведомлений</option>
-                    </select>
-                </label>
+                <div class="history-action-filter">
+                    <span class="history-filter-label">Действие</span>
+                    <details id="historyActionFilter">
+                        <summary id="historyActionFilterSummary">Выбрано: 8</summary>
+                        <div class="history-action-dropdown">
+                            <div class="history-action-filter-actions">
+                                <button class="small-button" id="historyActionsSelectAll" type="button">Выбрать все</button>
+                                <button class="small-button" id="historyActionsClearAll" type="button">Снять все</button>
+                            </div>
+                            <div id="historyActionOptions"></div>
+                        </div>
+                    </details>
+                </div>
             </div>
             <div class="table-wrap card">
                 <table>
@@ -481,23 +531,62 @@ declare(strict_types=1);
                     <tbody id="historyBody"></tbody>
                 </table>
             </div>
+            <nav class="history-pagination" id="historyPagination" aria-label="Страницы истории">
+                <button class="ghost-button" id="historyPreviousPage" type="button">Назад</button>
+                <span id="historyPageInfo">Страница 1 из 1</span>
+                <button class="ghost-button" id="historyNextPage" type="button">Вперёд</button>
+            </nav>
         </section>
     </main>
 
-    <dialog class="modal" id="eventBatchesDialog">
+    <dialog class="modal" id="registryExportDialog">
         <div class="card form modal-card">
+            <div class="modal-heading">
+                <h2>Выберите формат таблицы</h2>
+                <button class="icon-button" id="closeRegistryExportDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <div class="purchase-event-export-options">
+                <button class="purchase-event-export-option" id="exportRegistryXlsxButton" type="button">
+                    <strong>Excel XLSX</strong>
+                    <small>Современный формат для просмотра и обработки</small>
+                </button>
+                <button class="purchase-event-export-option" id="exportRegistryXlsButton" type="button">
+                    <strong>Excel XLS</strong>
+                    <small>Совместимый формат для старых версий Excel</small>
+                </button>
+            </div>
+            <div class="modal-actions"><button class="ghost-button" id="cancelRegistryExportDialogButton" type="button">Отмена</button></div>
+        </div>
+    </dialog>
+
+    <dialog class="modal purchase-event-summary-dialog" id="purchaseEventSummaryDialog" style="inset:8px;box-sizing:border-box;width:calc(100vw - 16px);min-width:calc(100vw - 16px);max-width:calc(100vw - 16px);height:calc(100vh - 16px);min-height:calc(100vh - 16px);max-height:calc(100vh - 16px);margin:auto">
+        <div class="card modal-card purchase-event-summary-dialog-card" style="box-sizing:border-box;display:grid;gap:12px;width:100%;height:100%;max-width:none;max-height:none;grid-template-rows:auto minmax(0,1fr) auto">
+            <div class="modal-heading">
+                <h2>Сводная таблица остатков</h2>
+                <button class="icon-button" id="closePurchaseEventSummaryDialogIcon" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <iframe id="purchaseEventSummaryFrame" title="Сводная таблица остатков" src="about:blank" style="display:block;width:100%;height:100%;min-width:0;min-height:0;border:0;border-radius:14px;background:#f4f7fb"></iframe>
+            <div class="modal-actions">
+                <button class="primary" id="closePurchaseEventSummaryDialogButton" type="button">Закрыть</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog class="modal event-batches-dialog" id="eventBatchesDialog">
+        <div class="card form modal-card event-batches-card">
             <div class="modal-heading">
                 <h2 id="eventBatchesDialogTitle">Партии события</h2>
                 <button class="icon-button" id="closeEventBatchesDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
             <p class="subtitle" id="eventBatchesDialogMeta"></p>
-            <div class="table-wrap">
+            <div class="table-wrap event-batches-table-wrap">
                 <table>
-                    <thead><tr><th>Артикул</th><th>Код</th><th>Наименование</th></tr></thead>
+                    <thead><tr id="eventBatchesHead"><th class="event-main-column event-main-column-1">Артикул</th><th class="event-main-column event-main-column-2">Код</th><th class="event-main-column event-main-column-3">Наименование</th><th class="event-main-column event-main-column-4">Менеджер</th><th class="event-main-column event-main-column-5">Общий остаток</th></tr></thead>
                     <tbody id="eventBatchesBody"></tbody>
                 </table>
             </div>
             <div class="modal-actions">
+                <button class="ghost-button" id="downloadEventCatalogStocksButton" type="button" disabled>Скачать Excel</button>
                 <button class="primary" id="confirmEventBatchesDialogButton" type="button">Закрыть</button>
             </div>
         </div>
@@ -576,15 +665,15 @@ declare(strict_types=1);
     <dialog class="modal" id="writeOffPasswordDialog">
         <form class="card form modal-card" id="writeOffPasswordForm" method="dialog">
             <div class="modal-heading">
-                <h2>Изменить статус / Удалить</h2>
+                <h2>Режим супервайзера</h2>
                 <button class="icon-button" id="closeWriteOffPasswordDialogButton" type="button" aria-label="Закрыть">×</button>
             </div>
-            <p class="subtitle">Введите пароль, чтобы разрешить изменение статусов в колонке «Статус».</p>
+            <p class="subtitle">Введите пароль, чтобы разрешить изменение статусов, удаление партий и отправку товаров на пересчет.</p>
             <label>Пароль<input id="writeOffPasswordInput" required autocomplete="current-password" type="password"></label>
             <p class="field-error" id="writeOffPasswordError" role="alert"></p>
             <div class="modal-actions">
                 <button class="ghost-button" id="cancelWriteOffPasswordButton" type="button">Отмена</button>
-                <button class="primary" type="submit">Разрешить изменение статусов</button>
+                <button class="primary" type="submit">Войти в режим супервайзера</button>
             </div>
         </form>
     </dialog>
@@ -667,6 +756,24 @@ declare(strict_types=1);
         </form>
     </dialog>
 
+    <dialog class="modal" id="recountWarehousesDialog">
+        <form class="card form modal-card" id="recountWarehousesForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Выберите склады для пересчета</h2>
+                <button class="icon-button" id="closeRecountWarehousesDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle">Персональные формы будут созданы и отправлены только отмеченным складам.</p>
+            <label class="checkbox-row recount-select-all-row"><input id="selectAllRecountWarehouses" type="checkbox"> Выбрать все</label>
+            <div class="recount-warehouse-list" id="recountWarehousesList"></div>
+            <p class="field-error" id="recountWarehousesError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="clearRecountWarehousesButton" type="button">Снять все</button>
+                <button class="ghost-button" id="cancelRecountWarehousesButton" type="button">Отмена</button>
+                <button class="primary" id="confirmRecountWarehousesButton" type="submit">Отправить на пересчет</button>
+            </div>
+        </form>
+    </dialog>
+
 
     <dialog class="modal" id="testStockFillDialog">
         <form class="card form modal-card" id="testStockFillForm" method="dialog">
@@ -716,6 +823,38 @@ declare(strict_types=1);
         </form>
     </dialog>
 
+
+    <dialog class="modal" id="catalogSyncTestDialog">
+        <form class="card form modal-card" id="catalogSyncTestForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Тест синхронизации с catalogvr</h2>
+                <button class="icon-button" id="closeCatalogSyncTestDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <label>Артикул<input id="catalogSyncArticle" required autocomplete="off" placeholder="Введите артикул"></label>
+            <p class="field-error" id="catalogSyncTestError" role="alert"></p>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelCatalogSyncTestButton" type="button">Отмена</button>
+                <button class="primary" id="runCatalogSyncTestButton" type="submit">Запустить тест</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="modal notification-history-dialog" id="catalogSyncResultDialog">
+        <div class="card form modal-card wide-modal-card">
+            <div class="modal-heading">
+                <h2>Результат синхронизации с catalogvr</h2>
+                <button class="icon-button" id="closeCatalogSyncResultDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle" id="catalogSyncResultInfo"></p>
+            <div class="table-wrap notification-dialog-body">
+                <table>
+                    <thead><tr id="catalogSyncResultHead"></tr></thead>
+                    <tbody id="catalogSyncResultBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-actions"><button class="primary" id="confirmCatalogSyncResultDialogButton" type="button">Закрыть</button></div>
+        </div>
+    </dialog>
     <dialog class="modal" id="testPurchaseNotificationDialog">
         <form class="card form modal-card" id="testPurchaseNotificationForm" method="dialog">
             <div class="modal-heading">

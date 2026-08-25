@@ -90,7 +90,58 @@ function vrCatalogProductsRequestPayload(array $articles): array
         'include_zero_stock' => true,
         // Остатки нужны до создания индивидуальных складских форм.
         'include_warehouse_stocks' => true,
+        // Раздел нужен для отбора товаров события «180 дней».
+        'include_section' => true,
     ];
+}
+
+/** Возвращает значение параметра «Раздел» из официального или legacy-ответа catalogvr. */
+function vrCatalogProductSection(array $product): string
+{
+    foreach (['section', 'section_name', 'Раздел', 'раздел'] as $key) {
+        if (array_key_exists($key, $product) && !is_array($product[$key])) {
+            return trim((string)$product[$key]);
+        }
+    }
+
+    $characteristics = $product['characteristics'] ?? $product['attributes'] ?? [];
+    if (!is_array($characteristics)) return '';
+    foreach ($characteristics as $key => $characteristic) {
+        $name = is_array($characteristic)
+            ? trim((string)($characteristic['name'] ?? $characteristic['title'] ?? $key))
+            : trim((string)$key);
+        if (mb_strtolower($name, 'UTF-8') !== 'раздел') continue;
+        $value = is_array($characteristic)
+            ? ($characteristic['value'] ?? $characteristic['text'] ?? '')
+            : $characteristic;
+        return trim((string)$value);
+    }
+
+    return '';
+}
+
+function vrCatalogSectionLookupKey(string $section): string
+{
+    $section = str_replace("\u{00A0}", ' ', trim($section));
+    $section = preg_replace('/\s+/u', ' ', $section) ?? $section;
+    return mb_strtolower($section, 'UTF-8');
+}
+
+/** Оставляет партии, чей параметр «Раздел» входит в разрешённый список. */
+function filterBatchesByVrCatalogSections(array $batches, array $products, array $allowedSections): array
+{
+    $allowed = array_fill_keys(array_map('vrCatalogSectionLookupKey', $allowedSections), true);
+    $matchingArticles = [];
+    foreach ($products as $product) {
+        if (!is_array($product) || !vrCatalogProductFound($product)) continue;
+        if (!isset($allowed[vrCatalogSectionLookupKey(vrCatalogProductSection($product))])) continue;
+        $key = vrCatalogArticleLookupKey(vrCatalogProductArticle($product));
+        if ($key !== '') $matchingArticles[$key] = true;
+    }
+
+    return array_values(array_filter($batches, static function (array $batch) use ($matchingArticles): bool {
+        return isset($matchingArticles[vrCatalogArticleLookupKey((string)($batch['article'] ?? ''))]);
+    }));
 }
 
 /**
@@ -116,40 +167,176 @@ function filterBatchesByVrCatalogWarehouseStock(array $batches, array $products,
     }));
 }
 
+
+function filterBatchesByVrCatalogWarehouseZeroStock(array $batches, array $products, array $warehouse): array
+{
+    $productsByArticle = [];
+    foreach ($products as $product) {
+        if (!is_array($product) || !vrCatalogProductFound($product)) continue;
+        $key = vrCatalogArticleLookupKey(vrCatalogProductArticle($product));
+        if ($key !== '') $productsByArticle[$key][] = $product;
+    }
+
+    return array_values(array_filter($batches, static function (array $batch) use ($productsByArticle, $warehouse): bool {
+        $key = vrCatalogArticleLookupKey((string)($batch['article'] ?? ''));
+        foreach ($productsByArticle[$key] ?? [] as $product) {
+            $quantity = vrCatalogWarehouseStockQuantityOrNull($product, $warehouse);
+            if ($quantity !== null && $quantity <= 0) return true;
+        }
+        return false;
+    }));
+}
+
 /** Читает остаток склада из официального массива stocks и legacy-вариантов ответа. */
 function vrCatalogWarehouseStockQuantity(array $product, array $warehouse): float
 {
+    return vrCatalogWarehouseStockQuantityOrNull($product, $warehouse) ?? 0.0;
+}
+
+function vrCatalogWarehouseStockQuantityOrNull(array $product, array $warehouse): ?float
+{
     $warehouseName = vrCatalogWarehouseLookupKey((string)($warehouse['name'] ?? ''));
-    if ($warehouseName === '') return 0.0;
+    if ($warehouseName === '') return null;
 
-    foreach (['stocks', 'warehouse_stocks', 'warehouses'] as $field) {
-        $stocks = $product[$field] ?? null;
-        if (!is_array($stocks)) continue;
-
-        foreach ($stocks as $key => $stock) {
-            if (is_array($stock)) {
-                $name = (string)($stock['warehouse_name'] ?? $stock['warehouse'] ?? $stock['name'] ?? $key);
-                $quantity = $stock['quantity'] ?? $stock['stock'] ?? $stock['balance'] ?? $stock['available'] ?? 0;
-            } else {
-                $name = (string)$key;
-                $quantity = $stock;
-            }
-            if (vrCatalogWarehouseLookupKey($name) === $warehouseName && is_numeric($quantity)) {
-                return (float)$quantity;
-            }
+    foreach (vrCatalogExtractWarehouseStockRows($product) as $row) {
+        if (vrCatalogWarehouseMatches((string)$row['name'], $warehouseName)) {
+            return (float)$row['quantity'];
         }
     }
 
-    $stockByWarehouse = $product['stock_by_warehouse'] ?? null;
-    if (is_array($stockByWarehouse)) {
-        foreach ($stockByWarehouse as $name => $quantity) {
-            if (vrCatalogWarehouseLookupKey((string)$name) === $warehouseName && is_numeric($quantity)) {
-                return (float)$quantity;
-            }
+    return null;
+}
+
+function vrCatalogExtractWarehouseStockRows(array $product): array
+{
+    $rows = [];
+    foreach (['stocks', 'warehouse_stocks', 'warehouses', 'stock_by_warehouse', 'Остатки', 'остатки', 'Остатки по складам', 'остатки по складам'] as $field) {
+        if (isset($product[$field]) && is_array($product[$field])) {
+            $rows = array_merge($rows, vrCatalogNormalizeStockContainer($product[$field]));
         }
     }
 
-    return 0.0;
+    // Если catalogvr переименовал контейнер остатков, ищем строки рекурсивно по
+    // паре признаков: название склада + количество. Это защищает синхронизацию
+    // от расхождения между UI catalogvr и внутренним API.
+    if (!$rows) {
+        $rows = vrCatalogFindStockRowsRecursive($product);
+    }
+
+    return $rows;
+}
+
+/** Объединяет складские строки карточек одного артикула без подстановки ложного нуля. */
+function vrCatalogStockSummary(array $products): array
+{
+    $warehouseStocks = [];
+    foreach ($products as $product) {
+        if (!is_array($product) || !vrCatalogProductFound($product)) continue;
+        foreach (vrCatalogExtractWarehouseStockRows($product) as $stock) {
+            $key = vrCatalogWarehouseLookupKey((string)$stock['name']);
+            if ($key === '') continue;
+            if (!isset($warehouseStocks[$key])) {
+                $warehouseStocks[$key] = ['name' => trim((string)$stock['name']), 'quantity' => 0.0];
+            }
+            $warehouseStocks[$key]['quantity'] += (float)$stock['quantity'];
+        }
+    }
+    $stocks = array_values($warehouseStocks);
+    usort($stocks, static fn (array $left, array $right): int => strnatcasecmp((string)$left['name'], (string)$right['name']));
+
+    return [
+        'stocks' => $stocks,
+        // Если catalogvr не передал ни одной складской строки, показываем прочерк,
+        // а не вводящий в заблуждение нулевой общий остаток.
+        'total' => $stocks ? array_sum(array_column($stocks, 'quantity')) : null,
+    ];
+}
+
+function vrCatalogNormalizeStockContainer(array $stocks): array
+{
+    $rows = [];
+    foreach ($stocks as $key => $stock) {
+        if (is_array($stock)) {
+            $name = (string)($stock['warehouse_name'] ?? $stock['warehouse'] ?? $stock['name'] ?? $stock['Склад'] ?? $stock['склад'] ?? $stock['Название склада'] ?? $stock['название склада'] ?? $key);
+            $quantity = $stock['quantity'] ?? $stock['stock'] ?? $stock['balance'] ?? $stock['available'] ?? $stock['Остаток'] ?? $stock['остаток'] ?? $stock['Количество'] ?? $stock['количество'] ?? null;
+        } else {
+            $name = (string)$key;
+            $quantity = $stock;
+        }
+        $parsedQuantity = vrCatalogParseStockQuantity($quantity);
+        if ($name !== '' && $parsedQuantity !== null) $rows[] = ['name' => $name, 'quantity' => $parsedQuantity];
+    }
+    return $rows;
+}
+
+function vrCatalogFindStockRowsRecursive(array $value): array
+{
+    $rows = [];
+    $name = $value['warehouse_name'] ?? $value['warehouse'] ?? $value['name'] ?? $value['Склад'] ?? $value['склад'] ?? $value['Название склада'] ?? $value['название склада'] ?? null;
+    $quantity = $value['quantity'] ?? $value['stock'] ?? $value['balance'] ?? $value['available'] ?? $value['Остаток'] ?? $value['остаток'] ?? $value['Количество'] ?? $value['количество'] ?? null;
+    $parsedQuantity = vrCatalogParseStockQuantity($quantity);
+    if ($name !== null && $parsedQuantity !== null) {
+        $rows[] = ['name' => (string)$name, 'quantity' => $parsedQuantity];
+    }
+    foreach ($value as $child) {
+        if (is_array($child)) $rows = array_merge($rows, vrCatalogFindStockRowsRecursive($child));
+    }
+    return $rows;
+}
+
+function vrCatalogParseStockQuantity($quantity): ?float
+{
+    if (is_int($quantity) || is_float($quantity)) return (float)$quantity;
+    $text = trim((string)$quantity);
+    if ($text === '') return null;
+    $text = str_replace(',', '.', $text);
+    if (is_numeric($text)) return (float)$text;
+    if (preg_match('/-?\d+(?:\.\d+)?/u', $text, $match)) return (float)$match[0];
+    return null;
+}
+
+
+function vrCatalogWarehouseMatches(string $catalogName, string $warehouseLookupKey): bool
+{
+    $catalogKey = vrCatalogWarehouseLookupKey($catalogName);
+    if ($catalogKey === '' || $warehouseLookupKey === '') return false;
+    if ($catalogKey === $warehouseLookupKey) return true;
+    if (vrCatalogCombinedWarehouseMatches($catalogName, $warehouseLookupKey)) return true;
+
+    // В catalogvr встречаются объединённые склады вида «Авиаторов Зал+Склад».
+    // Для настроек сервиса «Авиаторов Зал» и «Авиаторов Склад» считаем такой
+    // остаток подходящим, иначе складские формы ошибочно получают нули.
+    $parts = preg_split('/\s*\+\s*/u', $catalogName) ?: [];
+    foreach ($parts as $part) {
+        $partKey = vrCatalogWarehouseLookupKey($part);
+        if ($partKey === $warehouseLookupKey) return true;
+    }
+
+    return str_contains($catalogKey, $warehouseLookupKey) || str_contains($warehouseLookupKey, $catalogKey);
+}
+
+function vrCatalogCombinedWarehouseMatches(string $catalogName, string $warehouseLookupKey): bool
+{
+    $parts = preg_split('/\s*\+\s*/u', trim($catalogName)) ?: [];
+    if (count($parts) < 2) return false;
+
+    $firstWords = preg_split('/\s+/u', trim((string)$parts[0])) ?: [];
+    $prefix = trim((string)($firstWords[0] ?? ''));
+    foreach ($parts as $index => $part) {
+        $part = trim((string)$part);
+        if ($part === '') continue;
+        $variants = [$part];
+        // Для catalogvr «Авиаторов Зал+Склад» второй сегмент приходит без
+        // общего префикса. В сервисе сроков ему соответствует «Авиаторов Склад».
+        if ($index > 0 && $prefix !== '' && !str_contains(vrCatalogWarehouseLookupKey($part), vrCatalogWarehouseLookupKey($prefix))) {
+            $variants[] = $prefix . ' ' . $part;
+        }
+        foreach ($variants as $variant) {
+            if (vrCatalogWarehouseLookupKey($variant) === $warehouseLookupKey) return true;
+        }
+    }
+
+    return false;
 }
 
 function vrCatalogWarehouseLookupKey(string $name): string
