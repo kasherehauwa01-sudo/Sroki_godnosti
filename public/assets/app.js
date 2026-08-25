@@ -1756,8 +1756,11 @@ function formatHistoryBatch(batch) {
         ? `со сроком годности ${formatExpiryMonthRu(batch.expiry_date || batch.expiryDate, batch.expiry_full_date || batch.expiryFullDate)}`
         : 'без указанного срока годности';
     const status = batch.status ? `, статус «${batch.status}»` : '';
+    const importDetails = batch.import_sender_store || batch.import_document
+        ? `. Загружено магазином: ${batch.import_sender_store || 'не указано'}. Документ: ${batch.import_document || 'не указан'}`
+        : '';
 
-    return `партия ${article}${code}${name} ${expiry}${status}`;
+    return `партия ${article}${code}${name} ${expiry}${status}${importDetails}`;
 }
 
 function formatHistoryBatchList(batches) {

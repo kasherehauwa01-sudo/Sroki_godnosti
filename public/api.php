@@ -1014,6 +1014,8 @@ function historyBatchInfo(array $batch, ?int $id = null): array
         'expiry_invalid' => (bool)($batch['expiry_invalid'] ?? false),
         'expiry_raw' => (string)($batch['expiry_raw'] ?? ''),
         'status' => (string)($batch['status'] ?? ''),
+        'import_sender_store' => (string)($batch['import_sender_store'] ?? ''),
+        'import_document' => (string)($batch['import_document'] ?? ''),
     ];
 }
 
@@ -1124,6 +1126,8 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
     $code = trim((string)($payload['code'] ?? $payload['Код'] ?? ''));
     $name = trim((string)($payload['name'] ?? $payload['Наименование'] ?? ''));
     $createdSource = normalizeCreatedSource((string)($payload['created_source'] ?? $payload['createdSource'] ?? $payload['Способ'] ?? 'Ручной'));
+    $importSenderStore = trim((string)($payload['import_sender_store'] ?? $payload['senderStore'] ?? ''));
+    $importDocument = trim((string)($payload['import_document'] ?? $payload['document'] ?? ''));
     $expiryInput = (string)($payload['expiry_date'] ?? $payload['expiryDate'] ?? $payload['Срок годности до'] ?? '');
     $expiryRaw = trim((string)($payload['expiry_raw'] ?? $payload['expiryRaw'] ?? $expiryInput));
     $expiryFullDate = array_key_exists('expiry_full_date', $payload) || array_key_exists('expiryFullDate', $payload)
@@ -1150,6 +1154,8 @@ function normalizeBatchPayload(array $payload, bool $requireCreatedAt = true): a
         'expiry_invalid' => $expiryInfo['invalid'],
         'expiry_raw' => $expiryInfo['invalid'] ? $expiryInfo['raw'] : null,
         'status' => $status,
+        'import_sender_store' => $importSenderStore,
+        'import_document' => $importDocument,
     ];
 }
 
