@@ -13,7 +13,8 @@ declare(strict_types=1);
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/styles.css?v=20260825-02">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260825-03"></script>
+    <script defer src="assets/batch-export-selection.js?v=20260825-01"></script>
+    <script defer src="assets/app.js?v=20260825-04"></script>
 </head>
 <body>
     <header class="topbar">
