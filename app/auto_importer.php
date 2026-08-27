@@ -1,8 +1,6 @@
 <?php
 /**
- * Автозагрузка партий из XLS/XLSX-вложения письма.
- *
- * Скрипт использует SMTP-логин и пароль из таблицы settings как доступ к IMAP-ящику.
+ * Автозагрузка партий из XLS/XLSX-файла на FTP-сервере.
  */
 declare(strict_types=1);
 
@@ -13,12 +11,8 @@ if (is_file($autoImportComposerAutoload)) {
     require_once $autoImportComposerAutoload;
 }
 
-const AUTO_IMPORT_FROM = 'robot_volgorost@volgorost.ru';
-const AUTO_IMPORT_SUBJECT = 'Сроки годности. Ежедневная выгрузка';
-const AUTO_IMPORT_MAIL_HOST = 'imap.yandex.ru';
-const AUTO_IMPORT_MAIL_PORT = 993;
 const AUTO_IMPORT_TIMEZONE = 'Europe/Moscow';
-const AUTO_IMPORT_DEFAULT_TIME = '23:50';
+const AUTO_IMPORT_DEFAULT_TIME = '23:59';
 const AUTO_IMPORT_MAX_ATTEMPTS = 20;
 const AUTO_IMPORT_RETRY_INTERVAL_SECONDS = 1800;
 
@@ -130,7 +124,7 @@ function shouldRunAutoImportNow(PDO $pdo, DateTimeImmutable $scheduledAt, DateTi
         return false;
     }
 
-    // Если письмо ещё не пришло или была временная ошибка, повторяем каждые 30 минут.
+    // Если файл ещё не появился или была временная ошибка, повторяем каждые 30 минут.
     $lastRunAt = new DateTimeImmutable((string)$lastRun['created_at'], new DateTimeZone(AUTO_IMPORT_TIMEZONE));
 
     return $lastRunAt <= $now->modify('-' . AUTO_IMPORT_RETRY_INTERVAL_SECONDS . ' seconds');
@@ -212,7 +206,7 @@ function runAutoImport(PDO $pdo, bool $once = false): array
     return [
         'ok' => false,
         'status' => 'error',
-        'message' => $lastError !== '' ? $lastError : 'Письмо с ежедневной выгрузкой не найдено.',
+        'message' => $lastError !== '' ? $lastError : 'Файл ежедневной выгрузки на FTP не найден.',
     ];
 }
 
@@ -221,26 +215,8 @@ function runMissingExpiryFilterNotificationTest(PDO $pdo): array
     ensureSettingsSchema($pdo);
     ensureMissingFilterLogSchema($pdo);
     $settings = getRawSettings($pdo);
-    $username = trim((string)($settings['smtp_username'] ?? ''));
-    $password = (string)($settings['smtp_password'] ?? '');
-    if ($username === '' || $password === '') {
-        throw new RuntimeException('Для проверки заполните SMTP логин и пароль в настройках.');
-    }
-
-    $mail = fetchAutoImportMessageForDate($username, $password, new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE)));
-    if (!$mail) {
-        return ['ok' => true, 'message' => 'Письмо текущей даты не найдено. Уведомление не отправлено.'];
-    }
-
-    $attachments = extractSpreadsheetAttachments($mail['message']);
-    if (!$attachments) {
-        throw new RuntimeException('В найденном письме нет вложения XLS/XLSX.');
-    }
-
-    $codes = [];
-    foreach ($attachments as $attachment) {
-        $codes = array_merge($codes, findMissingExpiryFilterCodes(readSpreadsheetRows($attachment['content'], $attachment['filename'])));
-    }
+    $file = fetchAutoImportFtpFile($settings);
+    $codes = findMissingExpiryFilterCodes(readSpreadsheetRows($file['content'], $file['filename']));
 
     $result = notifyMissingExpiryFilterProducts($pdo, $codes);
     if (($result['status'] ?? '') === 'empty') {
@@ -262,39 +238,18 @@ function runMissingExpiryFilterNotificationTest(PDO $pdo): array
 
 function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $time): array
 {
-    $username = trim((string)($settings['smtp_username'] ?? ''));
-    $password = (string)($settings['smtp_password'] ?? '');
-    if ($username === '' || $password === '') {
-        throw new RuntimeException('Для автозагрузки заполните SMTP логин и пароль в настройках.');
-    }
-
     $targetDates = autoImportTargetDatesForAttempt($time);
-    $mail = fetchAutoImportMessageForDates($username, $password, $targetDates);
-    if (!$mail) {
-        writeLog($pdo, 'auto_import_not_found', [
-            'attempt' => $attempt,
-            'time' => $time,
-            'target_dates' => array_map(static fn (DateTimeImmutable $date): string => $date->format('Y-m-d'), $targetDates),
-            'from' => AUTO_IMPORT_FROM,
-            'subject' => AUTO_IMPORT_SUBJECT,
-            'message' => 'Непрочитанное письмо за даты выгрузки не найдено.',
-        ]);
-        return ['ok' => false, 'status' => 'not_found', 'message' => 'Непрочитанное письмо за даты выгрузки не найдено.'];
+    try {
+        $file = fetchAutoImportFtpFile($settings);
+    } catch (RuntimeException $error) {
+        if ($error->getMessage() !== 'На FTP не найден файл XLS/XLSX.') throw $error;
+        writeLog($pdo, 'auto_import_not_found', ['attempt' => $attempt, 'time' => $time, 'message' => $error->getMessage()]);
+        return ['ok' => false, 'status' => 'not_found', 'message' => $error->getMessage()];
     }
-    $targetDate = new DateTimeImmutable((string)$mail['target_date'], new DateTimeZone(AUTO_IMPORT_TIMEZONE));
-
-    $attachments = extractSpreadsheetAttachments($mail['message']);
-    if (!$attachments) {
-        throw new RuntimeException('В найденном письме нет вложения XLS/XLSX.');
-    }
-
-    $rows = [];
-    $missingFilterCodes = [];
-    foreach ($attachments as $attachment) {
-        $spreadsheetRows = readSpreadsheetRows($attachment['content'], $attachment['filename']);
-        $missingFilterCodes = array_merge($missingFilterCodes, findMissingExpiryFilterCodes($spreadsheetRows));
-        $rows = array_merge($rows, rowsToBatchPayloads($spreadsheetRows));
-    }
+    $targetDate = $targetDates[0] ?? new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+    $spreadsheetRows = readSpreadsheetRows($file['content'], $file['filename']);
+    $missingFilterCodes = findMissingExpiryFilterCodes($spreadsheetRows);
+    $rows = rowsToBatchPayloads($spreadsheetRows);
 
     if (!$rows) {
         throw new RuntimeException('Во вложении не найдены строки для загрузки.');
@@ -304,17 +259,14 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
 
     notifyMissingExpiryFilterProducts($pdo, $missingFilterCodes);
 
-    markAutoImportMessageSeen(
-        $username,
-        $password,
-        (string)$mail['folder'],
-        (string)$mail['id']
-    );
+    // Удаляем исходный файл только после успешного импорта и связанных проверок.
+    // При любой ошибке выше файл останется на FTP для следующей попытки.
+    deleteAutoImportFtpFile($settings, (string)($file['remote_name'] ?? $file['filename']));
 
     writeLog($pdo, 'auto_import_completed', [
         'attempt' => $attempt,
-        'folder' => (string)$mail['folder'],
-        'filename' => implode(', ', array_column($attachments, 'filename')),
+        'folder' => (string)$file['directory'],
+        'filename' => (string)$file['filename'],
         'target_date' => $targetDate->format('Y-m-d'),
         'added' => (int)($result['added'] ?? 0),
         'skipped_duplicates' => (int)($result['skipped_duplicates'] ?? 0),
@@ -333,6 +285,111 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
     ];
 }
 
+function normalizeAutoImportFtpSettings(array $settings): array
+{
+    $protocol = strtoupper(trim((string)($settings['ftp_protocol'] ?? 'FTP')));
+    if (!in_array($protocol, ['FTP', 'FTPS'], true)) throw new InvalidArgumentException('Поддерживаются только FTP и FTPS.');
+    $host = trim((string)($settings['ftp_host'] ?? ''));
+    $username = trim((string)($settings['ftp_username'] ?? ''));
+    $password = (string)($settings['ftp_password'] ?? '');
+    if ($host === '' || $username === '' || $password === '') throw new RuntimeException('Заполните хост, логин и пароль FTP.');
+    return [
+        'protocol' => $protocol,
+        'host' => $host,
+        'port' => max(1, min(65535, (int)($settings['ftp_port'] ?? 21))),
+        'username' => $username,
+        'password' => $password,
+        'directory' => '/' . trim((string)($settings['ftp_directory'] ?? ''), " /\t\n\r\0\x0B"),
+        'attempts' => max(1, min(20, (int)($settings['ftp_connection_attempts'] ?? 5))),
+        'retry_delay' => max(0, min(300, (int)($settings['ftp_retry_delay'] ?? 3))),
+    ];
+}
+
+function fetchAutoImportFtpFile(array $settings, ?callable $downloader = null): array
+{
+    $config = normalizeAutoImportFtpSettings($settings);
+    $downloader ??= 'downloadLatestFtpSpreadsheet';
+    $file = $downloader($config);
+    if (!is_array($file) || empty($file['filename']) || !isset($file['content'])) throw new RuntimeException('Не удалось скачать файл с FTP.');
+    return $file + ['directory' => $config['directory'], 'remote_name' => (string)$file['filename']];
+}
+
+function deleteAutoImportFtpFile(array $settings, string $remoteName, ?callable $deleter = null): void
+{
+    if (trim($remoteName) === '') throw new RuntimeException('Не указано имя FTP-файла для удаления.');
+    $config = normalizeAutoImportFtpSettings($settings);
+    $deleter ??= 'deleteFtpSpreadsheet';
+    $deleter($config, $remoteName);
+}
+
+function selectLatestFtpSpreadsheet(array $files): ?array
+{
+    $files = array_values(array_filter($files, static fn (array $file): bool => preg_match('/\.(xls|xlsx)$/i', (string)($file['name'] ?? '')) === 1));
+    usort($files, static fn (array $left, array $right): int => ((int)($right['modified_at'] ?? -1) <=> (int)($left['modified_at'] ?? -1)) ?: strnatcasecmp((string)$right['name'], (string)$left['name']));
+    return $files[0] ?? null;
+}
+
+function downloadLatestFtpSpreadsheet(array $config): array
+{
+    if (!function_exists('ftp_connect')) throw new RuntimeException('На сервере PHP не установлено расширение FTP.');
+    $connection = null;
+    $lastError = 'Не удалось подключиться к FTP.';
+    for ($attempt = 1; $attempt <= $config['attempts']; $attempt++) {
+        try {
+            $connection = $config['protocol'] === 'FTPS'
+                ? @ftp_ssl_connect($config['host'], $config['port'], 30)
+                : @ftp_connect($config['host'], $config['port'], 30);
+            if (!$connection || !@ftp_login($connection, $config['username'], $config['password'])) throw new RuntimeException('Не удалось авторизоваться на FTP.');
+            @ftp_pasv($connection, true);
+            if (!@ftp_chdir($connection, $config['directory'])) throw new RuntimeException('Каталог FTP не найден.');
+            $names = @ftp_nlist($connection, '.');
+            if (!is_array($names)) throw new RuntimeException('Не удалось получить список файлов FTP.');
+            $candidates = array_map(static fn (string $name): array => ['name' => $name, 'modified_at' => @ftp_mdtm($connection, $name)], $names);
+            $selected = selectLatestFtpSpreadsheet($candidates);
+            if (!$selected) throw new RuntimeException('На FTP не найден файл XLS/XLSX.');
+            $stream = fopen('php://temp', 'w+b');
+            if ($stream === false || !@ftp_fget($connection, $stream, (string)$selected['name'], FTP_BINARY)) throw new RuntimeException('Не удалось скачать файл с FTP.');
+            rewind($stream);
+            $content = stream_get_contents($stream);
+            fclose($stream);
+            if (!is_string($content) || $content === '') throw new RuntimeException('FTP вернул пустой файл.');
+            return ['filename' => basename((string)$selected['name']), 'remote_name' => (string)$selected['name'], 'content' => $content, 'directory' => $config['directory']];
+        } catch (Throwable $error) {
+            $lastError = $error->getMessage();
+            if ($lastError === 'На FTP не найден файл XLS/XLSX.') throw $error;
+            if ($attempt < $config['attempts'] && $config['retry_delay'] > 0) sleep($config['retry_delay']);
+        } finally {
+            if ($connection) { @ftp_close($connection); $connection = null; }
+        }
+    }
+    throw new RuntimeException($lastError);
+}
+
+function deleteFtpSpreadsheet(array $config, string $remoteName): void
+{
+    if (!function_exists('ftp_connect')) throw new RuntimeException('На сервере PHP не установлено расширение FTP.');
+    $connection = null;
+    $lastError = 'Не удалось удалить обработанный файл с FTP.';
+    for ($attempt = 1; $attempt <= $config['attempts']; $attempt++) {
+        try {
+            $connection = $config['protocol'] === 'FTPS'
+                ? @ftp_ssl_connect($config['host'], $config['port'], 30)
+                : @ftp_connect($config['host'], $config['port'], 30);
+            if (!$connection || !@ftp_login($connection, $config['username'], $config['password'])) throw new RuntimeException('Не удалось авторизоваться на FTP для удаления файла.');
+            @ftp_pasv($connection, true);
+            if (!@ftp_chdir($connection, $config['directory'])) throw new RuntimeException('Каталог FTP не найден при удалении файла.');
+            if (!@ftp_delete($connection, $remoteName)) throw new RuntimeException('Не удалось удалить обработанный файл с FTP.');
+            return;
+        } catch (Throwable $error) {
+            $lastError = $error->getMessage();
+            if ($attempt < $config['attempts'] && $config['retry_delay'] > 0) sleep($config['retry_delay']);
+        } finally {
+            if ($connection) { @ftp_close($connection); $connection = null; }
+        }
+    }
+    throw new RuntimeException($lastError);
+}
+
 function autoImportTargetDatesForAttempt(string $time): array
 {
     $now = new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
@@ -348,156 +405,6 @@ function autoImportTargetDates(DateTimeImmutable $scheduledAt, DateTimeImmutable
     }
 
     return $dates;
-}
-
-function fetchTodayAutoImportMessage(string $username, string $password): ?array
-{
-    return fetchAutoImportMessageForDate($username, $password, new DateTimeImmutable('now', new DateTimeZone(AUTO_IMPORT_TIMEZONE)));
-}
-
-function fetchAutoImportMessageForDates(string $username, string $password, array $targetDates): ?array
-{
-    foreach ($targetDates as $targetDate) {
-        $mail = fetchAutoImportMessageForDate($username, $password, $targetDate);
-        if ($mail) {
-            return $mail;
-        }
-    }
-
-    return null;
-}
-
-function fetchAutoImportMessageForDate(string $username, string $password, DateTimeImmutable $targetDate): ?array
-{
-    $imap = new SimpleImapClient(AUTO_IMPORT_MAIL_HOST, AUTO_IMPORT_MAIL_PORT);
-    try {
-        $imap->login($username, $password);
-        foreach ($imap->listMailboxes() as $folder) {
-            try {
-                $imap->selectMailbox($folder);
-            } catch (Throwable) {
-                continue;
-            }
-
-            $ids = $imap->searchUnreadMessagesForDate($targetDate);
-            foreach (array_reverse($ids) as $id) {
-                $message = $imap->fetchMessage($id);
-                $headers = parseMailHeaders($message);
-                $subject = trim((string)($headers['subject'] ?? ''));
-                if (
-                    autoImportSenderMatches($headers)
-                    && autoImportSubjectMatches($subject)
-                ) {
-                    return ['message' => $message, 'folder' => $folder, 'id' => $id, 'target_date' => $targetDate->format('Y-m-d')];
-                }
-            }
-        }
-    } finally {
-        $imap->logout();
-    }
-
-    return null;
-}
-
-function markAutoImportMessageSeen(string $username, string $password, string $folder, string $id): void
-{
-    $imap = new SimpleImapClient(AUTO_IMPORT_MAIL_HOST, AUTO_IMPORT_MAIL_PORT);
-    try {
-        $imap->login($username, $password);
-        $imap->selectMailbox($folder);
-        $imap->markSeen($id);
-    } finally {
-        $imap->logout();
-    }
-}
-
-function autoImportSubjectMatches(string $subject): bool
-{
-    // В реальных письмах тема может прийти с точкой на конце или без неё,
-    // поэтому сравниваем нормализованный текст без завершающей пунктуации.
-    $normalizedSubject = normalizeAutoImportSubject($subject);
-    $expectedSubject = normalizeAutoImportSubject(AUTO_IMPORT_SUBJECT);
-
-    return $normalizedSubject === $expectedSubject || str_contains($normalizedSubject, $expectedSubject);
-}
-
-function autoImportSenderMatches(array $headers): bool
-{
-    foreach (['from', 'sender', 'reply-to', 'return-path'] as $headerName) {
-        $value = strtolower((string)($headers[$headerName] ?? ''));
-        if (str_contains($value, strtolower(AUTO_IMPORT_FROM))) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-function normalizeAutoImportSubject(string $subject): string
-{
-    $subject = mb_strtolower(trim($subject));
-    $subject = preg_replace('/\s+/u', ' ', $subject) ?? $subject;
-
-    return rtrim($subject, " \t\n\r\0\x0B.");
-}
-
-function parseMailHeaders(string $message): array
-{
-    [$rawHeaders] = preg_split("/\r?\n\r?\n/", $message, 2) + [''];
-    $decoded = iconv_mime_decode_headers($rawHeaders, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8') ?: [];
-    return array_change_key_case($decoded, CASE_LOWER);
-}
-
-function extractSpreadsheetAttachments(string $message): array
-{
-    return array_values(array_filter(extractMimeParts($message), static function (array $part): bool {
-        return preg_match('/\.(xls|xlsx)$/i', $part['filename'] ?? '') === 1;
-    }));
-}
-
-function extractMimeParts(string $message): array
-{
-    [$rawHeaders, $body] = preg_split("/\r?\n\r?\n/", $message, 2) + ['', ''];
-    $headers = parseMailHeaders($rawHeaders . "\r\n\r\n");
-    $contentType = (string)($headers['content-type'] ?? '');
-    if (preg_match('/boundary="?([^";]+)"?/i', $contentType, $match)) {
-        $boundary = $match[1];
-        $parts = [];
-        foreach (explode('--' . $boundary, $body) as $part) {
-            $part = trim($part);
-            if ($part === '' || $part === '--') {
-                continue;
-            }
-            $parts = array_merge($parts, extractMimeParts($part));
-        }
-        return $parts;
-    }
-
-    $disposition = (string)($headers['content-disposition'] ?? '');
-    $filename = '';
-    if (preg_match('/filename\*?=(?:UTF-8\'\')?"?([^";]+)"?/i', $disposition, $match)) {
-        $filename = rawurldecode(trim($match[1], "\"' "));
-    }
-    if ($filename === '' && preg_match('/name\*?=(?:UTF-8\'\')?"?([^";]+)"?/i', $contentType, $match)) {
-        $filename = rawurldecode(trim($match[1], "\"' "));
-    }
-
-    $encoding = strtolower((string)($headers['content-transfer-encoding'] ?? ''));
-    $content = trim($body);
-    if ($encoding === 'base64') {
-        $content = (string)base64_decode(preg_replace('/\s+/', '', $content), true);
-    } elseif ($encoding === 'quoted-printable') {
-        $content = quoted_printable_decode($content);
-    }
-
-    return $filename !== '' ? [['filename' => $filename, 'content' => $content]] : [];
-}
-
-function spreadsheetAttachmentToBatches(string $content, string $filename): array
-{
-    $rows = readSpreadsheetRows($content, $filename);
-
-    return rowsToBatchPayloads($rows);
 }
 
 function readSpreadsheetRows(string $content, string $filename): array
@@ -803,125 +710,4 @@ function findAutoImportColumn(array $headers, array $variants): ?int
         }
     }
     return null;
-}
-
-final class SimpleImapClient
-{
-    private $socket = null;
-    private int $counter = 1;
-
-    public function __construct(private readonly string $host, private readonly int $port)
-    {
-        $this->socket = fsockopen('ssl://' . $host, $port, $errno, $errstr, 30);
-        if (!$this->socket) {
-            throw new RuntimeException('Не удалось подключиться к IMAP: ' . $errstr);
-        }
-        $this->readUntilTagged('');
-    }
-
-    public function login(string $username, string $password): void
-    {
-        $this->command('LOGIN "' . addcslashes($username, "\\\"") . '" "' . addcslashes($password, "\\\"") . '"');
-    }
-
-    public function listMailboxes(): array
-    {
-        $response = $this->command('LIST "" "*"');
-        $folders = ['INBOX'];
-        foreach (preg_split('/\r?\n/', $response) ?: [] as $line) {
-            if (!str_starts_with($line, '* LIST')) {
-                continue;
-            }
-            if (preg_match('/"((?:\\\\.|[^"])*)"\s*$/', $line, $match)) {
-                $folders[] = stripcslashes($match[1]);
-            }
-        }
-
-        return array_values(array_unique(array_filter($folders)));
-    }
-
-    public function selectMailbox(string $folder): void
-    {
-        $this->command('SELECT "' . addcslashes($folder, "\\\"") . '"');
-    }
-
-    public function searchUnreadMessagesForDate(DateTimeImmutable $targetDate): array
-    {
-        // Ищем только непрочитанные письма за конкретный календарный день.
-        // Верхняя граница BEFORE нужна, чтобы IMAP-сервер не вернул письма
-        // следующего дня при повторном запуске автоимпорта.
-        $since = $targetDate->format('d-M-Y');
-        $before = $targetDate->modify('+1 day')->format('d-M-Y');
-        $response = $this->command('SEARCH UNSEEN SINCE ' . $since . ' BEFORE ' . $before);
-        preg_match('/\* SEARCH([^\r\n]*)/i', $response, $match);
-
-        return array_values(array_filter(preg_split('/\s+/', trim($match[1] ?? '')) ?: []));
-    }
-
-    public function fetchMessage(string $id): string
-    {
-        $response = $this->command('FETCH ' . preg_replace('/[^0-9]/', '', $id) . ' RFC822');
-        if (preg_match('/\{(\d+)\}\r?\n/s', $response, $match, PREG_OFFSET_CAPTURE)) {
-            $length = (int)$match[1][0];
-            $start = $match[0][1] + strlen($match[0][0]);
-
-            return substr($response, $start, $length);
-        }
-
-        return $response;
-    }
-
-    public function markSeen(string $id): void
-    {
-        $this->command('STORE ' . preg_replace('/[^0-9]/', '', $id) . ' +FLAGS (\Seen)');
-    }
-
-    public function logout(): void
-    {
-        if (!is_resource($this->socket)) {
-            $this->socket = null;
-            return;
-        }
-
-        try {
-            $this->command('LOGOUT');
-        } catch (Throwable) {
-            // Ошибка закрытия IMAP-сессии не должна маскировать результат автозагрузки.
-        }
-
-        fclose($this->socket);
-        $this->socket = null;
-    }
-
-    public function __destruct()
-    {
-        $this->logout();
-    }
-
-    private function command(string $command): string
-    {
-        $tag = 'A' . $this->counter++;
-        fwrite($this->socket, $tag . ' ' . $command . "\r\n");
-        $response = $this->readUntilTagged($tag);
-        if (!preg_match('/^' . preg_quote($tag, '/') . ' OK/im', $response)) {
-            throw new RuntimeException('IMAP-команда завершилась ошибкой: ' . $command);
-        }
-        return $response;
-    }
-
-    private function readUntilTagged(string $tag): string
-    {
-        $response = '';
-        while (!feof($this->socket)) {
-            $line = fgets($this->socket);
-            if ($line === false) {
-                break;
-            }
-            $response .= $line;
-            if ($tag === '' || str_starts_with($line, $tag . ' ')) {
-                break;
-            }
-        }
-        return $response;
-    }
 }

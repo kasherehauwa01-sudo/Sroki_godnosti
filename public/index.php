@@ -11,9 +11,10 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260825-02">
+    <link rel="stylesheet" href="assets/styles.css?v=20260825-03">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script defer src="assets/app.js?v=20260825-03"></script>
+    <script defer src="assets/batch-export-selection.js?v=20260825-01"></script>
+    <script defer src="assets/app.js?v=20260825-04"></script>
 </head>
 <body>
     <header class="topbar">
@@ -138,6 +139,7 @@ declare(strict_types=1);
             <div class="settings-subtabs" aria-label="Разделы настроек">
                 <button class="settings-subtab active" data-settings-tab="main" type="button">Основные</button>
                 <button class="settings-subtab" data-settings-tab="notifications" type="button">Уведомления</button>
+                <button class="settings-subtab" data-settings-tab="ftp" type="button">FTP</button>
                 <button class="settings-subtab" data-settings-tab="warehouses" type="button">Склады</button>
             </div>
             <div class="settings-subpanel" data-settings-panel="warehouses" hidden>
@@ -161,13 +163,12 @@ declare(strict_types=1);
             <form class="settings-grid settings-subpanel active" data-settings-panel="main" id="settingsForm">
                 <div class="card form settings-auto-import-card">
                     <h3>Автозагрузка</h3>
-                    <p class="subtitle">Автозагрузка запускается в 23:50 по московскому времени.</p>
+                    <p class="subtitle">Автозагрузка забирает последний XLS/XLSX-файл с FTP ежедневно в 23:59 по московскому времени.</p>
                     <div class="settings-actions">
-                        <button class="ghost-button" id="testAutoImportButton" formnovalidate type="button">Тест автозагрузки</button>
                         <button class="ghost-button" id="showAutoImportLogsButton" formnovalidate type="button">Логи автозагрузки</button>
                     </div>
                     <p class="subtitle" id="testAutoImportStatus" role="status" aria-live="polite"></p>
-                    <p class="subtitle">Cron должен запускать <code>scripts/auto_import.php</code> в 23:50. Если письмо не найдено, скрипт повторяет поиск каждые 30 минут, максимум 20 попыток.</p>
+                    <p class="subtitle">Cron должен запускать <code>scripts/auto_import.php</code> в 23:59. Если файл не найден, скрипт повторяет попытку каждые 30 минут, максимум 20 раз.</p>
                     <dl class="system-info">
                         <dt>Последняя автозагрузка:</dt><dd id="autoImportLastDate">Не выполнялось</dd>
                         <dt>Количество загруженных партий:</dt><dd id="autoImportLoaded">0</dd>
@@ -217,6 +218,25 @@ declare(strict_types=1);
 
                 <div class="settings-save-bar">
                     <button class="primary" id="saveSettingsButton" type="submit">Сохранить настройки</button>
+                </div>
+            </form>
+
+            <form class="settings-grid settings-subpanel" data-settings-panel="ftp" id="ftpSettingsForm" hidden>
+                <div class="card form settings-ftp-card">
+                    <h3>Подключение к FTP для автозагрузки</h3>
+                    <label>Протокол<select id="ftpProtocol"><option value="FTP">FTP</option><option value="FTPS">FTPS</option></select></label>
+                    <label>Хост<input id="ftpHost" autocomplete="off" placeholder="176.53.160.144" required></label>
+                    <label>Порт<input id="ftpPort" type="number" min="1" max="65535" value="21" required></label>
+                    <label>Логин<input id="ftpUsername" autocomplete="username" required></label>
+                    <label>Пароль<input id="ftpPassword" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы не менять"></label>
+                    <label>Каталог с XLS/XLSX<input id="ftpDirectory" value="/" placeholder="/xml" required></label>
+                    <label>Количество попыток подключения<input id="ftpConnectionAttempts" type="number" min="1" max="20" value="5" required></label>
+                    <label>Задержка между попытками, секунд<input id="ftpRetryDelay" type="number" min="0" max="300" value="3" required></label>
+                    <div class="settings-actions">
+                        <button class="primary" type="submit">Сохранить подключение</button>
+                        <button class="ghost-button" id="testFtpConnectionButton" type="button">Проверить подключение</button>
+                    </div>
+                    <p class="subtitle" id="testFtpConnectionStatus" role="status" aria-live="polite"></p>
                 </div>
             </form>
 
@@ -380,15 +400,13 @@ declare(strict_types=1);
                     <li>Рассылка помогает обнаружить товары, которые не попадут в контроль сроков годности из-за отсутствующего фильтра в исходной выгрузке.</li>
                 </ul>
 
-                <h3>Автозагрузка партий из почты</h3>
+                <h3>Автозагрузка партий с FTP</h3>
                 <ul>
-                    <li>Сервис может автоматически забирать ежедневную XLS/XLSX-выгрузку из почтового ящика.</li>
-                    <li>Ожидаемые параметры письма: отправитель <code>robot_volgorost@volgorost.ru</code>, тема <code>Сроки годности. Ежедневная выгрузка</code>.</li>
-                    <li>Автозагрузка запускается в 23:50 по московскому времени: до 00:00 ищет непрочитанное письмо за текущий день, после 00:00 ищет непрочитанное письмо и за дату предыдущего запуска, и за новые сутки.</li>
-                    <li>Если письмо не найдено, сервис повторяет поиск каждые 30 минут, максимум 20 попыток.</li>
-                    <li>После успешной загрузки письмо помечается прочитанным, чтобы не загрузить его повторно.</li>
+                    <li>Сервис автоматически забирает последний XLS/XLSX-файл из FTP-каталога, указанного во вкладке <code>Настройки → FTP</code>.</li>
+                    <li>Автозагрузка запускается ежедневно в 23:59 по московскому времени и скачивает последний XLS/XLSX-файл из настроенного FTP-каталога.</li>
+                    <li>Если файл не найден, сервис повторяет проверку каждые 30 минут, максимум 20 попыток.</li>
                     <li>Результат автозагрузки сохраняется в истории: количество добавленных партий, дубли, перемещённые на СБ замещенные партии и ошибки.</li>
-                    <li>В настройках доступен ручной тест автозагрузки и просмотр логов автозагрузки.</li>
+                    <li>В настройках доступны проверка FTP-подключения и просмотр логов автозагрузки.</li>
                 </ul>
 
                 <h3>Автоматическое перемещение на СБ партий с кодом <code>-1</code></h3>
@@ -398,7 +416,7 @@ declare(strict_types=1);
                     <li>Автоматическое перемещение на СБ выполняется только если у сравниваемых партий одинаковый срок годности.</li>
                     <li>Найденные партии с базовым кодом переводятся в статус <code>Перемещено на СБ</code>.</li>
                     <li>Уже перемещённые на СБ партии повторно не обрабатываются.</li>
-                    <li>Правило работает при ручном добавлении, массовом добавлении, импорте XLS/XLSX через интерфейс и автозагрузке из почты.</li>
+                    <li>Правило работает при ручном добавлении, массовом добавлении, импорте XLS/XLSX через интерфейс и автозагрузке с FTP.</li>
                     <li>Информация об автоматически перемещённых на СБ партиях сохраняется в истории и в результате автозагрузки.</li>
                 </ul>
 
@@ -604,7 +622,7 @@ declare(strict_types=1);
                 </button>
                 <button class="purchase-event-export-option" id="exportRegistryXlsButton" type="button">
                     <strong>Для импорта в первичный счет</strong>
-                    <small>Таблица в совместимом формате XLS</small>
+                    <small>ZIP-архив: отдельный XLS для каждого склада catalogvr</small>
                 </button>
             </div>
             <div class="modal-actions"><button class="ghost-button" id="cancelRegistryExportDialogButton" type="button">Отмена</button></div>
