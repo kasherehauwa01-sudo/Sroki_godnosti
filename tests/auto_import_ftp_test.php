@@ -36,10 +36,24 @@ if ($file['filename'] !== 'Сроки.xlsx' || $file['content'] !== 'spreadsheet
 }
 if (($receivedConfig['password'] ?? '') !== 'secret') throw new RuntimeException('Пароль не передан FTP-загрузчику.');
 
+$deleted = null;
+deleteAutoImportFtpFile([
+    'ftp_host' => 'ftp.example.test', 'ftp_username' => 'user', 'ftp_password' => 'secret', 'ftp_directory' => '/upload',
+], 'Сроки.xlsx', static function (array $ftpConfig, string $remoteName) use (&$deleted): void {
+    $deleted = [$ftpConfig['directory'], $remoteName];
+});
+if ($deleted !== ['/upload', 'Сроки.xlsx']) throw new RuntimeException('После обработки должен удаляться тот же файл из того же FTP-каталога.');
+
 $source = file_get_contents(__DIR__ . '/../app/auto_importer.php');
 if (!is_string($source)) throw new RuntimeException('Не удалось прочитать автоимпортер.');
-foreach (['ftp_connect', 'ftp_ssl_connect', 'ftp_login', 'ftp_pasv', 'ftp_nlist', 'ftp_mdtm', 'ftp_fget', 'FTP_BINARY'] as $fragment) {
+foreach (['ftp_connect', 'ftp_ssl_connect', 'ftp_login', 'ftp_pasv', 'ftp_nlist', 'ftp_mdtm', 'ftp_fget', 'ftp_delete', 'FTP_BINARY'] as $fragment) {
     if (!str_contains($source, $fragment)) throw new RuntimeException('FTP-механизм не содержит: ' . $fragment);
+}
+$bulkPosition = strpos($source, '$result = bulkCreateBatches');
+$deletePosition = strpos($source, 'deleteAutoImportFtpFile(', $bulkPosition === false ? 0 : $bulkPosition);
+$completedPosition = strpos($source, "writeLog(\$pdo, 'auto_import_completed'", $bulkPosition === false ? 0 : $bulkPosition);
+if ($bulkPosition === false || $deletePosition === false || $completedPosition === false || !($bulkPosition < $deletePosition && $deletePosition < $completedPosition)) {
+    throw new RuntimeException('FTP-файл должен удаляться только после успешного импорта и до фиксации завершения.');
 }
 foreach (['SimpleImapClient', 'SEARCH UNSEEN', 'BODY.PEEK', 'RFC822', 'markAutoImportMessageSeen'] as $removedFragment) {
     if (str_contains($source, $removedFragment)) throw new RuntimeException('Старый IMAP-механизм не удалён: ' . $removedFragment);

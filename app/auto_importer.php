@@ -259,6 +259,10 @@ function runAutoImportAttempt(PDO $pdo, array $settings, int $attempt, string $t
 
     notifyMissingExpiryFilterProducts($pdo, $missingFilterCodes);
 
+    // Удаляем исходный файл только после успешного импорта и связанных проверок.
+    // При любой ошибке выше файл останется на FTP для следующей попытки.
+    deleteAutoImportFtpFile($settings, (string)($file['remote_name'] ?? $file['filename']));
+
     writeLog($pdo, 'auto_import_completed', [
         'attempt' => $attempt,
         'folder' => (string)$file['directory'],
@@ -307,7 +311,15 @@ function fetchAutoImportFtpFile(array $settings, ?callable $downloader = null): 
     $downloader ??= 'downloadLatestFtpSpreadsheet';
     $file = $downloader($config);
     if (!is_array($file) || empty($file['filename']) || !isset($file['content'])) throw new RuntimeException('Не удалось скачать файл с FTP.');
-    return $file + ['directory' => $config['directory']];
+    return $file + ['directory' => $config['directory'], 'remote_name' => (string)$file['filename']];
+}
+
+function deleteAutoImportFtpFile(array $settings, string $remoteName, ?callable $deleter = null): void
+{
+    if (trim($remoteName) === '') throw new RuntimeException('Не указано имя FTP-файла для удаления.');
+    $config = normalizeAutoImportFtpSettings($settings);
+    $deleter ??= 'deleteFtpSpreadsheet';
+    $deleter($config, $remoteName);
 }
 
 function selectLatestFtpSpreadsheet(array $files): ?array
@@ -341,10 +353,35 @@ function downloadLatestFtpSpreadsheet(array $config): array
             $content = stream_get_contents($stream);
             fclose($stream);
             if (!is_string($content) || $content === '') throw new RuntimeException('FTP вернул пустой файл.');
-            return ['filename' => basename((string)$selected['name']), 'content' => $content, 'directory' => $config['directory']];
+            return ['filename' => basename((string)$selected['name']), 'remote_name' => (string)$selected['name'], 'content' => $content, 'directory' => $config['directory']];
         } catch (Throwable $error) {
             $lastError = $error->getMessage();
             if ($lastError === 'На FTP не найден файл XLS/XLSX.') throw $error;
+            if ($attempt < $config['attempts'] && $config['retry_delay'] > 0) sleep($config['retry_delay']);
+        } finally {
+            if ($connection) { @ftp_close($connection); $connection = null; }
+        }
+    }
+    throw new RuntimeException($lastError);
+}
+
+function deleteFtpSpreadsheet(array $config, string $remoteName): void
+{
+    if (!function_exists('ftp_connect')) throw new RuntimeException('На сервере PHP не установлено расширение FTP.');
+    $connection = null;
+    $lastError = 'Не удалось удалить обработанный файл с FTP.';
+    for ($attempt = 1; $attempt <= $config['attempts']; $attempt++) {
+        try {
+            $connection = $config['protocol'] === 'FTPS'
+                ? @ftp_ssl_connect($config['host'], $config['port'], 30)
+                : @ftp_connect($config['host'], $config['port'], 30);
+            if (!$connection || !@ftp_login($connection, $config['username'], $config['password'])) throw new RuntimeException('Не удалось авторизоваться на FTP для удаления файла.');
+            @ftp_pasv($connection, true);
+            if (!@ftp_chdir($connection, $config['directory'])) throw new RuntimeException('Каталог FTP не найден при удалении файла.');
+            if (!@ftp_delete($connection, $remoteName)) throw new RuntimeException('Не удалось удалить обработанный файл с FTP.');
+            return;
+        } catch (Throwable $error) {
+            $lastError = $error->getMessage();
             if ($attempt < $config['attempts'] && $config['retry_delay'] > 0) sleep($config['retry_delay']);
         } finally {
             if ($connection) { @ftp_close($connection); $connection = null; }
