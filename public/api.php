@@ -293,7 +293,15 @@ function ensureSettingsSchema(PDO $pdo): void
         );
         $statement->execute([':table' => 'settings', ':column' => $column]);
         if ((int)$statement->fetchColumn() === 0) {
-            $pdo->exec($sql);
+            try {
+                $pdo->exec($sql);
+            } catch (PDOException $error) {
+                // Несколько параллельных API-запросов могут одновременно увидеть
+                // отсутствующую колонку. Ошибка 1060 означает, что другой запрос
+                // уже успел добавить её, поэтому инициализацию можно продолжить.
+                $driverCode = (int)($error->errorInfo[1] ?? 0);
+                if ($driverCode !== 1060 && (string)$error->getCode() !== '42S21') throw $error;
+            }
         }
     }
     // Старое фиксированное время автоимпорта переносим на расписание FTP.

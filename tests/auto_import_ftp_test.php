@@ -62,6 +62,7 @@ foreach (['SimpleImapClient', 'SEARCH UNSEEN', 'BODY.PEEK', 'RFC822', 'markAutoI
 $page = file_get_contents(__DIR__ . '/../public/index.php');
 $js = file_get_contents(__DIR__ . '/../public/assets/app.js');
 $api = file_get_contents(__DIR__ . '/../public/api.php');
+$migration = file_get_contents(__DIR__ . '/../database/migrations/20260827_ftp_auto_import.sql');
 foreach (['data-settings-tab="ftp"', 'ftpSettingsForm', 'ftpProtocol', 'ftpHost', 'ftpPort', 'ftpUsername', 'ftpPassword', 'ftpDirectory', 'ftpConnectionAttempts', 'ftpRetryDelay', 'testFtpConnectionButton'] as $fragment) {
     if (!str_contains((string)$page, $fragment)) throw new RuntimeException('Вкладка FTP не содержит: ' . $fragment);
 }
@@ -70,6 +71,12 @@ foreach (['collectFtpSettingsForm', 'testFtpConnection', 'test_ftp_connection'] 
 }
 foreach (['ftp_protocol', 'ftp_password_set', "':ftp_password' => true", "':auto_import_time' => '23:59'"] as $fragment) {
     if (!str_contains((string)$api, $fragment)) throw new RuntimeException('Настройки FTP backend не содержат: ' . $fragment);
+}
+if (substr_count((string)$migration, 'ADD COLUMN IF NOT EXISTS') !== 8) {
+    throw new RuntimeException('FTP-миграция должна безопасно выполняться повторно для всех восьми колонок.');
+}
+foreach (['1060', '42S21'] as $duplicateColumnCode) {
+    if (!str_contains((string)$api, $duplicateColumnCode)) throw new RuntimeException('Автомиграция не обрабатывает duplicate column: ' . $duplicateColumnCode);
 }
 
 echo "Проверки FTP-автозагрузки пройдены.\n";
