@@ -130,7 +130,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'event_catalog_stocks', 'purchase_recipients', 'email_notification_logs', 'catalog_health']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'run_notifications_now', 'catalog_sync_test']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_ftp_connection', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'run_notifications_now', 'catalog_sync_test']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -1746,7 +1746,7 @@ function formatHistoryAction(action) {
         expiry_notifications_failed: 'Ошибка уведомлений',
         auto_import_completed: 'Автозагрузка',
         auto_import_failed: 'Ошибка автозагрузки',
-        auto_import_not_found: 'Автозагрузка: письмо не найдено',
+        auto_import_not_found: 'Автозагрузка: файл FTP не найден',
         expiry_check_no_matches: 'Проверка сроков без совпадений',
         expiry_check_skipped: 'Проверка сроков пропущена',
         auto_import_started: 'Запуск автозагрузки',
@@ -2049,6 +2049,14 @@ function renderSettings() {
     setValueIfPresent('#notificationTime', settings.notification_time || '09:00');
     setValueIfPresent('#missingFilterEmails', (settings.missing_filter_emails || []).join('\n'));
     setValueIfPresent('#emailLogRetentionDays', settings.email_log_retention_days || 365);
+    setValueIfPresent('#ftpProtocol', settings.ftp_protocol || 'FTP');
+    setValueIfPresent('#ftpHost', settings.ftp_host || '');
+    setValueIfPresent('#ftpPort', settings.ftp_port || 21);
+    setValueIfPresent('#ftpUsername', settings.ftp_username || '');
+    setValueIfPresent('#ftpPassword', '');
+    setValueIfPresent('#ftpDirectory', settings.ftp_directory || '/');
+    setValueIfPresent('#ftpConnectionAttempts', settings.ftp_connection_attempts || 5);
+    setValueIfPresent('#ftpRetryDelay', settings.ftp_retry_delay ?? 3);
     renderPurchaseRecipients();
 
     const autoImport = settings.auto_import || {};
@@ -2313,11 +2321,41 @@ function collectSettingsForm() {
         notify_7_days: qs('#notify7').checked,
         notify_1_day: qs('#notify1').checked,
         notification_time: notificationTimeInput ? (notificationTimeInput.value || '09:00') : (state.settings && state.settings.notification_time ? state.settings.notification_time : '09:00'),
-        auto_import_time: '23:50',
+        auto_import_time: '23:59',
         emails,
         missing_filter_email: missingFilterEmails.join(','),
         email_log_retention_days: Number(qs('#emailLogRetentionDays')?.value || 365),
     };
+}
+
+function collectFtpSettingsForm() {
+    return {
+        auto_import_time: '23:59',
+        ftp_protocol: qs('#ftpProtocol').value,
+        ftp_host: qs('#ftpHost').value.trim(),
+        ftp_port: Number(qs('#ftpPort').value || 21),
+        ftp_username: qs('#ftpUsername').value.trim(),
+        ftp_password: qs('#ftpPassword').value,
+        ftp_directory: qs('#ftpDirectory').value.trim() || '/',
+        ftp_connection_attempts: Number(qs('#ftpConnectionAttempts').value || 5),
+        ftp_retry_delay: Number(qs('#ftpRetryDelay').value || 3),
+    };
+}
+
+async function testFtpConnection() {
+    const button = qs('#testFtpConnectionButton');
+    const status = qs('#testFtpConnectionStatus');
+    button.disabled = true;
+    status.textContent = 'Проверяю подключение к FTP...';
+    try {
+        await persistSettings(collectFtpSettingsForm());
+        const result = await api('test_ftp_connection', { settings_password: state.settingsPassword });
+        status.textContent = result.message;
+    } catch (error) {
+        status.textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
 }
 
 async function persistSettings(partial = null) {
@@ -2417,7 +2455,7 @@ async function sendTestMissingFilterNotification() {
     const button = qs('#testMissingFilterButton');
     const status = qs('#testMissingFilterStatus');
     button.disabled = true;
-    status.textContent = 'Сохраняю настройки и проверяю сегодняшнее письмо...';
+    status.textContent = 'Сохраняю настройки и проверяю файл на FTP...';
     showToast('Проверяю товары без фильтра «Срок годности»...');
 
     try {
@@ -2428,40 +2466,6 @@ async function sendTestMissingFilterNotification() {
         showToast(status.textContent);
     } catch (error) {
         await loadSettings().catch(() => {});
-        status.textContent = error.message;
-        showToast(error.message, true);
-    } finally {
-        button.disabled = false;
-    }
-}
-
-async function runTestAutoImport() {
-    const button = qs('#testAutoImportButton');
-    const status = qs('#testAutoImportStatus');
-    button.disabled = true;
-    status.textContent = 'Ищу письмо за сегодня и загружаю вложение...';
-    showToast('Запускаю тест автозагрузки...');
-
-    try {
-        await persistSettings();
-        const result = await api('test_auto_import', { settings_password: state.settingsPassword });
-        if (result.settings) {
-            state.settings = result.settings;
-            renderSettings();
-        } else {
-            await loadSettings();
-        }
-        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
-        status.textContent = result.message || 'Автозагрузка выполнена.';
-        showToast(status.textContent);
-        setTimeout(async () => {
-            try {
-                await Promise.all([loadSettings(), loadBatches(), loadHistory()]);
-            } catch (error) {
-                console.warn('Не удалось обновить данные после автозагрузки', error);
-            }
-        }, 7000);
-    } catch (error) {
         status.textContent = error.message;
         showToast(error.message, true);
     } finally {
@@ -3032,12 +3036,12 @@ function bindEvents() {
         clearTimeout(state.emailLogFilterTimer);
         state.emailLogFilterTimer = setTimeout(showNotificationLogs, 300);
     }));
-    qs('#testAutoImportButton').addEventListener('click', runTestAutoImport);
+    qs('#testFtpConnectionButton').addEventListener('click', testFtpConnection);
     qs('#showAutoImportLogsButton').addEventListener('click', showAutoImportLogs);
     qs('#closeAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
     qs('#confirmAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
     qs('#copyDeployCommandButton').addEventListener('click', copyDeployCommand);
-    qsa('#settingsForm input, #settingsForm textarea, #notificationSettingsForm input, #notificationSettingsForm textarea').forEach((field) => {
+    qsa('#settingsForm input, #settingsForm textarea, #notificationSettingsForm input, #notificationSettingsForm textarea, #ftpSettingsForm input, #ftpSettingsForm select').forEach((field) => {
         if (field.id !== 'deployCommandInput') {
             field.addEventListener('input', markSettingsDirty);
             field.addEventListener('change', markSettingsDirty);
@@ -3056,6 +3060,14 @@ function bindEvents() {
         event.preventDefault();
         try {
             await persistSettings();
+        } catch (error) {
+            showToast(error.message, true);
+        }
+    });
+    qs('#ftpSettingsForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+            await persistSettings(collectFtpSettingsForm());
         } catch (error) {
             showToast(error.message, true);
         }

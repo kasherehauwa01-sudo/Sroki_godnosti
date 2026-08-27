@@ -86,7 +86,7 @@ function handleApiRequest(): void
         $payload = readPayload();
         $action = (string)($_GET['action'] ?? $payload['action'] ?? 'list');
 
-        if (!in_array($action, ['test_auto_import', 'test_missing_filter_notification'], true)) {
+        if (!in_array($action, ['test_auto_import', 'test_ftp_connection', 'test_missing_filter_notification'], true)) {
             runApiBackgroundTask($pdo, 'auto_import', static fn () => runDueAutoImport($pdo));
         }
 
@@ -137,6 +137,7 @@ function handleApiRequest(): void
                 'catalog_sync_test' => runCatalogSyncTest($pdo, $payload),
                 'test_email_delivery' => testEmailDelivery($pdo, $payload),
                 'test_auto_import' => runTestAutoImport($pdo, $payload),
+                'test_ftp_connection' => testFtpConnection($pdo, $payload),
                 'test_missing_filter_notification' => runTestMissingFilterNotification($pdo, $payload),
                 'test_purchase_notification' => sendTestPurchaseNotification($pdo, $payload),
                 'test_stock_fill_notification' => sendTestStockFillNotification($pdo, $payload),
@@ -273,7 +274,15 @@ function ensureSettingsSchema(PDO $pdo): void
         'smtp_from_email' => "ALTER TABLE settings ADD COLUMN smtp_from_email VARCHAR(255) NULL AFTER smtp_password",
         'smtp_from_name' => "ALTER TABLE settings ADD COLUMN smtp_from_name VARCHAR(255) NULL AFTER smtp_from_email",
         'notification_time' => "ALTER TABLE settings ADD COLUMN notification_time CHAR(5) NOT NULL DEFAULT '09:00' AFTER smtp_from_name",
-        'auto_import_time' => "ALTER TABLE settings ADD COLUMN auto_import_time CHAR(5) NOT NULL DEFAULT '23:50' AFTER notification_time",
+        'auto_import_time' => "ALTER TABLE settings ADD COLUMN auto_import_time CHAR(5) NOT NULL DEFAULT '23:59' AFTER notification_time",
+        'ftp_protocol' => "ALTER TABLE settings ADD COLUMN ftp_protocol VARCHAR(8) NOT NULL DEFAULT 'FTP' AFTER auto_import_time",
+        'ftp_host' => "ALTER TABLE settings ADD COLUMN ftp_host VARCHAR(255) NULL AFTER ftp_protocol",
+        'ftp_port' => "ALTER TABLE settings ADD COLUMN ftp_port SMALLINT UNSIGNED NOT NULL DEFAULT 21 AFTER ftp_host",
+        'ftp_username' => "ALTER TABLE settings ADD COLUMN ftp_username VARCHAR(255) NULL AFTER ftp_port",
+        'ftp_password' => "ALTER TABLE settings ADD COLUMN ftp_password TEXT NULL AFTER ftp_username",
+        'ftp_directory' => "ALTER TABLE settings ADD COLUMN ftp_directory VARCHAR(1024) NOT NULL DEFAULT '/' AFTER ftp_password",
+        'ftp_connection_attempts' => "ALTER TABLE settings ADD COLUMN ftp_connection_attempts TINYINT UNSIGNED NOT NULL DEFAULT 5 AFTER ftp_directory",
+        'ftp_retry_delay' => "ALTER TABLE settings ADD COLUMN ftp_retry_delay SMALLINT UNSIGNED NOT NULL DEFAULT 3 AFTER ftp_connection_attempts",
         'missing_filter_email' => "ALTER TABLE settings ADD COLUMN missing_filter_email TEXT NULL AFTER auto_import_time",
         'email_log_retention_days' => "ALTER TABLE settings ADD COLUMN email_log_retention_days SMALLINT UNSIGNED NOT NULL DEFAULT 365 AFTER missing_filter_email",
     ];
@@ -287,6 +296,8 @@ function ensureSettingsSchema(PDO $pdo): void
             $pdo->exec($sql);
         }
     }
+    // Старое фиксированное время автоимпорта переносим на расписание FTP.
+    $pdo->exec("UPDATE settings SET auto_import_time = '23:59' WHERE auto_import_time = '23:50'");
     // Поле оставлено для совместимости со старыми установками, но все письма
     // используют единое утверждённое имя отправителя.
     $pdo->prepare("UPDATE settings SET smtp_from_name = :name WHERE id = 1 AND COALESCE(smtp_from_name, '') <> :name_check")
@@ -1909,6 +1920,14 @@ function runTestAutoImport(PDO $pdo, array $payload): array
     writeLog($pdo, 'auto_import_started', ['mode' => 'manual_test']);
 
     return runAutoImport($pdo, true);
+}
+
+function testFtpConnection(PDO $pdo, array $payload): array
+{
+    assertSettingsPassword($payload);
+    $settings = getRawSettings($pdo);
+    $file = fetchAutoImportFtpFile($settings);
+    return ['ok' => true, 'message' => 'Подключение выполнено. Найден файл: ' . $file['filename'] . ' (' . strlen($file['content']) . ' байт).'];
 }
 
 function runTestMissingFilterNotification(PDO $pdo, array $payload): array
@@ -4021,6 +4040,7 @@ function normalizeSettings(array $settings): array
     }
 
     $smtpPassword = (string)($settings['smtp_password'] ?? '');
+    $ftpPassword = (string)($settings['ftp_password'] ?? '');
 
     return [
         'id' => 1,
@@ -4043,7 +4063,16 @@ function normalizeSettings(array $settings): array
         'smtp_from_email' => (string)($settings['smtp_from_email'] ?? SENDER_EMAIL),
         'smtp_from_name' => notificationEmailFromName(),
         'notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? '09:00')),
-        'auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? '23:50'), '23:50'),
+        'auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? '23:59'), '23:59'),
+        'ftp_protocol' => strtoupper((string)($settings['ftp_protocol'] ?? 'FTP')) === 'FTPS' ? 'FTPS' : 'FTP',
+        'ftp_host' => (string)($settings['ftp_host'] ?? ''),
+        'ftp_port' => (int)($settings['ftp_port'] ?? 21),
+        'ftp_username' => (string)($settings['ftp_username'] ?? ''),
+        'ftp_password' => '',
+        'ftp_password_set' => $ftpPassword !== '',
+        'ftp_directory' => (string)($settings['ftp_directory'] ?? '/'),
+        'ftp_connection_attempts' => (int)($settings['ftp_connection_attempts'] ?? 5),
+        'ftp_retry_delay' => (int)($settings['ftp_retry_delay'] ?? 3),
         'auto_import' => getAutoImportInfo($GLOBALS['pdo_for_settings_info'] ?? null),
         'missing_filter_email' => (string)($settings['missing_filter_email'] ?? ''),
         'email_log_retention_days' => max(1, min(3650, (int)($settings['email_log_retention_days'] ?? 365))),
@@ -4081,6 +4110,10 @@ function saveSettings(PDO $pdo, array $settings): array
     if ($smtpPassword === '') {
         $smtpPassword = (string)($current['smtp_password'] ?? '');
     }
+    $ftpPassword = trim((string)($settings['ftp_password'] ?? ''));
+    if ($ftpPassword === '') $ftpPassword = (string)($current['ftp_password'] ?? '');
+    $ftpProtocol = strtoupper(trim((string)($settings['ftp_protocol'] ?? $current['ftp_protocol'] ?? 'FTP')));
+    if (!in_array($ftpProtocol, ['FTP', 'FTPS'], true)) $ftpProtocol = 'FTP';
 
     $params = [
         ':notify_0_days' => (int)(bool)$settings['notify_0_days'],
@@ -4099,7 +4132,15 @@ function saveSettings(PDO $pdo, array $settings): array
         ':smtp_from_email' => trim((string)($settings['smtp_from_email'] ?? $current['smtp_from_email'] ?? SENDER_EMAIL)),
         ':smtp_from_name' => notificationEmailFromName(),
         ':notification_time' => normalizeNotificationTime((string)($settings['notification_time'] ?? $current['notification_time'] ?? '09:00')),
-        ':auto_import_time' => normalizeNotificationTime((string)($settings['auto_import_time'] ?? $current['auto_import_time'] ?? '23:50'), '23:50'),
+        ':auto_import_time' => '23:59',
+        ':ftp_protocol' => $ftpProtocol,
+        ':ftp_host' => trim((string)($settings['ftp_host'] ?? $current['ftp_host'] ?? '')),
+        ':ftp_port' => max(1, min(65535, (int)($settings['ftp_port'] ?? $current['ftp_port'] ?? 21))),
+        ':ftp_username' => trim((string)($settings['ftp_username'] ?? $current['ftp_username'] ?? '')),
+        ':ftp_password' => $ftpPassword,
+        ':ftp_directory' => '/' . trim((string)($settings['ftp_directory'] ?? $current['ftp_directory'] ?? '/'), " /\t\n\r\0\x0B"),
+        ':ftp_connection_attempts' => max(1, min(20, (int)($settings['ftp_connection_attempts'] ?? $current['ftp_connection_attempts'] ?? 5))),
+        ':ftp_retry_delay' => max(0, min(300, (int)($settings['ftp_retry_delay'] ?? $current['ftp_retry_delay'] ?? 3))),
         ':missing_filter_email' => implode(',', splitEmails((string)($settings['missing_filter_email'] ?? $current['missing_filter_email'] ?? ''))),
         ':email_log_retention_days' => max(1, min(3650, (int)($settings['email_log_retention_days'] ?? $current['email_log_retention_days'] ?? 365))),
     ];
@@ -4123,12 +4164,20 @@ function saveSettings(PDO $pdo, array $settings): array
              smtp_from_name = :smtp_from_name,
              notification_time = :notification_time,
              auto_import_time = :auto_import_time,
+             ftp_protocol = :ftp_protocol,
+             ftp_host = :ftp_host,
+             ftp_port = :ftp_port,
+             ftp_username = :ftp_username,
+             ftp_password = :ftp_password,
+             ftp_directory = :ftp_directory,
+             ftp_connection_attempts = :ftp_connection_attempts,
+             ftp_retry_delay = :ftp_retry_delay,
              missing_filter_email = :missing_filter_email,
              email_log_retention_days = :email_log_retention_days
          WHERE id = 1'
     );
     $statement->execute($params);
-    writeLog($pdo, 'settings', array_diff_key($params, [':smtp_password' => true]));
+    writeLog($pdo, 'settings', array_diff_key($params, [':smtp_password' => true, ':ftp_password' => true]));
 
     return ['ok' => true, 'settings' => getSettings($pdo)];
 }
@@ -4249,7 +4298,7 @@ function autoImportLogText(string $action, array $payload): string
 {
     if ($action === 'auto_import_started') {
         return ($payload['mode'] ?? '') === 'daily_auto'
-            ? sprintf('Ежедневная автозагрузка запущена по расписанию %s МСК.', (string)($payload['time'] ?? '23:50'))
+            ? sprintf('Ежедневная FTP-автозагрузка запущена по расписанию %s МСК.', (string)($payload['time'] ?? '23:59'))
             : 'Ручной тест автозагрузки запущен.';
     }
     if ($action === 'auto_import_completed') {
