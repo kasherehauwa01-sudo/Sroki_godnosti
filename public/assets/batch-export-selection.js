@@ -16,7 +16,7 @@
         const render = () => {
             const query = dialog.querySelector('.batch-export-search').value.trim().toLocaleLowerCase('ru-RU');
             const visible = items.filter((batch) => [batch.article, batch.code, batch.name].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(query)));
-            list.innerHTML = visible.map((batch) => `<label class="batch-export-row"><input type="checkbox" data-batch-id="${batch.id}" ${selectedIds.has(batch.id) ? 'checked' : ''}><span>${escapeHtml(batch.article || '—')} | ${escapeHtml(batch.code || '—')} | ${escapeHtml(batch.name || '—')} | ${escapeHtml(batch.expiry_date || '—')}</span></label>`).join('') || '<p class="subtitle">Товары не найдены.</p>';
+            list.innerHTML = visible.map((batch) => `<label class="batch-export-row"><input type="checkbox" data-batch-id="${batch.id}" ${selectedIds.has(batch.id) ? 'checked' : ''}><span>${escapeHtml(batch.article || '—')} | ${escapeHtml(batch.code || '—')} | ${escapeHtml(batch.name || '—')} | ${escapeHtml(batch.expiry_date || batch.expiryDate || '—')}</span></label>`).join('') || '<p class="subtitle">Товары не найдены.</p>';
             list.querySelectorAll('[data-batch-id]').forEach((checkbox) => checkbox.addEventListener('change', () => { const id = Number(checkbox.dataset.batchId); checkbox.checked ? selectedIds.add(id) : selectedIds.delete(id); updateState(); })); updateState();
         };
         selectAll.addEventListener('change', () => { selectAll.checked ? items.forEach((batch) => selectedIds.add(batch.id)) : selectedIds.clear(); render(); });
