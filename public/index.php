@@ -11,7 +11,7 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260828-01">
+    <link rel="stylesheet" href="assets/styles.css?v=20260828-02">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script defer src="assets/batch-export-selection.js?v=20260825-01"></script>
     <script defer src="assets/app.js?v=20260828-01"></script>
@@ -240,23 +240,25 @@ declare(strict_types=1);
                 </div>
             </form>
 
-            <form class="settings-grid settings-subpanel" data-settings-panel="notifications" id="notificationSettingsForm" hidden>
-                <div class="card form">
+            <form class="settings-grid settings-subpanel notification-settings-panel" data-settings-panel="notifications" id="notificationSettingsForm" hidden>
+                <div class="card form notification-schedule-card">
                     <h3>Уведомления</h3>
-                    <label class="checkbox-row"><input id="notify0" name="notify_0_days" type="checkbox"> В день просрочки</label>
-                    <label class="checkbox-row"><input id="notify180" name="notify_180_days" type="checkbox"> За 180 дней</label>
-                    <label class="checkbox-row"><input id="notify90" name="notify_90_days" type="checkbox"> За 90 дней</label>
-                    <label class="checkbox-row"><input id="notify60" name="notify_60_days" type="checkbox"> За 60 дней</label>
-                    <label class="checkbox-row"><input id="notify30" name="notify_30_days" type="checkbox"> За 30 дней</label>
-                    <label class="checkbox-row"><input id="notify15" name="notify_15_days" type="checkbox"> За 15 дней</label>
-                    <label class="checkbox-row"><input id="notify7" name="notify_7_days" type="checkbox"> За 7 дней</label>
-                    <label class="checkbox-row"><input id="notify1" name="notify_1_day" type="checkbox"> За 1 день</label>
-                    <label>Время отправки уведомлений
-                        <input id="notificationTime" name="notification_time" type="time" value="09:00">
-                    </label>
-                    <div class="settings-actions">
-                        <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
-                        <button class="ghost-button" id="runNotificationsNowButton" formnovalidate type="button">Запустить отправку</button>
+                    <div class="notification-rules-grid">
+                        <label class="checkbox-row"><input id="notify0" name="notify_0_days" type="checkbox"> В день просрочки</label>
+                        <label class="checkbox-row"><input id="notify180" name="notify_180_days" type="checkbox"> За 180 дней</label>
+                        <label class="checkbox-row"><input id="notify90" name="notify_90_days" type="checkbox"> За 90 дней</label>
+                        <label class="checkbox-row"><input id="notify60" name="notify_60_days" type="checkbox"> За 60 дней</label>
+                        <label class="checkbox-row"><input id="notify30" name="notify_30_days" type="checkbox"> За 30 дней</label>
+                        <label class="checkbox-row"><input id="notify15" name="notify_15_days" type="checkbox"> За 15 дней</label>
+                        <label class="checkbox-row"><input id="notify7" name="notify_7_days" type="checkbox"> За 7 дней</label>
+                        <label class="checkbox-row"><input id="notify1" name="notify_1_day" type="checkbox"> За 1 день</label>
+                    </div>
+                    <div class="notification-schedule-controls">
+                        <label>Время отправки<input id="notificationTime" name="notification_time" type="time" value="09:00"></label>
+                        <div class="settings-actions">
+                            <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест</button>
+                            <button class="ghost-button" id="runNotificationsNowButton" formnovalidate type="button">Запустить</button>
+                        </div>
                     </div>
                     <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
                 </div>
@@ -297,7 +299,7 @@ declare(strict_types=1);
 
                 <div class="card form missing-filter-card">
                     <h3>Уведомления «Товар без фильтров»</h3>
-                    <label>Получатели<textarea id="missingFilterEmails" rows="5" placeholder="ivan@mail.ru&#10;petrov@mail.ru"></textarea></label>
+                    <label>Получатели<textarea id="missingFilterEmails" rows="3" placeholder="ivan@mail.ru&#10;petrov@mail.ru"></textarea></label>
                     <p class="subtitle">Укажите каждый email с новой строки или через запятую.</p>
                     <div class="settings-actions">
                         <button class="ghost-button" id="testMissingFilterButton" formnovalidate type="button">Тест</button>

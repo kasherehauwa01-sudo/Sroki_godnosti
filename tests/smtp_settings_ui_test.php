@@ -15,6 +15,10 @@ foreach (['settings.smtp_host', 'settings.smtp_password_set', 'smtp_security:', 
 foreach (['.settings-smtp-card', '.smtp-settings-grid', '.smtp-settings-status'] as $fragment) {
     if (!str_contains((string)$styles, $fragment)) throw new RuntimeException('Оформление SMTP-блока не содержит: ' . $fragment);
 }
+foreach (['notification-settings-panel', 'notification-rules-grid', 'notification-schedule-controls', 'padding: 14px 16px', 'min-height: 36px'] as $fragment) {
+    $source = str_starts_with($fragment, 'notification-') ? (string)$page : (string)$styles;
+    if (!str_contains($source, $fragment)) throw new RuntimeException('Компактная вкладка уведомлений не содержит: ' . $fragment);
+}
 foreach (["'smtp_password' => ''", "'smtp_password_set' =>", "[':smtp_password' => true"] as $fragment) {
     if (!str_contains((string)$api, $fragment)) throw new RuntimeException('Backend небезопасно обрабатывает SMTP-пароль: ' . $fragment);
 }
