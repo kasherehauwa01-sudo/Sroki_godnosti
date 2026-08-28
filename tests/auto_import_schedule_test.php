@@ -14,7 +14,7 @@ $pdo->exec(
     )'
 );
 
-$scheduledAt = new DateTimeImmutable('2026-08-09 23:50:00', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+$scheduledAt = new DateTimeImmutable('2026-08-09 23:59:00', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
 $now = new DateTimeImmutable('2026-08-10 01:00:00', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
 
 $insert = $pdo->prepare('INSERT INTO logs (action, payload, created_at) VALUES (:action, :payload, :created_at)');
@@ -31,7 +31,7 @@ if (shouldRunAutoImportNow($pdo, $scheduledAt, $now)) {
     throw new RuntimeException('После успешной загрузки повторная попытка в том же окне расписания запрещена.');
 }
 
-$nextScheduledAt = new DateTimeImmutable('2026-08-10 23:50:00', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
+$nextScheduledAt = new DateTimeImmutable('2026-08-10 23:59:00', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
 $nextNow = new DateTimeImmutable('2026-08-10 23:51:00', new DateTimeZone(AUTO_IMPORT_TIMEZONE));
 if (!shouldRunAutoImportNow($pdo, $nextScheduledAt, $nextNow)) {
     throw new RuntimeException('В следующем окне расписания автозагрузка должна снова запускаться.');
@@ -48,5 +48,6 @@ if (autoImportTimeFromSettings(['auto_import_time' => '21:15']) !== '21:15') {
 if (autoImportTimeFromSettings(['auto_import_time' => '99:99']) !== AUTO_IMPORT_DEFAULT_TIME) {
     throw new RuntimeException('Некорректное время должно заменяться значением по умолчанию.');
 }
+if (AUTO_IMPORT_DEFAULT_TIME !== '23:59') throw new RuntimeException('FTP-автозагрузка должна запускаться в 23:59.');
 
 echo "Проверки расписания автозагрузки пройдены.\n";

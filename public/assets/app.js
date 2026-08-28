@@ -130,7 +130,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'event_catalog_stocks', 'purchase_recipients', 'email_notification_logs', 'catalog_health']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'run_notifications_now', 'catalog_sync_test']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_ftp_connection', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'run_notifications_now', 'catalog_sync_test']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -1288,6 +1288,53 @@ function downloadEventCatalogStocks() {
     });
 }
 
+function openEventExportDialog() {
+    if (!state.selectedEventDetails) return;
+    qs('#eventExportDialog').showModal();
+}
+
+function closeEventExportDialog() {
+    qs('#eventExportDialog').close();
+}
+
+async function downloadSelectedEventBatches(selectedBatchIds) {
+    let response;
+    try {
+        response = await fetch('api.php?action=expiry_event_primary_invoice_xls', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ event_id: state.selectedEventDetails.id, selected_batch_ids: selectedBatchIds }),
+        });
+    } catch (_) {
+        throw new Error('Не удалось скачать файл');
+    }
+    if (!response.ok) {
+        let result = {};
+        try { result = await response.json(); } catch (_) { /* Ответ мог быть не в JSON. */ }
+        throw new Error(result.error || 'Не удалось сформировать ZIP');
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1];
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = encodedName ? decodeURIComponent(encodedName) : 'Первичные счета.zip';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+}
+
+function openEventPrimaryInvoiceSelection() {
+    closeEventExportDialog();
+    const event = state.selectedEventDetails;
+    if (!event) {
+        showToast('Событие не найдено', true);
+        return;
+    }
+    window.openBatchExportSelection({ batches: event.batches || [], onDownload: downloadSelectedEventBatches });
+}
+
 function closeEventBatchesDialog() {
     qs('#eventBatchesDialog').close();
     state.selectedEventDetails = null;
@@ -1699,7 +1746,7 @@ function formatHistoryAction(action) {
         expiry_notifications_failed: 'Ошибка уведомлений',
         auto_import_completed: 'Автозагрузка',
         auto_import_failed: 'Ошибка автозагрузки',
-        auto_import_not_found: 'Автозагрузка: письмо не найдено',
+        auto_import_not_found: 'Автозагрузка: файл FTP не найден',
         expiry_check_no_matches: 'Проверка сроков без совпадений',
         expiry_check_skipped: 'Проверка сроков пропущена',
         auto_import_started: 'Запуск автозагрузки',
@@ -2000,8 +2047,28 @@ function renderSettings() {
     setCheckedIfPresent('#notify1', Boolean(settings.notify_1_day));
     setValueIfPresent('#notificationEmails', (settings.emails || []).join('\n'));
     setValueIfPresent('#notificationTime', settings.notification_time || '09:00');
+    setValueIfPresent('#smtpHost', settings.smtp_host || 'smtp.yandex.ru');
+    setValueIfPresent('#smtpPort', settings.smtp_port || 465);
+    setValueIfPresent('#smtpSecurity', String(settings.smtp_security || (Number(settings.smtp_port || 465) === 465 ? 'SSL' : 'STARTTLS')).toLowerCase());
+    setValueIfPresent('#smtpUsername', settings.smtp_username || '');
+    setValueIfPresent('#smtpPassword', '');
+    setValueIfPresent('#smtpFromEmail', settings.smtp_from_email || '');
+    setValueIfPresent('#smtpFromName', settings.smtp_from_name || '');
+    const smtpStatus = qs('#smtpSettingsStatus');
+    if (smtpStatus) {
+        smtpStatus.textContent = settings.smtp_password_set ? 'Настроено' : 'Не настроено';
+        smtpStatus.classList.toggle('not-configured', !settings.smtp_password_set);
+    }
     setValueIfPresent('#missingFilterEmails', (settings.missing_filter_emails || []).join('\n'));
     setValueIfPresent('#emailLogRetentionDays', settings.email_log_retention_days || 365);
+    setValueIfPresent('#ftpProtocol', settings.ftp_protocol || 'FTP');
+    setValueIfPresent('#ftpHost', settings.ftp_host || '');
+    setValueIfPresent('#ftpPort', settings.ftp_port || 21);
+    setValueIfPresent('#ftpUsername', settings.ftp_username || '');
+    setValueIfPresent('#ftpPassword', '');
+    setValueIfPresent('#ftpDirectory', settings.ftp_directory || '/');
+    setValueIfPresent('#ftpConnectionAttempts', settings.ftp_connection_attempts || 5);
+    setValueIfPresent('#ftpRetryDelay', settings.ftp_retry_delay ?? 3);
     renderPurchaseRecipients();
 
     const autoImport = settings.auto_import || {};
@@ -2266,11 +2333,47 @@ function collectSettingsForm() {
         notify_7_days: qs('#notify7').checked,
         notify_1_day: qs('#notify1').checked,
         notification_time: notificationTimeInput ? (notificationTimeInput.value || '09:00') : (state.settings && state.settings.notification_time ? state.settings.notification_time : '09:00'),
-        auto_import_time: '23:50',
+        smtp_host: qs('#smtpHost')?.value.trim() || state.settings?.smtp_host || 'smtp.yandex.ru',
+        smtp_port: Number(qs('#smtpPort')?.value || state.settings?.smtp_port || 465),
+        smtp_security: qs('#smtpSecurity')?.value === 'ssl' ? 'SSL' : 'STARTTLS',
+        smtp_username: qs('#smtpUsername')?.value.trim() || state.settings?.smtp_username || '',
+        smtp_password: qs('#smtpPassword')?.value || '',
+        smtp_from_email: qs('#smtpFromEmail')?.value.trim() || state.settings?.smtp_from_email || '',
+        auto_import_time: '23:59',
         emails,
         missing_filter_email: missingFilterEmails.join(','),
         email_log_retention_days: Number(qs('#emailLogRetentionDays')?.value || 365),
     };
+}
+
+function collectFtpSettingsForm() {
+    return {
+        auto_import_time: '23:59',
+        ftp_protocol: qs('#ftpProtocol').value,
+        ftp_host: qs('#ftpHost').value.trim(),
+        ftp_port: Number(qs('#ftpPort').value || 21),
+        ftp_username: qs('#ftpUsername').value.trim(),
+        ftp_password: qs('#ftpPassword').value,
+        ftp_directory: qs('#ftpDirectory').value.trim() || '/',
+        ftp_connection_attempts: Number(qs('#ftpConnectionAttempts').value || 5),
+        ftp_retry_delay: Number(qs('#ftpRetryDelay').value || 3),
+    };
+}
+
+async function testFtpConnection() {
+    const button = qs('#testFtpConnectionButton');
+    const status = qs('#testFtpConnectionStatus');
+    button.disabled = true;
+    status.textContent = 'Проверяю подключение к FTP...';
+    try {
+        await persistSettings(collectFtpSettingsForm());
+        const result = await api('test_ftp_connection', { settings_password: state.settingsPassword });
+        status.textContent = result.message;
+    } catch (error) {
+        status.textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
 }
 
 async function persistSettings(partial = null) {
@@ -2287,6 +2390,16 @@ function toggleSmtpPasswordVisibility() {
     const button = qs('#toggleSmtpPasswordButton');
     input.type = input.type === 'password' ? 'text' : 'password';
     button.textContent = input.type === 'password' ? 'Показать' : 'Скрыть';
+}
+
+function syncSmtpSecurityPort() {
+    const security = qs('#smtpSecurity');
+    const port = qs('#smtpPort');
+    if (!security || !port) return;
+    const currentPort = Number(port.value || 0);
+    if (security.value === 'ssl' && (currentPort === 0 || currentPort === 587)) port.value = '465';
+    if (security.value === 'starttls' && (currentPort === 0 || currentPort === 465)) port.value = '587';
+    markSettingsDirty();
 }
 
 
@@ -2370,7 +2483,7 @@ async function sendTestMissingFilterNotification() {
     const button = qs('#testMissingFilterButton');
     const status = qs('#testMissingFilterStatus');
     button.disabled = true;
-    status.textContent = 'Сохраняю настройки и проверяю сегодняшнее письмо...';
+    status.textContent = 'Сохраняю настройки и проверяю файл на FTP...';
     showToast('Проверяю товары без фильтра «Срок годности»...');
 
     try {
@@ -2381,40 +2494,6 @@ async function sendTestMissingFilterNotification() {
         showToast(status.textContent);
     } catch (error) {
         await loadSettings().catch(() => {});
-        status.textContent = error.message;
-        showToast(error.message, true);
-    } finally {
-        button.disabled = false;
-    }
-}
-
-async function runTestAutoImport() {
-    const button = qs('#testAutoImportButton');
-    const status = qs('#testAutoImportStatus');
-    button.disabled = true;
-    status.textContent = 'Ищу письмо за сегодня и загружаю вложение...';
-    showToast('Запускаю тест автозагрузки...');
-
-    try {
-        await persistSettings();
-        const result = await api('test_auto_import', { settings_password: state.settingsPassword });
-        if (result.settings) {
-            state.settings = result.settings;
-            renderSettings();
-        } else {
-            await loadSettings();
-        }
-        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
-        status.textContent = result.message || 'Автозагрузка выполнена.';
-        showToast(status.textContent);
-        setTimeout(async () => {
-            try {
-                await Promise.all([loadSettings(), loadBatches(), loadHistory()]);
-            } catch (error) {
-                console.warn('Не удалось обновить данные после автозагрузки', error);
-            }
-        }, 7000);
-    } catch (error) {
         status.textContent = error.message;
         showToast(error.message, true);
     } finally {
@@ -2711,8 +2790,42 @@ function closeRegistryExportDialog() {
 
 function downloadRegistryExport(format) {
     closeRegistryExportDialog();
-    const extension = format === 'primary_invoice' ? 'xls' : 'xlsx';
-    exportXlsx(activeRowsForExport(state.filteredBatches), `reestr_filtr.${extension}`, batchExportMapper);
+    if (format === 'primary_invoice') {
+        window.openBatchExportSelection({
+            batches: activeRowsForExport(state.filteredBatches),
+            onDownload: downloadSelectedRegistryBatches,
+        });
+        return;
+    }
+    exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper);
+}
+
+async function downloadSelectedRegistryBatches(selectedBatchIds) {
+    let response;
+    try {
+        response = await fetch('api.php?action=registry_primary_invoice_xls', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selected_batch_ids: selectedBatchIds }),
+        });
+    } catch (_) {
+        throw new Error('Не удалось скачать файл');
+    }
+    if (!response.ok) {
+        let result = {};
+        try { result = await response.json(); } catch (_) { /* Ответ мог быть не в JSON. */ }
+        throw new Error(result.error || 'Не удалось сформировать ZIP');
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1];
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = encodedName ? decodeURIComponent(encodedName) : 'Первичные счета.zip';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
 }
 
 function formatHistoryBatchList(batches) {
@@ -2886,7 +2999,11 @@ function bindEvents() {
     }));
     qs('#closeEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
     qs('#confirmEventBatchesDialogButton').addEventListener('click', closeEventBatchesDialog);
-    qs('#downloadEventCatalogStocksButton').addEventListener('click', downloadEventCatalogStocks);
+    qs('#downloadEventCatalogStocksButton').addEventListener('click', openEventExportDialog);
+    qs('#closeEventExportDialogButton').addEventListener('click', closeEventExportDialog);
+    qs('#cancelEventExportDialogButton').addEventListener('click', closeEventExportDialog);
+    qs('#downloadEventViewButton').addEventListener('click', () => { closeEventExportDialog(); downloadEventCatalogStocks(); });
+    qs('#downloadEventPrimaryInvoiceButton').addEventListener('click', openEventPrimaryInvoiceSelection);
 
     qs('#filterSearch').addEventListener('input', () => {
         updateRegistrySearchClearButton();
@@ -2929,6 +3046,8 @@ function bindEvents() {
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
     qs('#runNotificationsNowButton').addEventListener('click', runNotificationsNow);
     qs('#testEmailDeliveryButton').addEventListener('click', testEmailDelivery);
+    qs('#toggleSmtpPasswordButton').addEventListener('click', toggleSmtpPasswordVisibility);
+    qs('#smtpSecurity').addEventListener('change', syncSmtpSecurityPort);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
     qs('#openCatalogSyncTestButton').addEventListener('click', openCatalogSyncTestDialog);
     qs('#catalogSyncTestForm').addEventListener('submit', submitCatalogSyncTest);
@@ -2947,12 +3066,12 @@ function bindEvents() {
         clearTimeout(state.emailLogFilterTimer);
         state.emailLogFilterTimer = setTimeout(showNotificationLogs, 300);
     }));
-    qs('#testAutoImportButton').addEventListener('click', runTestAutoImport);
+    qs('#testFtpConnectionButton').addEventListener('click', testFtpConnection);
     qs('#showAutoImportLogsButton').addEventListener('click', showAutoImportLogs);
     qs('#closeAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
     qs('#confirmAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
     qs('#copyDeployCommandButton').addEventListener('click', copyDeployCommand);
-    qsa('#settingsForm input, #settingsForm textarea, #notificationSettingsForm input, #notificationSettingsForm textarea').forEach((field) => {
+    qsa('#settingsForm input, #settingsForm textarea, #notificationSettingsForm input, #notificationSettingsForm textarea, #notificationSettingsForm select, #ftpSettingsForm input, #ftpSettingsForm select').forEach((field) => {
         if (field.id !== 'deployCommandInput') {
             field.addEventListener('input', markSettingsDirty);
             field.addEventListener('change', markSettingsDirty);
@@ -2971,6 +3090,14 @@ function bindEvents() {
         event.preventDefault();
         try {
             await persistSettings();
+        } catch (error) {
+            showToast(error.message, true);
+        }
+    });
+    qs('#ftpSettingsForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+            await persistSettings(collectFtpSettingsForm());
         } catch (error) {
             showToast(error.message, true);
         }

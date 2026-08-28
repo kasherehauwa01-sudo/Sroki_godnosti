@@ -142,6 +142,23 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .settings-save-bar { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
+.notification-settings-panel { gap: 12px; }
+.notification-settings-panel > .card { padding: 14px 16px; gap: 10px; border-radius: 16px; }
+.notification-settings-panel h3 { margin: 0; }
+.notification-settings-panel label { gap: 5px; }
+.notification-settings-panel input, .notification-settings-panel select, .notification-settings-panel textarea { padding: 9px 10px; }
+.notification-settings-panel button { min-height: 36px; padding: 8px 12px; }
+.notification-schedule-card { align-content: start; }
+.notification-rules-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; }
+.notification-rules-grid .checkbox-row { font-size: 14px; }
+.notification-schedule-controls { display: grid; grid-template-columns: minmax(145px, 190px) 1fr; gap: 10px; align-items: end; }
+.settings-smtp-card { grid-column: 1 / -1; }
+.smtp-settings-heading { margin-bottom: 0; }
+.smtp-settings-status { align-self: start; padding: 6px 10px; border-radius: 999px; color: #166534; background: #dcfce7; font-size: 12px; font-weight: 800; }
+.smtp-settings-status.not-configured { color: #92400e; background: #fef3c7; }
+.smtp-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 12px; }
+.smtp-settings-grid .smtp-field-wide { grid-column: 1 / -1; }
+.smtp-settings-actions { padding-top: 10px; border-top: 1px solid var(--border); }
 .checkbox-row { display: flex; grid-template-columns: none; align-items: center; gap: 10px; font-weight: 700; }
 .checkbox-row input { width: auto; }
 .recount-select-all-row { padding-bottom: 12px; border-bottom: 1px solid var(--border); }
@@ -158,7 +175,11 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
     .settings-grid { grid-template-columns: 1fr; }
     .password-field, .copy-field { flex-direction: column; align-items: stretch; }
     .system-info { grid-template-columns: 1fr; }
+    .smtp-settings-grid { grid-template-columns: 1fr; }
+    .smtp-settings-grid .smtp-field-wide { grid-column: auto; }
+    .notification-schedule-controls { grid-template-columns: 1fr; }
 }
+@media (max-width: 520px) { .notification-rules-grid { grid-template-columns: 1fr; } }
 .notification-history-list {
     max-height: 320px;
     overflow-y: auto;
@@ -234,6 +255,12 @@ tr.indicator-purple td { background: var(--purple); font-weight: 800; }
 .purchase-event-export-option:hover { border-color: var(--primary); background: #eef4ff; }
 .purchase-event-export-option strong { font-size: 16px; }
 .purchase-event-export-option small { color: var(--muted); font-weight: 500; }
+.modal.batch-export-selection-dialog { inset: 8px; box-sizing: border-box; width: calc(100vw - 16px); min-width: calc(100vw - 16px); max-width: calc(100vw - 16px); margin: auto; }
+.batch-export-selection-card { box-sizing: border-box; display: grid; grid-template-rows: auto auto auto minmax(120px, 1fr) auto auto; width: 100%; max-width: none; max-height: calc(100vh - 16px); overflow: hidden; }
+.batch-export-list { min-height: 120px; overflow: auto; border: 1px solid var(--border); border-radius: 12px; }
+.batch-export-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 12px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.batch-export-row:last-child { border-bottom: 0; }
+.batch-export-count { margin: 0; color: var(--muted); font-weight: 700; }
 .purchase-event-table-wrap { width: 100%; max-width: 100%; height: calc(100vh - 190px); max-height: calc(100vh - 190px); overflow: auto; }
 .purchase-event-table { min-width: 980px; }
 .purchase-event-table th { position: sticky; top: 0; z-index: 3; }

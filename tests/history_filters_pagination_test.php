@@ -29,7 +29,7 @@ if (!str_contains($javascript, "return actions[action] || (action ? 'Служе�
     throw new RuntimeException('Неизвестные англоязычные действия не должны показываться пользователю как есть.');
 }
 foreach ([
-    "auto_import_not_found: 'Автозагрузка: письмо не найдено'",
+    "auto_import_not_found: 'Автозагрузка: файл FTP не найден'",
     "auto_write_off: 'Автосписание'",
     "zero_stock_auto_status: 'Автоноль'",
 ] as $translatedAction) {

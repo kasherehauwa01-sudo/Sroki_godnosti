@@ -51,12 +51,21 @@ CREATE TABLE IF NOT EXISTS settings (
     notification_email TEXT NULL,
     smtp_host VARCHAR(255) NULL,
     smtp_port SMALLINT UNSIGNED NULL,
+    smtp_security VARCHAR(16) NOT NULL DEFAULT 'STARTTLS',
     smtp_username VARCHAR(255) NULL,
     smtp_password TEXT NULL,
     smtp_from_email TEXT NULL,
     smtp_from_name VARCHAR(255) NULL,
     notification_time CHAR(5) NOT NULL DEFAULT '09:00',
-    auto_import_time CHAR(5) NOT NULL DEFAULT '23:50',
+    auto_import_time CHAR(5) NOT NULL DEFAULT '23:59',
+    ftp_protocol VARCHAR(8) NOT NULL DEFAULT 'FTP',
+    ftp_host VARCHAR(255) NULL,
+    ftp_port SMALLINT UNSIGNED NOT NULL DEFAULT 21,
+    ftp_username VARCHAR(255) NULL,
+    ftp_password TEXT NULL,
+    ftp_directory VARCHAR(1024) NOT NULL DEFAULT '/',
+    ftp_connection_attempts TINYINT UNSIGNED NOT NULL DEFAULT 5,
+    ftp_retry_delay SMALLINT UNSIGNED NOT NULL DEFAULT 3,
     missing_filter_email TEXT NULL,
     email_log_retention_days SMALLINT UNSIGNED NOT NULL DEFAULT 365,
     PRIMARY KEY (id)
@@ -87,15 +96,24 @@ INSERT INTO settings (
     notification_email,
     smtp_host,
     smtp_port,
+    smtp_security,
     smtp_username,
     smtp_password,
     smtp_from_email,
     smtp_from_name,
     notification_time,
     auto_import_time,
+    ftp_protocol,
+    ftp_host,
+    ftp_port,
+    ftp_username,
+    ftp_password,
+    ftp_directory,
+    ftp_connection_attempts,
+    ftp_retry_delay,
     missing_filter_email,
     email_log_retention_days
-) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Отдел претензий | Контроль сроков годности', '09:00', '23:50', NULL, 365)
+) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'STARTTLS', 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Отдел претензий | Контроль сроков годности', '09:00', '23:59', 'FTP', NULL, 21, NULL, NULL, '/', 5, 3, NULL, 365)
 ON DUPLICATE KEY UPDATE id = id;
 
 CREATE TABLE IF NOT EXISTS email_notification_log (

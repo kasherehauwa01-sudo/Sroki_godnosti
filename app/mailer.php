@@ -247,7 +247,8 @@ function sendSmtpEmail(PDO $pdo, array $emails, string $subject, string $body, a
         throw new RuntimeException('В настройках SMTP не указан пароль.');
     }
 
-    $mode = $port === 465 ? 'SSL' : 'STARTTLS';
+    $configuredMode = strtoupper(trim((string)($settings['smtp_security'] ?? '')));
+    $mode = in_array($configuredMode, ['SSL', 'STARTTLS'], true) ? $configuredMode : ($port === 465 ? 'SSL' : 'STARTTLS');
     $transportHost = $mode === 'SSL' ? 'ssl://' . $host : $host;
     $transcript = [];
 
