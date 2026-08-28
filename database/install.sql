@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS settings (
     notification_email TEXT NULL,
     smtp_host VARCHAR(255) NULL,
     smtp_port SMALLINT UNSIGNED NULL,
+    smtp_security VARCHAR(16) NOT NULL DEFAULT 'STARTTLS',
     smtp_username VARCHAR(255) NULL,
     smtp_password TEXT NULL,
     smtp_from_email TEXT NULL,
@@ -95,6 +96,7 @@ INSERT INTO settings (
     notification_email,
     smtp_host,
     smtp_port,
+    smtp_security,
     smtp_username,
     smtp_password,
     smtp_from_email,
@@ -111,7 +113,7 @@ INSERT INTO settings (
     ftp_retry_delay,
     missing_filter_email,
     email_log_retention_days
-) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Отдел претензий | Контроль сроков годности', '09:00', '23:59', 'FTP', NULL, 21, NULL, NULL, '/', 5, 3, NULL, 365)
+) VALUES (1, 0, 0, 0, 1, 1, 1, 0, 0, 'vr-vk@yandex.ru', 'smtp.yandex.ru', 587, 'STARTTLS', 'vr-vk@yandex.ru', NULL, 'vr-vk@yandex.ru', 'Отдел претензий | Контроль сроков годности', '09:00', '23:59', 'FTP', NULL, 21, NULL, NULL, '/', 5, 3, NULL, 365)
 ON DUPLICATE KEY UPDATE id = id;
 
 CREATE TABLE IF NOT EXISTS email_notification_log (

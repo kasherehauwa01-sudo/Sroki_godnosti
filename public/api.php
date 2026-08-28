@@ -269,6 +269,7 @@ function ensureSettingsSchema(PDO $pdo): void
         'notify_180_days' => "ALTER TABLE settings ADD COLUMN notify_180_days TINYINT(1) NOT NULL DEFAULT 0 AFTER id",
         'smtp_host' => "ALTER TABLE settings ADD COLUMN smtp_host VARCHAR(255) NULL AFTER notification_email",
         'smtp_port' => "ALTER TABLE settings ADD COLUMN smtp_port SMALLINT UNSIGNED NULL AFTER smtp_host",
+        'smtp_security' => "ALTER TABLE settings ADD COLUMN smtp_security VARCHAR(16) NOT NULL DEFAULT '' AFTER smtp_port",
         'smtp_username' => "ALTER TABLE settings ADD COLUMN smtp_username VARCHAR(255) NULL AFTER smtp_port",
         'smtp_password' => "ALTER TABLE settings ADD COLUMN smtp_password TEXT NULL AFTER smtp_username",
         'smtp_from_email' => "ALTER TABLE settings ADD COLUMN smtp_from_email VARCHAR(255) NULL AFTER smtp_password",
@@ -306,6 +307,7 @@ function ensureSettingsSchema(PDO $pdo): void
     }
     // Старое фиксированное время автоимпорта переносим на расписание FTP.
     $pdo->exec("UPDATE settings SET auto_import_time = '23:59' WHERE auto_import_time = '23:50'");
+    $pdo->exec("UPDATE settings SET smtp_security = CASE WHEN smtp_port = 465 THEN 'SSL' ELSE 'STARTTLS' END WHERE smtp_security = ''");
     // Поле оставлено для совместимости со старыми установками, но все письма
     // используют единое утверждённое имя отправителя.
     $pdo->prepare("UPDATE settings SET smtp_from_name = :name WHERE id = 1 AND COALESCE(smtp_from_name, '') <> :name_check")
@@ -4065,6 +4067,7 @@ function normalizeSettings(array $settings): array
         'rules' => $rules,
         'smtp_host' => (string)($settings['smtp_host'] ?? 'smtp.yandex.ru'),
         'smtp_port' => (int)($settings['smtp_port'] ?? 587),
+        'smtp_security' => strtoupper((string)($settings['smtp_security'] ?? ((int)($settings['smtp_port'] ?? 587) === 465 ? 'SSL' : 'STARTTLS'))) === 'SSL' ? 'SSL' : 'STARTTLS',
         'smtp_username' => (string)($settings['smtp_username'] ?? SENDER_EMAIL),
         'smtp_password' => '',
         'smtp_password_set' => $smtpPassword !== '',
@@ -4122,6 +4125,8 @@ function saveSettings(PDO $pdo, array $settings): array
     if ($ftpPassword === '') $ftpPassword = (string)($current['ftp_password'] ?? '');
     $ftpProtocol = strtoupper(trim((string)($settings['ftp_protocol'] ?? $current['ftp_protocol'] ?? 'FTP')));
     if (!in_array($ftpProtocol, ['FTP', 'FTPS'], true)) $ftpProtocol = 'FTP';
+    $smtpSecurity = strtoupper(trim((string)($settings['smtp_security'] ?? $current['smtp_security'] ?? 'STARTTLS')));
+    if (!in_array($smtpSecurity, ['SSL', 'STARTTLS'], true)) $smtpSecurity = 'STARTTLS';
 
     $params = [
         ':notify_0_days' => (int)(bool)$settings['notify_0_days'],
@@ -4135,6 +4140,7 @@ function saveSettings(PDO $pdo, array $settings): array
         ':notification_email' => implode(',', array_values(array_unique(array_filter(array_map('trim', $emails))))),
         ':smtp_host' => trim((string)($settings['smtp_host'] ?? $current['smtp_host'] ?? 'smtp.yandex.ru')),
         ':smtp_port' => (int)($settings['smtp_port'] ?? $current['smtp_port'] ?? 587),
+        ':smtp_security' => $smtpSecurity,
         ':smtp_username' => trim((string)($settings['smtp_username'] ?? $current['smtp_username'] ?? SENDER_EMAIL)),
         ':smtp_password' => $smtpPassword,
         ':smtp_from_email' => trim((string)($settings['smtp_from_email'] ?? $current['smtp_from_email'] ?? SENDER_EMAIL)),
@@ -4166,6 +4172,7 @@ function saveSettings(PDO $pdo, array $settings): array
              notification_email = :notification_email,
              smtp_host = :smtp_host,
              smtp_port = :smtp_port,
+             smtp_security = :smtp_security,
              smtp_username = :smtp_username,
              smtp_password = :smtp_password,
              smtp_from_email = :smtp_from_email,

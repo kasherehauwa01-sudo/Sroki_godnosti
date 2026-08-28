@@ -2047,6 +2047,18 @@ function renderSettings() {
     setCheckedIfPresent('#notify1', Boolean(settings.notify_1_day));
     setValueIfPresent('#notificationEmails', (settings.emails || []).join('\n'));
     setValueIfPresent('#notificationTime', settings.notification_time || '09:00');
+    setValueIfPresent('#smtpHost', settings.smtp_host || 'smtp.yandex.ru');
+    setValueIfPresent('#smtpPort', settings.smtp_port || 465);
+    setValueIfPresent('#smtpSecurity', String(settings.smtp_security || (Number(settings.smtp_port || 465) === 465 ? 'SSL' : 'STARTTLS')).toLowerCase());
+    setValueIfPresent('#smtpUsername', settings.smtp_username || '');
+    setValueIfPresent('#smtpPassword', '');
+    setValueIfPresent('#smtpFromEmail', settings.smtp_from_email || '');
+    setValueIfPresent('#smtpFromName', settings.smtp_from_name || '');
+    const smtpStatus = qs('#smtpSettingsStatus');
+    if (smtpStatus) {
+        smtpStatus.textContent = settings.smtp_password_set ? 'Настроено' : 'Не настроено';
+        smtpStatus.classList.toggle('not-configured', !settings.smtp_password_set);
+    }
     setValueIfPresent('#missingFilterEmails', (settings.missing_filter_emails || []).join('\n'));
     setValueIfPresent('#emailLogRetentionDays', settings.email_log_retention_days || 365);
     setValueIfPresent('#ftpProtocol', settings.ftp_protocol || 'FTP');
@@ -2321,6 +2333,12 @@ function collectSettingsForm() {
         notify_7_days: qs('#notify7').checked,
         notify_1_day: qs('#notify1').checked,
         notification_time: notificationTimeInput ? (notificationTimeInput.value || '09:00') : (state.settings && state.settings.notification_time ? state.settings.notification_time : '09:00'),
+        smtp_host: qs('#smtpHost')?.value.trim() || state.settings?.smtp_host || 'smtp.yandex.ru',
+        smtp_port: Number(qs('#smtpPort')?.value || state.settings?.smtp_port || 465),
+        smtp_security: qs('#smtpSecurity')?.value === 'ssl' ? 'SSL' : 'STARTTLS',
+        smtp_username: qs('#smtpUsername')?.value.trim() || state.settings?.smtp_username || '',
+        smtp_password: qs('#smtpPassword')?.value || '',
+        smtp_from_email: qs('#smtpFromEmail')?.value.trim() || state.settings?.smtp_from_email || '',
         auto_import_time: '23:59',
         emails,
         missing_filter_email: missingFilterEmails.join(','),
@@ -2372,6 +2390,16 @@ function toggleSmtpPasswordVisibility() {
     const button = qs('#toggleSmtpPasswordButton');
     input.type = input.type === 'password' ? 'text' : 'password';
     button.textContent = input.type === 'password' ? 'Показать' : 'Скрыть';
+}
+
+function syncSmtpSecurityPort() {
+    const security = qs('#smtpSecurity');
+    const port = qs('#smtpPort');
+    if (!security || !port) return;
+    const currentPort = Number(port.value || 0);
+    if (security.value === 'ssl' && (currentPort === 0 || currentPort === 587)) port.value = '465';
+    if (security.value === 'starttls' && (currentPort === 0 || currentPort === 465)) port.value = '587';
+    markSettingsDirty();
 }
 
 
@@ -3018,6 +3046,8 @@ function bindEvents() {
     qs('#sendTestNotificationButton').addEventListener('click', sendTestNotification);
     qs('#runNotificationsNowButton').addEventListener('click', runNotificationsNow);
     qs('#testEmailDeliveryButton').addEventListener('click', testEmailDelivery);
+    qs('#toggleSmtpPasswordButton').addEventListener('click', toggleSmtpPasswordVisibility);
+    qs('#smtpSecurity').addEventListener('change', syncSmtpSecurityPort);
     qs('#showNotificationLogsButton').addEventListener('click', showNotificationLogs);
     qs('#openCatalogSyncTestButton').addEventListener('click', openCatalogSyncTestDialog);
     qs('#catalogSyncTestForm').addEventListener('submit', submitCatalogSyncTest);
@@ -3041,7 +3071,7 @@ function bindEvents() {
     qs('#closeAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
     qs('#confirmAutoImportLogsDialogButton').addEventListener('click', closeAutoImportLogs);
     qs('#copyDeployCommandButton').addEventListener('click', copyDeployCommand);
-    qsa('#settingsForm input, #settingsForm textarea, #notificationSettingsForm input, #notificationSettingsForm textarea, #ftpSettingsForm input, #ftpSettingsForm select').forEach((field) => {
+    qsa('#settingsForm input, #settingsForm textarea, #notificationSettingsForm input, #notificationSettingsForm textarea, #notificationSettingsForm select, #ftpSettingsForm input, #ftpSettingsForm select').forEach((field) => {
         if (field.id !== 'deployCommandInput') {
             field.addEventListener('input', markSettingsDirty);
             field.addEventListener('change', markSettingsDirty);

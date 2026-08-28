@@ -11,10 +11,10 @@ declare(strict_types=1);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Сроки годности партий товаров</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="assets/styles.css?v=20260825-03">
+    <link rel="stylesheet" href="assets/styles.css?v=20260828-01">
     <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script defer src="assets/batch-export-selection.js?v=20260825-01"></script>
-    <script defer src="assets/app.js?v=20260825-04"></script>
+    <script defer src="assets/app.js?v=20260828-01"></script>
 </head>
 <body>
     <header class="topbar">
@@ -257,14 +257,31 @@ declare(strict_types=1);
                     <div class="settings-actions">
                         <button class="ghost-button" id="sendTestNotificationButton" formnovalidate type="button">Тест уведомления</button>
                         <button class="ghost-button" id="runNotificationsNowButton" formnovalidate type="button">Запустить отправку</button>
+                    </div>
+                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="card form settings-smtp-card">
+                    <div class="section-heading smtp-settings-heading">
+                        <div><h3>SMTP-сервер</h3><p>Параметры отправки системных уведомлений</p></div>
+                        <span class="smtp-settings-status" id="smtpSettingsStatus">Не настроено</span>
+                    </div>
+                    <div class="smtp-settings-grid">
+                        <label class="smtp-field-wide">SMTP-сервер<input id="smtpHost" autocomplete="off" placeholder="smtp.yandex.ru" required></label>
+                        <label>Порт<input id="smtpPort" type="number" min="1" max="65535" value="465" required></label>
+                        <label>Тип защиты<select id="smtpSecurity"><option value="ssl">SSL/TLS</option><option value="starttls">STARTTLS</option></select></label>
+                        <label>Логин<input id="smtpUsername" autocomplete="username" required></label>
+                        <label>Пароль<div class="password-field"><input id="smtpPassword" type="password" autocomplete="new-password" placeholder="Оставьте пустым, чтобы не менять"><button class="ghost-button" id="toggleSmtpPasswordButton" type="button">Показать</button></div></label>
+                        <label>Email отправителя<input id="smtpFromEmail" type="email" autocomplete="email" required></label>
+                        <label>Имя отправителя<input id="smtpFromName" readonly></label>
+                        <label class="smtp-field-wide">Email для теста<input id="deliveryTestEmail" type="email" autocomplete="email" placeholder="user@example.ru"></label>
+                    </div>
+                    <div class="settings-actions smtp-settings-actions">
+                        <button class="primary" type="submit">Сохранить SMTP</button>
+                        <button class="ghost-button" id="testEmailDeliveryButton" formnovalidate type="button">Отправить тест</button>
                         <button class="ghost-button" id="showNotificationLogsButton" formnovalidate type="button">История уведомлений</button>
                     </div>
-                    <label>Email для проверки доставки
-                        <input id="deliveryTestEmail" type="email" autocomplete="email" placeholder="user@example.ru">
-                    </label>
-                    <button class="ghost-button" id="testEmailDeliveryButton" formnovalidate type="button">Проверить доставку</button>
                     <pre class="smtp-test-output" id="emailDeliveryTestOutput" aria-live="polite"></pre>
-                    <p class="subtitle" id="testNotificationStatus" role="status" aria-live="polite"></p>
                 </div>
 
                 <div class="card form purchase-recipients-card">
