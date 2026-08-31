@@ -1255,7 +1255,9 @@ function normalizeDateWithInvalidInfo(string $value): array
         return ['date' => '', 'invalid' => false, 'full' => false];
     }
     if (preg_match('/^(0?[1-9]|1[0-2])\.(\d{4})$/', $value, $matches)) {
-        return ['date' => sprintf('%04d-%02d-01', (int)$matches[2], (int)$matches[1]), 'invalid' => false, 'full' => false];
+        $year = (int)$matches[2];
+        $month = (int)$matches[1];
+        return ['date' => sprintf('%04d-%02d-%02d', $year, $month, daysInExpiryMonth($year, $month)), 'invalid' => false, 'full' => false];
     }
     if (preg_match('/^(\d{1,2})[.-](\d{1,2})[.-](\d{2}|\d{4})$/', $value, $matches)) {
         $day = (int)$matches[1];
@@ -1275,12 +1277,19 @@ function normalizeDateWithInvalidInfo(string $value): array
             ? ['date' => sprintf('%04d-%02d-%02d', $year, $month, $day), 'invalid' => false, 'full' => true]
             : ['date' => $fallback, 'invalid' => true, 'full' => true];
     }
-    if (preg_match('/^(\d{4})-(\d{1,2})$/', $value, $matches)) {
-        return ['date' => sprintf('%04d-%02d-01', (int)$matches[1], (int)$matches[2]), 'invalid' => false, 'full' => false];
+    if (preg_match('/^(\d{4})-(0?[1-9]|1[0-2])$/', $value, $matches)) {
+        $year = (int)$matches[1];
+        $month = (int)$matches[2];
+        return ['date' => sprintf('%04d-%02d-%02d', $year, $month, daysInExpiryMonth($year, $month)), 'invalid' => false, 'full' => false];
     }
 
     $timestamp = strtotime($value);
     return ['date' => $timestamp ? date('Y-m-d', $timestamp) : '', 'invalid' => false, 'full' => $timestamp ? date('d', $timestamp) !== '01' : false];
+}
+
+function daysInExpiryMonth(int $year, int $month): int
+{
+    return (int)(new DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month)))->format('t');
 }
 
 function normalizeExpiryYear(string $year): int

@@ -58,7 +58,7 @@ function formatExpiryMonth(string $expiryDate, bool $forceFull = false): string
         return $expiryDate;
     }
 
-    return $forceFull || date('d', $timestamp) !== '01'
+    return $forceFull
         ? date('d.m.Y', $timestamp)
         : date('m.Y', $timestamp);
 }
