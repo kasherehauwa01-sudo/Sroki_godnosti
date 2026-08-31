@@ -314,7 +314,7 @@ function toExpiryDateValue(value) {
     const monthYear = text.match(/^(0?[1-9]|1[0-2])\.(\d{4})$/);
     if (monthYear) {
         const [, month, year] = monthYear;
-        return `${year}-${month.padStart(2, '0')}-01`;
+        return `${year}-${month.padStart(2, '0')}-${lastDayOfMonth(year, month)}`;
     }
 
     const normalizedFullText = normalizeFullExpiryText(text);
@@ -330,10 +330,10 @@ function toExpiryDateValue(value) {
         return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
     }
 
-    const isoMonth = text.match(/^(\d{4})-(\d{1,2})$/);
+    const isoMonth = text.match(/^(\d{4})-(0?[1-9]|1[0-2])$/);
     if (isoMonth) {
         const [, year, month] = isoMonth;
-        return `${year}-${month.padStart(2, '0')}-01`;
+        return `${year}-${month.padStart(2, '0')}-${lastDayOfMonth(year, month)}`;
     }
 
     const parsed = new Date(text);
@@ -347,13 +347,17 @@ function toExpiryDateValue(value) {
     return text;
 }
 
+function lastDayOfMonth(year, month) {
+    return String(new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate()).padStart(2, '0');
+}
+
 function formatExpiryMonthRu(value, forceFull = false) {
     const dateValue = toExpiryDateValue(value);
     const match = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!match) return value || '';
 
     const [, year, month, day] = match;
-    return forceFull || day !== '01' ? `${day}.${month}.${year}` : `${month}.${year}`;
+    return forceFull ? `${day}.${month}.${year}` : `${month}.${year}`;
 }
 
 function maskExpiryMonthValue(value) {
