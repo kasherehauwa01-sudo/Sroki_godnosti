@@ -53,6 +53,9 @@ $summary = registryPrimaryInvoiceSummaryFromCatalog([
 if (array_column($summary['warehouses'], 'name') !== ['Склад Казань', 'Склад Москва']) {
     throw new RuntimeException('Каждый склад catalogvr должен стать отдельной группой экспорта.');
 }
+if (array_column($summary['rows'], 'total') !== [13.0, 7.0]) {
+    throw new RuntimeException('Общее количество должно суммировать остатки по всем магазинам.');
+}
 $moscowId = (int)$summary['warehouses'][1]['id'];
 $moscowRows = purchaseEventPrimaryInvoiceRowsForWarehouse($summary, $moscowId);
 if ($moscowRows !== [
