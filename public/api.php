@@ -155,6 +155,7 @@ function handleApiRequest(): void
                 'purchase_event_primary_invoice_xls' => downloadSelectedPurchaseEventPrimaryInvoice($pdo, $payload),
                 'expiry_event_primary_invoice_xls' => downloadSelectedExpiryEventPrimaryInvoice($pdo, $payload),
                 'registry_primary_invoice_xls' => downloadSelectedRegistryPrimaryInvoice($pdo, $payload),
+                'registry_stock_totals' => getRegistryStockTotals($pdo, $payload),
                 'purchase_event_remind' => remindPurchaseEventWarehouses($pdo, $payload),
                 'registry_recount' => sendRegistryRecountNotifications($pdo, $payload),
                 'email_notification_retry' => retryEmailNotification($pdo, $payload),
@@ -3697,11 +3698,16 @@ function registryPrimaryInvoiceSummaryFromCatalog(array $batches, array $product
     $rows = [];
     foreach ($batches as $batch) {
         $quantities = [];
+        $total = 0.0;
         foreach ($batchStocks[(int)$batch['id']] as $stock) {
             $name = trim((string)($stock['name'] ?? ''));
-            if (isset($warehouseIds[$name])) $quantities[(string)$warehouseIds[$name]] = $stock['quantity'];
+            if (isset($warehouseIds[$name])) {
+                $quantity = (float)($stock['quantity'] ?? 0);
+                $quantities[(string)$warehouseIds[$name]] = $quantity;
+                $total += $quantity;
+            }
         }
-        $rows[] = ['id' => (int)$batch['id'], 'code' => (string)$batch['code'], 'quantities' => $quantities];
+        $rows[] = ['id' => (int)$batch['id'], 'code' => (string)$batch['code'], 'quantities' => $quantities, 'total' => $total];
     }
 
     return [
@@ -3709,6 +3715,24 @@ function registryPrimaryInvoiceSummaryFromCatalog(array $batches, array $product
         'warehouses' => array_map(static fn (string $name, int $id): array => ['id' => $id, 'name' => $name], array_keys($warehouseIds), array_values($warehouseIds)),
         'rows' => $rows,
     ];
+}
+
+function getRegistryStockTotals(PDO $pdo, array $payload): array
+{
+    try {
+        $summary = registryPrimaryInvoiceSummary($pdo, (array)($payload['batch_ids'] ?? []));
+    } catch (InvalidArgumentException $error) {
+        throw $error;
+    } catch (Throwable $error) {
+        error_log('Не удалось получить остатки реестра из catalogvr: ' . $error->getMessage());
+        throw new RuntimeException('Не удалось получить остатки товаров');
+    }
+
+    $totals = [];
+    foreach ((array)$summary['rows'] as $row) {
+        $totals[(string)(int)$row['id']] = (float)($row['total'] ?? 0);
+    }
+    return ['ok' => true, 'totals' => $totals];
 }
 
 function downloadSelectedRegistryPrimaryInvoice(PDO $pdo, array $payload): never

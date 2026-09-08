@@ -130,7 +130,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'event_catalog_stocks', 'purchase_recipients', 'email_notification_logs', 'catalog_health']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_ftp_connection', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'run_notifications_now', 'catalog_sync_test']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_ftp_connection', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'registry_stock_totals', 'run_notifications_now', 'catalog_sync_test']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -2792,7 +2792,7 @@ function closeRegistryExportDialog() {
     qs('#registryExportDialog').close();
 }
 
-function downloadRegistryExport(format) {
+async function downloadRegistryExport(format) {
     closeRegistryExportDialog();
     if (format === 'primary_invoice') {
         window.openBatchExportSelection({
@@ -2801,7 +2801,16 @@ function downloadRegistryExport(format) {
         });
         return;
     }
-    exportXlsx(activeRowsForExport(state.filteredBatches), 'reestr_filtr.xlsx', batchExportMapper);
+    const batches = activeRowsForExport(state.filteredBatches);
+    try {
+        const result = await api('registry_stock_totals', { batch_ids: batches.map((batch) => batch.id) });
+        exportXlsx(batches.map((batch) => ({
+            ...batch,
+            totalQuantity: result.totals?.[String(batch.id)] ?? 0,
+        })), 'reestr_filtr.xlsx', batchExportMapper);
+    } catch (error) {
+        showToast(error.message, true);
+    }
 }
 
 async function downloadSelectedRegistryBatches(selectedBatchIds) {
@@ -3125,6 +3134,7 @@ function batchExportMapper(batch) {
         Артикул: batch.article,
         Код: batch.code || '',
         Наименование: batch.name || '',
+        Количество: batch.totalQuantity ?? '',
         'Срок годности': formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate),
         'Остаток дней': formatDays(days),
         'Статус партии': batch.status,

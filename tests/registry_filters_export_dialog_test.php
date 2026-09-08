@@ -11,7 +11,7 @@ foreach (['filterExpiryFrom', 'filterExpiryTo', 'expiry-period-filter', '<legend
     if (!str_contains($page, $fragment)) throw new RuntimeException('В интерфейсе реестра отсутствует: ' . $fragment);
 }
 if (str_contains($page, 'id="filterEventDays"')) throw new RuntimeException('Фильтр «Событие» должен быть удалён из реестра.');
-foreach (['filters.expiry_from', 'filters.expiry_to', 'clearRegistrySearch', "downloadRegistryExport('view')", "downloadRegistryExport('primary_invoice')", "addEventListener('click', openRegistryExportDialog)", 'openBatchExportSelection', 'registry_primary_invoice_xls', 'selected_batch_ids'] as $fragment) {
+foreach (['filters.expiry_from', 'filters.expiry_to', 'clearRegistrySearch', "downloadRegistryExport('view')", "downloadRegistryExport('primary_invoice')", "addEventListener('click', openRegistryExportDialog)", 'openBatchExportSelection', 'registry_primary_invoice_xls', 'registry_stock_totals', 'totalQuantity', 'Количество:', 'selected_batch_ids'] as $fragment) {
     if (!str_contains($js, $fragment)) throw new RuntimeException('Не найдена логика реестра: ' . $fragment);
 }
 if (str_contains($js, '`reestr_filtr.${extension}`')) {
@@ -41,6 +41,9 @@ $summary = registryPrimaryInvoiceSummaryFromCatalog([
 ]);
 if (array_column($summary['warehouses'], 'name') !== ['Склад Казань', 'Склад Москва']) {
     throw new RuntimeException('Каждый склад catalogvr должен стать отдельной группой экспорта.');
+}
+if (array_column($summary['rows'], 'total') !== [13.0, 7.0]) {
+    throw new RuntimeException('Общее количество должно суммировать остатки по всем магазинам.');
 }
 $moscowId = (int)$summary['warehouses'][1]['id'];
 $moscowRows = purchaseEventPrimaryInvoiceRowsForWarehouse($summary, $moscowId);
