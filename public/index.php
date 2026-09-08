@@ -36,6 +36,7 @@ declare(strict_types=1);
                 <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
                 <button class="ghost-button" id="openWriteOffButton" type="button">Режим супервайзера</button>
                 <button class="small-button danger hidden" id="bulkDeleteButton" type="button">Удалить</button>
+                <button class="small-button hidden" id="bulkStatusButton" type="button">Изменить статус</button>
                 <button class="small-button hidden" id="sendRecountButton" type="button">Отправить на пересчет</button>
             </div>
             <div class="card registry-filter-card">
@@ -501,8 +502,14 @@ declare(strict_types=1);
                 <ol>
                     <li>Нажмите <code>Режим супервайзера</code>.</li>
                     <li>Введите пароль ответственного пользователя.</li>
-                    <li>После успешного ввода пароля можно менять статусы в реестре, удалять партии и отмечать строки чекбоксами для массовых действий.</li>
-                    <li>Выберите новый статус: <code>В наличии</code>, <code>Перемещено на СБ</code> или <code>Нет в наличии</code>.</li>
+                    <li>Для изменения одной партии выберите новый статус прямо в ее строке.</li>
+                </ol>
+                <h4>Массовое изменение статуса</h4>
+                <ol>
+                    <li>Отметьте чекбоксами товары, статус которых нужно изменить. Для выбора всех видимых строк можно использовать чекбокс <code>Выделить все</code>.</li>
+                    <li>После выбора хотя бы одного товара рядом с кнопкой <code>Удалить</code> появится кнопка <code>Изменить статус</code>.</li>
+                    <li>Нажмите <code>Изменить статус</code> и выберите: <code>В наличии</code>, <code>Перемещено на СБ</code> или <code>Нет в наличии</code>.</li>
+                    <li>Нажмите <code>Ок</code>. Выбранный статус будет применен ко всем отмеченным товарам.</li>
                 </ol>
                 <p>Статус также можно изменить из окна остатков партии во вкладке <code>Уведомления</code>.</p>
 
@@ -834,6 +841,27 @@ declare(strict_types=1);
         </form>
     </dialog>
 
+
+    <dialog class="modal" id="bulkStatusDialog">
+        <form class="card form modal-card" id="bulkStatusForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Изменить статус</h2>
+                <button class="icon-button" id="closeBulkStatusDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle" id="bulkStatusSelectionCount"></p>
+            <label>Новый статус
+                <select id="bulkStatusSelect" required>
+                    <option>В наличии</option>
+                    <option>Перемещено на СБ</option>
+                    <option>Нет в наличии</option>
+                </select>
+            </label>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelBulkStatusButton" type="button">Отмена</button>
+                <button class="primary" type="submit">Ок</button>
+            </div>
+        </form>
+    </dialog>
 
     <dialog class="modal" id="batchStockDialog">
         <div class="card form modal-card">
