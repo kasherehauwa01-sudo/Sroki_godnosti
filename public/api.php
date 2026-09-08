@@ -3719,18 +3719,25 @@ function registryPrimaryInvoiceSummaryFromCatalog(array $batches, array $product
 
 function getRegistryStockTotals(PDO $pdo, array $payload): array
 {
-    try {
-        $summary = registryPrimaryInvoiceSummary($pdo, (array)($payload['batch_ids'] ?? []));
-    } catch (InvalidArgumentException $error) {
-        throw $error;
-    } catch (Throwable $error) {
-        error_log('Не удалось получить остатки реестра из catalogvr: ' . $error->getMessage());
-        throw new RuntimeException('Не удалось получить остатки товаров');
-    }
+    $batchIds = array_values(array_unique(array_filter(
+        array_map('intval', (array)($payload['batch_ids'] ?? [])),
+        static fn (int $id): bool => $id > 0
+    )));
+    if (!$batchIds) throw new InvalidArgumentException('Не выбрано ни одного товара');
 
+    $placeholders = implode(',', array_fill(0, count($batchIds), '?'));
+    $statement = $pdo->prepare(
+        "SELECT b.id, COALESCE(SUM(CASE WHEN w.is_active = 1 THEN bs.quantity ELSE 0 END), 0) AS total
+         FROM batches b
+         LEFT JOIN batch_stock bs ON bs.batch_id = b.id
+         LEFT JOIN warehouses w ON w.id = bs.warehouse_id
+         WHERE b.status = ? AND b.id IN ($placeholders)
+         GROUP BY b.id"
+    );
+    $statement->execute(array_merge([ACTIVE_STATUS], $batchIds));
     $totals = [];
-    foreach ((array)$summary['rows'] as $row) {
-        $totals[(string)(int)$row['id']] = (float)($row['total'] ?? 0);
+    foreach ($statement->fetchAll() as $row) {
+        $totals[(string)(int)$row['id']] = (float)$row['total'];
     }
     return ['ok' => true, 'totals' => $totals];
 }

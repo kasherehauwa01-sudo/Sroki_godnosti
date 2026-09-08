@@ -26,6 +26,17 @@ $api = file_get_contents(__DIR__ . '/../public/api.php');
 foreach (['registryPrimaryInvoiceSummary', 'downloadSelectedRegistryPrimaryInvoice', 'fetchVrCatalogProductsByArticles', 'purchaseEventPrimaryInvoiceRowsForWarehouse'] as $fragment) {
     if (!str_contains((string)$api, $fragment)) throw new RuntimeException('Backend экспорта реестра не содержит: ' . $fragment);
 }
+$totalsFunctionStart = strpos((string)$api, 'function getRegistryStockTotals');
+$totalsFunctionEnd = strpos((string)$api, 'function downloadSelectedRegistryPrimaryInvoice', $totalsFunctionStart ?: 0);
+$totalsFunction = $totalsFunctionStart !== false && $totalsFunctionEnd !== false
+    ? substr((string)$api, $totalsFunctionStart, $totalsFunctionEnd - $totalsFunctionStart)
+    : '';
+foreach (['FROM batches b', 'LEFT JOIN batch_stock bs', 'LEFT JOIN warehouses w', 'SUM(CASE WHEN w.is_active = 1 THEN bs.quantity'] as $fragment) {
+    if (!str_contains($totalsFunction, $fragment)) throw new RuntimeException('Остатки реестра должны браться из заполненных складами данных: ' . $fragment);
+}
+if (str_contains($totalsFunction, 'fetchVrCatalogProducts')) {
+    throw new RuntimeException('Остатки для колонки «Количество» не должны загружаться из catalogvr.');
+}
 
 $summary = registryPrimaryInvoiceSummaryFromCatalog([
     ['id' => 11, 'article' => 'АРТ-1', 'code' => 'КОД-1', 'expiry_date' => '2026-09-01'],
