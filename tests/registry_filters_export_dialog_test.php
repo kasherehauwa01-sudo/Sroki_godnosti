@@ -11,7 +11,7 @@ foreach (['filterExpiryFrom', 'filterExpiryTo', 'expiry-period-filter', '<legend
     if (!str_contains($page, $fragment)) throw new RuntimeException('В интерфейсе реестра отсутствует: ' . $fragment);
 }
 if (str_contains($page, 'id="filterEventDays"')) throw new RuntimeException('Фильтр «Событие» должен быть удалён из реестра.');
-foreach (['filters.expiry_from', 'filters.expiry_to', 'clearRegistrySearch', "downloadRegistryExport('view')", "downloadRegistryExport('primary_invoice')", "addEventListener('click', openRegistryExportDialog)", 'openBatchExportSelection', 'registry_primary_invoice_xls', 'selected_batch_ids'] as $fragment) {
+foreach (['filters.expiry_from', 'filters.expiry_to', 'clearRegistrySearch', "downloadRegistryExport('view')", "downloadRegistryExport('primary_invoice')", "addEventListener('click', openRegistryExportDialog)", 'openBatchExportSelection', 'registry_primary_invoice_xls', 'registry_stock_totals', 'totalQuantity', 'Количество:', 'selected_batch_ids'] as $fragment) {
     if (!str_contains($js, $fragment)) throw new RuntimeException('Не найдена логика реестра: ' . $fragment);
 }
 if (str_contains($js, '`reestr_filtr.${extension}`')) {
@@ -25,6 +25,17 @@ if (str_contains($js, "qs('#exportFilteredButton').addEventListener('click', () 
 $api = file_get_contents(__DIR__ . '/../public/api.php');
 foreach (['registryPrimaryInvoiceSummary', 'downloadSelectedRegistryPrimaryInvoice', 'fetchVrCatalogProductsByArticles', 'purchaseEventPrimaryInvoiceRowsForWarehouse'] as $fragment) {
     if (!str_contains((string)$api, $fragment)) throw new RuntimeException('Backend экспорта реестра не содержит: ' . $fragment);
+}
+$totalsFunctionStart = strpos((string)$api, 'function getRegistryStockTotals');
+$totalsFunctionEnd = strpos((string)$api, 'function downloadSelectedRegistryPrimaryInvoice', $totalsFunctionStart ?: 0);
+$totalsFunction = $totalsFunctionStart !== false && $totalsFunctionEnd !== false
+    ? substr((string)$api, $totalsFunctionStart, $totalsFunctionEnd - $totalsFunctionStart)
+    : '';
+foreach (['FROM batches b', 'LEFT JOIN batch_stock bs', 'LEFT JOIN warehouses w', 'SUM(CASE WHEN w.is_active = 1 THEN bs.quantity'] as $fragment) {
+    if (!str_contains($totalsFunction, $fragment)) throw new RuntimeException('Остатки реестра должны браться из заполненных складами данных: ' . $fragment);
+}
+if (str_contains($totalsFunction, 'fetchVrCatalogProducts')) {
+    throw new RuntimeException('Остатки для колонки «Количество» не должны загружаться из catalogvr.');
 }
 
 $summary = registryPrimaryInvoiceSummaryFromCatalog([

@@ -155,6 +155,7 @@ function handleApiRequest(): void
                 'purchase_event_primary_invoice_xls' => downloadSelectedPurchaseEventPrimaryInvoice($pdo, $payload),
                 'expiry_event_primary_invoice_xls' => downloadSelectedExpiryEventPrimaryInvoice($pdo, $payload),
                 'registry_primary_invoice_xls' => downloadSelectedRegistryPrimaryInvoice($pdo, $payload),
+                'registry_stock_totals' => getRegistryStockTotals($pdo, $payload),
                 'purchase_event_remind' => remindPurchaseEventWarehouses($pdo, $payload),
                 'registry_recount' => sendRegistryRecountNotifications($pdo, $payload),
                 'email_notification_retry' => retryEmailNotification($pdo, $payload),
@@ -3709,6 +3710,31 @@ function registryPrimaryInvoiceSummaryFromCatalog(array $batches, array $product
         'warehouses' => array_map(static fn (string $name, int $id): array => ['id' => $id, 'name' => $name], array_keys($warehouseIds), array_values($warehouseIds)),
         'rows' => $rows,
     ];
+}
+
+function getRegistryStockTotals(PDO $pdo, array $payload): array
+{
+    $batchIds = array_values(array_unique(array_filter(
+        array_map('intval', (array)($payload['batch_ids'] ?? [])),
+        static fn (int $id): bool => $id > 0
+    )));
+    if (!$batchIds) throw new InvalidArgumentException('Не выбрано ни одного товара');
+
+    $placeholders = implode(',', array_fill(0, count($batchIds), '?'));
+    $statement = $pdo->prepare(
+        "SELECT b.id, COALESCE(SUM(CASE WHEN w.is_active = 1 THEN bs.quantity ELSE 0 END), 0) AS total
+         FROM batches b
+         LEFT JOIN batch_stock bs ON bs.batch_id = b.id
+         LEFT JOIN warehouses w ON w.id = bs.warehouse_id
+         WHERE b.status = ? AND b.id IN ($placeholders)
+         GROUP BY b.id"
+    );
+    $statement->execute(array_merge([ACTIVE_STATUS], $batchIds));
+    $totals = [];
+    foreach ($statement->fetchAll() as $row) {
+        $totals[(string)(int)$row['id']] = (float)$row['total'];
+    }
+    return ['ok' => true, 'totals' => $totals];
 }
 
 function downloadSelectedRegistryPrimaryInvoice(PDO $pdo, array $payload): never
