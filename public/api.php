@@ -3734,11 +3734,16 @@ function registryPrimaryInvoiceSummaryFromCatalog(array $batches, array $product
     $rows = [];
     foreach ($batches as $batch) {
         $quantities = [];
+        $total = 0.0;
         foreach ($batchStocks[(int)$batch['id']] as $stock) {
             $name = trim((string)($stock['name'] ?? ''));
-            if (isset($warehouseIds[$name])) $quantities[(string)$warehouseIds[$name]] = $stock['quantity'];
+            if (isset($warehouseIds[$name])) {
+                $quantity = (float)($stock['quantity'] ?? 0);
+                $quantities[(string)$warehouseIds[$name]] = $quantity;
+                $total += $quantity;
+            }
         }
-        $rows[] = ['id' => (int)$batch['id'], 'code' => (string)$batch['code'], 'quantities' => $quantities];
+        $rows[] = ['id' => (int)$batch['id'], 'code' => (string)$batch['code'], 'quantities' => $quantities, 'total' => $total];
     }
 
     return [
