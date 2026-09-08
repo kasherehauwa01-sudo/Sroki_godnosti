@@ -36,6 +36,7 @@ declare(strict_types=1);
                 <button class="primary" id="openAddBatchesButton" type="button">Добавить партию</button>
                 <button class="ghost-button" id="openWriteOffButton" type="button">Режим супервайзера</button>
                 <button class="small-button danger hidden" id="bulkDeleteButton" type="button">Удалить</button>
+                <button class="small-button hidden" id="bulkStatusButton" type="button">Изменить статус</button>
                 <button class="small-button hidden" id="sendRecountButton" type="button">Отправить на пересчет</button>
             </div>
             <div class="card registry-filter-card">
@@ -834,6 +835,27 @@ declare(strict_types=1);
         </form>
     </dialog>
 
+
+    <dialog class="modal" id="bulkStatusDialog">
+        <form class="card form modal-card" id="bulkStatusForm" method="dialog">
+            <div class="modal-heading">
+                <h2>Изменить статус</h2>
+                <button class="icon-button" id="closeBulkStatusDialogButton" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="subtitle" id="bulkStatusSelectionCount"></p>
+            <label>Новый статус
+                <select id="bulkStatusSelect" required>
+                    <option>В наличии</option>
+                    <option>Перемещено на СБ</option>
+                    <option>Нет в наличии</option>
+                </select>
+            </label>
+            <div class="modal-actions">
+                <button class="ghost-button" id="cancelBulkStatusButton" type="button">Отмена</button>
+                <button class="primary" type="submit">Ок</button>
+            </div>
+        </form>
+    </dialog>
 
     <dialog class="modal" id="batchStockDialog">
         <div class="card form modal-card">
