@@ -130,6 +130,7 @@ function handleApiRequest(): void
                 'update' => updateBatch($pdo, $payload),
                 'delete' => deleteBatch($pdo, $payload),
                 'bulk_delete' => deleteBatches($pdo, $payload),
+                'bulk_update_status' => updateBatchesStatus($pdo, $payload),
                 'delete_by_articles' => deleteBatchesByArticles($pdo, $payload),
                 'settings' => saveProtectedSettings($pdo, $payload),
                 'test_notification' => sendTestNotification($pdo, $payload),
@@ -1098,6 +1099,41 @@ function deleteBatches(PDO $pdo, array $payload): array
     }
 
     return ['ok' => true, 'deleted' => $deleted];
+}
+
+function updateBatchesStatus(PDO $pdo, array $payload): array
+{
+    $ids = array_values(array_unique(array_filter(
+        array_map('intval', (array)($payload['ids'] ?? [])),
+        static fn (int $id): bool => $id > 0
+    )));
+    if (!$ids) throw new InvalidArgumentException('Не выбраны партии для изменения статуса.');
+
+    $status = trim((string)($payload['status'] ?? ''));
+    if (!in_array($status, BATCH_STATUSES, true)) throw new InvalidArgumentException('Недопустимый статус партии.');
+    assertWriteOffPassword($payload);
+
+    $update = $pdo->prepare('UPDATE batches SET status = :status WHERE id = :id');
+    $pdo->beginTransaction();
+    try {
+        $updated = 0;
+        foreach ($ids as $id) {
+            $before = findBatchForHistory($pdo, $id);
+            if (!$before || (string)($before['status'] ?? '') === $status) continue;
+            $update->execute([':status' => $status, ':id' => $id]);
+            if ($update->rowCount() === 0) continue;
+            $after = $before;
+            $after['status'] = $status;
+            writeLog($pdo, 'update', ['before' => $before, 'after' => $after]);
+            $updated++;
+        }
+        $pdo->commit();
+    } catch (Throwable $error) {
+        $pdo->rollBack();
+        throw $error;
+    }
+
+    return ['ok' => true, 'updated' => $updated];
 }
 
 function deleteBatchesByArticles(PDO $pdo, array $payload): array

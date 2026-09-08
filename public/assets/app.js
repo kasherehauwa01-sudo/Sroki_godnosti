@@ -130,7 +130,7 @@ async function copyDeployCommand() {
 
 function getApiMethod(action, data = {}) {
     const readActions = new Set(['list', 'logs', 'tick', 'warehouses', 'batch_stock', 'batch_stock_xlsx', 'stock_notifications', 'stock_notification', 'stock_batch_notifications', 'events', 'event_catalog_stocks', 'purchase_recipients', 'email_notification_logs', 'catalog_health']);
-    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_ftp_connection', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'registry_stock_totals', 'run_notifications_now', 'catalog_sync_test']);
+    const writeActions = new Set(['create', 'bulk_create', 'update', 'delete', 'bulk_delete', 'bulk_update_status', 'test_notification', 'test_email_delivery', 'test_auto_import', 'test_ftp_connection', 'test_missing_filter_notification', 'test_purchase_notification', 'test_stock_fill_notification', 'verify_write_off', 'delete_by_articles', 'warehouse_create', 'warehouse_update', 'warehouse_delete', 'mark_stock_batch_notification_viewed', 'purchase_recipient_create', 'purchase_recipient_update', 'purchase_recipient_delete', 'email_notification_retry', 'registry_recount', 'registry_stock_totals', 'run_notifications_now', 'catalog_sync_test']);
 
     // Действие settings используется и для чтения, и для сохранения:
     // payload с ключом settings сохраняется POST-запросом, остальные payload читаются GET-запросом.
@@ -549,6 +549,8 @@ function updateSelectionControls() {
     qs('#selectionHeader').classList.toggle('hidden', !selectionVisible);
     qs('#bulkDeleteButton').classList.toggle('hidden', !state.writeOffAccessGranted || state.selectedBatchIds.size === 0);
     qs('#bulkDeleteButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
+    qs('#bulkStatusButton').classList.toggle('hidden', !state.writeOffAccessGranted || state.selectedBatchIds.size === 0);
+    qs('#bulkStatusButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
     qs('#sendRecountButton')?.classList.toggle('hidden', !state.writeOffAccessGranted);
     qs('#sendRecountButton').disabled = !state.writeOffAccessGranted || state.selectedBatchIds.size === 0;
 
@@ -1040,6 +1042,41 @@ async function deleteSelectedBatches() {
         const result = await api('bulk_delete', { ids, write_off_password: state.writeOffPassword });
         state.selectedBatchIds.clear();
         showToast(`Удалено партий: ${result.deleted || ids.length}`);
+        await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
+    } catch (error) {
+        showToast(error.message, true);
+    }
+}
+
+function openBulkStatusDialog() {
+    if (!state.writeOffAccessGranted || state.selectedBatchIds.size === 0) return;
+    qs('#bulkStatusSelectionCount').textContent = `Выбрано товаров: ${state.selectedBatchIds.size}`;
+    qs('#bulkStatusSelect').value = statusOptions[0];
+    qs('#bulkStatusDialog').showModal();
+}
+
+function closeBulkStatusDialog() {
+    qs('#bulkStatusDialog').close();
+}
+
+async function updateSelectedBatchesStatus(event) {
+    event.preventDefault();
+    if (!state.writeOffAccessGranted || state.selectedBatchIds.size === 0) {
+        closeBulkStatusDialog();
+        return;
+    }
+    const status = qs('#bulkStatusSelect').value;
+    if (!statusOptions.includes(status)) return;
+
+    try {
+        const result = await api('bulk_update_status', {
+            ids: [...state.selectedBatchIds].map(Number),
+            status,
+            write_off_password: state.writeOffPassword,
+        });
+        closeBulkStatusDialog();
+        state.selectedBatchIds.clear();
+        showToast(`Статус изменен у партий: ${result.updated || 0}`);
         await Promise.all([loadBatches(), loadHistory(), loadStockBatchNotifications(), loadEvents()]);
     } catch (error) {
         showToast(error.message, true);
@@ -2945,6 +2982,10 @@ function bindEvents() {
     qs('#leaveSettingsButton').addEventListener('click', leaveSettingsWithoutSaving);
     qs('#openWriteOffButton').addEventListener('click', openWriteOffPasswordDialog);
     qs('#bulkDeleteButton').addEventListener('click', deleteSelectedBatches);
+    qs('#bulkStatusButton').addEventListener('click', openBulkStatusDialog);
+    qs('#bulkStatusForm').addEventListener('submit', updateSelectedBatchesStatus);
+    qs('#cancelBulkStatusButton').addEventListener('click', closeBulkStatusDialog);
+    qs('#closeBulkStatusDialogButton').addEventListener('click', closeBulkStatusDialog);
     qs('#sendRecountButton').addEventListener('click', openRecountWarehousesDialog);
     qs('#recountWarehousesForm').addEventListener('submit', sendSelectedBatchesToRecount);
     qs('#selectAllRecountWarehouses').addEventListener('change', (event) => setAllRecountWarehouses(event.target.checked));
