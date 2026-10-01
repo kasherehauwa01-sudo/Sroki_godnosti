@@ -13,6 +13,12 @@ $getLogsSource = substr($api, (int)$getLogsStart, (int)$getLogsEnd - (int)$getLo
 if (preg_match('/\bLIMIT\s+\d+/i', $getLogsSource)) {
     throw new RuntimeException('API истории не должен ограничивать результат фиксированным количеством строк.');
 }
+if (str_contains($getLogsSource, 'fetchAll()')) {
+    throw new RuntimeException('API истории не должен одновременно загружать второй полный набор записей через fetchAll().');
+}
+if (substr_count($getLogsSource, "\$row['payload']") !== 1) {
+    throw new RuntimeException('Payload истории не должен дублироваться в JSON-ответе API.');
+}
 if (str_contains($javascript, 'registryActions.has(')) {
     throw new RuntimeException('Клиент не должен скрывать новые типы событий по старому белому списку.');
 }

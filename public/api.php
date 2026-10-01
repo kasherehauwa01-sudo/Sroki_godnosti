@@ -4624,17 +4624,22 @@ function getLogs(PDO $pdo): array
     // Вкладка «История» имеет фильтр «Всё время», поэтому сервер не должен
     // незаметно отбрасывать записи старше последних 300 строк.
     $statement = $pdo->query('SELECT id, action, payload, created_at FROM logs ORDER BY id DESC');
-    return array_map(static function (array $row): array {
-        return [
+    $logs = [];
+    // Не загружаем все строки PDO вторым массивом и не дублируем payload в ответе.
+    // На большой истории прежний вариант одновременно держал в памяти результат
+    // PDO, преобразованный массив и JSON, из-за чего API исчерпывал 256 МБ.
+    while ($row = $statement->fetch()) {
+        $logs[] = [
             'id' => (int)$row['id'],
             'createdAt' => formatMoscowDateTime((string)$row['created_at']),
             'level' => 'INFO',
             'event' => $row['action'],
             'details' => $row['payload'] ?? '',
             'action' => $row['action'],
-            'payload' => $row['payload'],
         ];
-    }, $statement->fetchAll());
+    }
+
+    return $logs;
 }
 
 function writeLog(PDO $pdo, string $action, array $payload = []): void
