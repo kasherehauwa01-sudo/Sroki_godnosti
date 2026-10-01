@@ -825,7 +825,10 @@ declare(strict_types=1);
             <label>Артикул<input id="editArticle" name="article" required autocomplete="off"></label>
             <label>Код<input id="editCode" name="code" autocomplete="off"></label>
             <label>Наименование<input id="editName" name="name" autocomplete="off"></label>
-            <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10"></label>
+            <div class="expiry-input-group">
+                <label>Срок годности до<input id="editExpiryDate" name="expiryDate" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10"></label>
+                <label class="checkbox-row"><input id="editExpiryUnlimited" type="checkbox"> Не ограничен</label>
+            </div>
             <label>Статус
                 <select id="editStatus" name="status" required>
                     <option>В наличии</option>
