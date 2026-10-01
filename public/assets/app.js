@@ -887,7 +887,10 @@ function openEditDialog(id) {
     qs('#editArticle').value = batch.article;
     qs('#editCode').value = batch.code || '';
     qs('#editName').value = batch.name || '';
-    qs('#editExpiryDate').value = batch.expiryInvalid ? (batch.expiryRaw || formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate)) : formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate);
+    const expiryUnlimited = Boolean(batch.expiryUnlimited);
+    qs('#editExpiryDate').value = expiryUnlimited ? '' : (batch.expiryInvalid ? (batch.expiryRaw || formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate)) : formatExpiryMonthRu(batch.expiryDate, batch.expiryFullDate));
+    qs('#editExpiryUnlimited').checked = expiryUnlimited;
+    updateExpiryUnlimitedInput(qs('#editExpiryDate'), expiryUnlimited);
     qs('#editStatus').value = batch.status;
     qs('#editCreatedAt').value = batch.createdAt;
     qs('#editBatchDialog').showModal();
@@ -898,6 +901,11 @@ function closeEditDialog() {
     qs('#editBatchForm').reset();
 }
 
+function updateExpiryUnlimitedInput(input, unlimited) {
+    input.disabled = unlimited;
+    input.required = !unlimited;
+}
+
 function createBatchRow(values = {}) {
     const row = document.createElement('div');
     row.className = 'batch-row';
@@ -905,10 +913,16 @@ function createBatchRow(values = {}) {
         <label>Артикул<input class="batch-row-article" required autocomplete="off" value="${escapeHtml(values.article || '')}"></label>
         <label>Код<input class="batch-row-code" autocomplete="off" value="${escapeHtml(values.code || '')}"></label>
         <label>Наименование<input class="batch-row-name" autocomplete="off" value="${escapeHtml(values.name || '')}"></label>
-        <label>Срок годности<input class="batch-row-expiry" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10" value="${escapeHtml(values.expiryDate || '')}"></label>
+        <div class="expiry-input-group">
+            <label>Срок годности до<input class="batch-row-expiry" required pattern="^((0[1-9]|1[0-2])[.][0-9]{4}|(0[1-9]|[12][0-9]|3[01])[.](0[1-9]|1[0-2])[.][0-9]{4})$" placeholder="мм.гггг или дд.мм.гггг" inputmode="numeric" maxlength="10" value="${escapeHtml(values.expiryDate || '')}"></label>
+            <label class="checkbox-row"><input class="batch-row-expiry-unlimited" type="checkbox"> Не ограничен</label>
+        </div>
         <button class="small-button danger remove-batch-row-button" type="button" aria-label="Удалить строку">🗑️</button>
     `;
     bindExpiryMonthMask(row.querySelector('.batch-row-expiry'));
+    row.querySelector('.batch-row-expiry-unlimited').addEventListener('change', (event) => {
+        updateExpiryUnlimitedInput(row.querySelector('.batch-row-expiry'), event.target.checked);
+    });
     row.querySelector('.remove-batch-row-button').addEventListener('click', () => {
         row.remove();
         updateBatchRowRemoveButtons();
@@ -942,7 +956,7 @@ function collectBatchRows() {
         code: row.querySelector('.batch-row-code').value,
         name: row.querySelector('.batch-row-name').value,
         createdSource: 'Ручной',
-        expiryDate: row.querySelector('.batch-row-expiry').value,
+        expiryDate: row.querySelector('.batch-row-expiry-unlimited').checked ? 'Не ограничен' : row.querySelector('.batch-row-expiry').value,
     }));
 }
 
@@ -985,7 +999,9 @@ function closeXlsImportDialog() {
 async function submitEditForm(event) {
     event.preventDefault();
     const form = new FormData(event.target);
-    const batch = normalizeBatch(Object.fromEntries(form.entries()));
+    const values = Object.fromEntries(form.entries());
+    if (qs('#editExpiryUnlimited').checked) values.expiryDate = 'Не ограничен';
+    const batch = normalizeBatch(values);
     batch.id = String(form.get('id'));
     const previousBatch = state.batches.find((item) => item.id === batch.id);
     batch.createdSource = previousBatch?.createdSource || batch.createdSource;
@@ -2998,6 +3014,9 @@ function bindEvents() {
     qs('#closeWriteOffPasswordDialogButton').addEventListener('click', closeWriteOffPasswordDialog);
 
     bindExpiryMonthMask(qs('#editExpiryDate'));
+    qs('#editExpiryUnlimited').addEventListener('change', (event) => {
+        updateExpiryUnlimitedInput(qs('#editExpiryDate'), event.target.checked);
+    });
     qs('#editBatchForm').addEventListener('submit', submitEditForm);
     qs('#closeEditDialogButton').addEventListener('click', closeEditDialog);
     qs('#cancelEditButton').addEventListener('click', closeEditDialog);

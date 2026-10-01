@@ -40,6 +40,8 @@ h1 { margin: 0; font-size: clamp(28px, 5vw, 46px); }
 .batch-lines { display: grid; gap: 10px; }
 .batch-dialog-actions, .settings-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .batch-row { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(130px, 1fr) minmax(130px, 1fr) auto; gap: 10px; align-items: end; padding: 12px; border: 1px solid var(--border); border-radius: 16px; background: #f8fafc; }
+.expiry-input-group { display: grid; gap: 8px; }
+.expiry-input-group .checkbox-row { font-size: 14px; }
 
 .grid { display: grid; gap: 18px; }
 .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
